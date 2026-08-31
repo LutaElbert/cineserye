@@ -6,21 +6,21 @@
  * stay reviewable.
  */
 export const APP_CONFIG = {
-  name: 'Canvas Starter',
+  name: 'Cineserye',
   shortMark: 'C',
-  description: 'A local-first, extensible canvas for connected ideas, images, and editable layers.',
-  editorAriaLabel: 'Canvas Starter diagram editor',
+  description: 'A local-first, agent-ready cinema workspace for developing stories scene by scene and shot by shot.',
+  editorAriaLabel: 'Cineserye story canvas editor',
   storage: {
-    databaseName: 'canvas-starter-local',
-    projectFormat: 'canvas-starter-project',
-    projectExtension: '.canvas',
+    databaseName: 'cineserye-local',
+    projectFormat: 'cineserye-project',
+    projectExtension: '.cineserye',
   },
   export: {
-    defaultFileBase: 'canvas-export',
-    svgTitle: 'Canvas Starter editable diagram',
-    svgDescription: 'An editable SVG exported from Canvas Starter.',
+    defaultFileBase: 'cineserye-story',
+    svgTitle: 'Cineserye editable story canvas',
+    svgDescription: 'An editable story, scene, and shot canvas exported from Cineserye.',
   },
   vectorization: {
-    workerName: 'canvas-starter-vectorizer',
+    workerName: 'cineserye-vectorizer',
   },
 } as const;

@@ -20,7 +20,7 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
   await page.keyboard.press('Enter');
   await expect(page.getByRole('region', { name: 'Canvas workspace' })).toBeFocused();
 
-  const researchLayer = page.getByRole('button', { name: 'Research', exact: true });
+  const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
   await researchLayer.focus();
   await researchLayer.press('F2');
   await expect(page.getByLabel('Layer name')).toBeFocused();
@@ -28,7 +28,7 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
   await expect(researchLayer).toBeFocused();
 
   await researchLayer.click();
-  const researchNode = canvasNode(page, 'Research');
+  const researchNode = canvasNode(page, 'Story Premise');
   await researchNode.focus();
   await researchNode.press('Enter');
   await expect(page.getByLabel('Concept title')).toBeFocused();
@@ -39,18 +39,18 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
 test('exposes layer, connector, toggle, and selection state semantically', async ({ page }) => {
   await openEditor(page);
   await expect(page.getByRole('list', { name: 'Canvas layers' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
-  await expect(page.getByRole('button', { name: 'Research', exact: true })).toHaveAttribute('aria-pressed', 'false');
-  await page.getByRole('button', { name: 'Research', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Research', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Collapse branch from Research' })).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByLabel('Connector from Research to Explore tools')).toBeVisible();
-  await expect(page.getByLabel('Connector from Research to Editable layers')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Collapse branch from Story Premise' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toBeVisible();
+  await expect(page.getByLabel('Connector from Scene 01 to Shot 01')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Hide Research', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Show Research', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Show Research', exact: true }).click();
-  await page.getByRole('button', { name: 'Lock Research', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Unlock Research', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide Story Premise', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Show Story Premise', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Show Story Premise', exact: true }).click();
+  await page.getByRole('button', { name: 'Lock Story Premise', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Unlock Story Premise', exact: true })).toBeVisible();
 });
 
 test('keeps controls usable with reduced motion and enlarged text on mobile', async ({ page }) => {
@@ -62,7 +62,7 @@ test('keeps controls usable with reduced motion and enlarged text on mobile', as
   });
   await page.getByRole('button', { name: 'Open layers panel' }).click();
   await expect(page.locator('.layers-panel')).toHaveClass(/panel-open/);
-  await expect(page.getByRole('button', { name: 'Research', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close layers panel' }).click();
   await page.getByRole('button', { name: 'Open properties panel' }).click();
   await expect(page.getByRole('heading', { name: 'Properties' })).toBeVisible();

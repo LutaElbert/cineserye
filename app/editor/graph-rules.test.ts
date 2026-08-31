@@ -27,22 +27,22 @@ function edge(id: string, source: string, target: string): EditorEdge {
 describe('connection rules', () => {
   it('accepts a new directed connection and permits its reverse', () => {
     const document = fixture();
-    expect(canConnect(document.nodes, document.edges, { source: 'explore', target: 'layers' })).toBe(true);
-    expect(canConnect(document.nodes, document.edges, { source: 'explore', target: 'research' })).toBe(true);
+    expect(canConnect(document.nodes, document.edges, { source: 'story-premise', target: 'shot-01' })).toBe(true);
+    expect(canConnect(document.nodes, document.edges, { source: 'scene-01', target: 'story-premise' })).toBe(true);
   });
 
   it('rejects missing, unknown, and self endpoints', () => {
     const document = fixture();
-    expect(connectionIssue(document.nodes, document.edges, { source: null, target: 'layers' })).toBe('missing-endpoint');
-    expect(connectionIssue(document.nodes, document.edges, { source: 'unknown', target: 'layers' })).toBe('unknown-endpoint');
-    expect(connectionIssue(document.nodes, document.edges, { source: 'research', target: 'research' })).toBe('self-connection');
+    expect(connectionIssue(document.nodes, document.edges, { source: null, target: 'shot-01' })).toBe('missing-endpoint');
+    expect(connectionIssue(document.nodes, document.edges, { source: 'unknown', target: 'shot-01' })).toBe('unknown-endpoint');
+    expect(connectionIssue(document.nodes, document.edges, { source: 'story-premise', target: 'story-premise' })).toBe('self-connection');
   });
 
   it('rejects duplicate directed connections regardless of handles', () => {
     const document = fixture();
     expect(connectionIssue(document.nodes, document.edges, {
-      source: 'research',
-      target: 'explore',
+      source: 'story-premise',
+      target: 'scene-01',
       sourceHandle: 'bottom',
       targetHandle: 'top',
     })).toBe('duplicate-connection');
@@ -51,8 +51,8 @@ describe('connection rules', () => {
   it('rejects connections when either endpoint is locked', () => {
     const document = fixture();
     document.nodes[1].data.locked = true;
-    expect(connectionIssue(document.nodes, document.edges, { source: 'explore', target: 'layers' })).toBe('locked-endpoint');
-    expect(connectionIssue(document.nodes, document.edges, { source: 'layers', target: 'explore' })).toBe('locked-endpoint');
+    expect(connectionIssue(document.nodes, document.edges, { source: 'scene-01', target: 'story-premise' })).toBe('locked-endpoint');
+    expect(connectionIssue(document.nodes, document.edges, { source: 'shot-01', target: 'scene-01' })).toBe('locked-endpoint');
   });
 
   it('ignores the edge being reconnected when checking duplicates', () => {
@@ -60,8 +60,8 @@ describe('connection rules', () => {
     expect(canConnect(
       document.nodes,
       document.edges,
-      { source: 'research', target: 'explore' },
-      'research-explore',
+      { source: 'story-premise', target: 'scene-01' },
+      'story-premise-scene-01',
     )).toBe(true);
   });
 });
@@ -72,10 +72,10 @@ describe('graph integrity', () => {
     const nodes = [...document.nodes, structuredClone(document.nodes[0])];
     const edges = [
       ...document.edges,
-      edge('research-explore', 'explore', 'layers'),
-      edge('orphan', 'explore', 'missing'),
-      edge('self', 'layers', 'layers'),
-      edge('duplicate-pair', 'research', 'layers'),
+      edge('story-premise-scene-01', 'scene-01', 'shot-01'),
+      edge('orphan', 'scene-01', 'missing'),
+      edge('self', 'shot-01', 'shot-01'),
+      edge('duplicate-pair', 'scene-01', 'shot-01'),
     ];
     expect(graphIntegrityIssues(nodes, edges).map((issue) => issue.kind)).toEqual(expect.arrayContaining([
       'duplicate-layer-id',
@@ -88,23 +88,23 @@ describe('graph integrity', () => {
 
   it('deletes incident connectors with selected layers', () => {
     const document = fixture();
-    const result = removeNodesAndConnections(document.nodes, document.edges, new Set(['research']));
-    expect(result.nodes.map((node) => node.id)).toEqual(['explore', 'layers']);
-    expect(result.edges).toEqual([]);
+    const result = removeNodesAndConnections(document.nodes, document.edges, new Set(['story-premise']));
+    expect(result.nodes.map((node) => node.id)).toEqual(['scene-01', 'shot-01']);
+    expect(result.edges.map((edge) => edge.id)).toEqual(['scene-01-shot-01']);
   });
 
   it('finds collapsed descendants without looping on cycles', () => {
     const document = fixture();
-    const research = document.nodes.find((node) => node.id === 'research') as EditorNode;
-    if (research.data.kind !== 'concept') throw new Error('Expected a concept fixture.');
-    research.data.collapsed = true;
-    document.edges.push(edge('cycle', 'layers', 'research'));
-    expect(collapsedDescendantIds(document.nodes, document.edges)).toEqual(new Set(['explore', 'layers']));
+    const premise = document.nodes.find((node) => node.id === 'story-premise') as EditorNode;
+    if (premise.data.kind !== 'concept') throw new Error('Expected a concept fixture.');
+    premise.data.collapsed = true;
+    document.edges.push(edge('cycle', 'shot-01', 'story-premise'));
+    expect(collapsedDescendantIds(document.nodes, document.edges)).toEqual(new Set(['scene-01', 'shot-01']));
   });
 
   it('creates deterministic positions for rooted, cyclic, and disconnected graphs', () => {
     const document = fixture();
-    document.edges.push(edge('cycle', 'layers', 'research'));
+    document.edges.push(edge('cycle', 'shot-01', 'story-premise'));
     const disconnected = structuredClone(document.nodes[0]);
     disconnected.id = 'disconnected';
     disconnected.data.name = 'Disconnected';
@@ -118,6 +118,6 @@ describe('graph integrity', () => {
   it('excludes hidden layers from tidy positions', () => {
     const document = fixture();
     document.nodes[1].hidden = true;
-    expect(tidyGraphPositions(document.nodes, document.edges).has('explore')).toBe(false);
+    expect(tidyGraphPositions(document.nodes, document.edges).has('scene-01')).toBe(false);
   });
 });

@@ -39,7 +39,7 @@ test('canvas selection, hand mode, zoom controls, dragging, and pane deselection
   await page.getByRole('button', { name: 'Fit view' }).click();
   await expect(page.getByLabel('Diagram overview')).toBeVisible();
 
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   await research.click();
   await expect(research).toHaveClass(/selected/);
   await pane.click({ position: { x: 25, y: 25 } });
@@ -61,9 +61,9 @@ test('canvas selection, hand mode, zoom controls, dragging, and pane deselection
 test('select all, marquee modifiers, escape, and layer ranges stay synchronized', async ({ page }) => {
   await openEditor(page);
   const layerButton = (name: string) => page.getByRole('button', { name, exact: true });
-  const research = canvasNode(page, 'Research');
-  const explore = canvasNode(page, 'Explore tools');
-  const editable = canvasNode(page, 'Editable layers');
+  const research = canvasNode(page, 'Story Premise');
+  const explore = canvasNode(page, 'Scene 01');
+  const editable = canvasNode(page, 'Shot 01');
 
   await page.waitForTimeout(550);
   await expect(page.locator('main[data-save-state="saved"]')).toBeVisible();
@@ -71,9 +71,9 @@ test('select all, marquee modifiers, escape, and layer ranges stay synchronized'
   await page.waitForTimeout(550);
   await expect(page.locator('main[data-save-state="saved"]')).toBeVisible();
   await expect(page.locator('.inspector-panel').getByText('3 layers selected', { exact: true }).first()).toBeVisible();
-  await expect(layerButton('Research')).toHaveAttribute('aria-pressed', 'true');
-  await expect(layerButton('Explore tools')).toHaveAttribute('aria-pressed', 'true');
-  await expect(layerButton('Editable layers')).toHaveAttribute('aria-pressed', 'true');
+  await expect(layerButton('Story Premise')).toHaveAttribute('aria-pressed', 'true');
+  await expect(layerButton('Scene 01')).toHaveAttribute('aria-pressed', 'true');
+  await expect(layerButton('Shot 01')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(3);
   const keyboardGroupActions = page.getByRole('group', { name: '3 selected layer actions' });
   await expect(keyboardGroupActions).toBeVisible();
@@ -138,24 +138,24 @@ test('select all, marquee modifiers, escape, and layer ranges stay synchronized'
   await page.keyboard.up('Shift');
   await expect(page.locator('.inspector-panel').getByText('3 layers selected', { exact: true }).first()).toBeVisible();
 
-  const currentExploreBox = await explore.boundingBox();
-  expect(currentExploreBox).toBeTruthy();
+  const currentResearchBox = await research.boundingBox();
+  expect(currentResearchBox).toBeTruthy();
   await page.keyboard.down('Alt');
   await dragBox(page, {
-    x: currentExploreBox!.x - 12,
-    y: currentExploreBox!.y - 12,
-    width: currentExploreBox!.width + 24,
-    height: currentExploreBox!.height + 24,
+    x: currentResearchBox!.x - 12,
+    y: currentResearchBox!.y - 12,
+    width: currentResearchBox!.width + 24,
+    height: currentResearchBox!.height + 24,
   });
   await page.keyboard.up('Alt');
-  await expect(explore).not.toHaveClass(/selected/);
-  await expect(research).toHaveClass(/selected/);
+  await expect(research).not.toHaveClass(/selected/);
+  await expect(explore).toHaveClass(/selected/);
   await expect(editable).toHaveClass(/selected/);
 
-  await layerButton('Editable layers').click();
-  await layerButton('Research').click({ modifiers: ['Shift'] });
+  await layerButton('Shot 01').click();
+  await layerButton('Story Premise').click({ modifiers: ['Shift'] });
   await expect(page.locator('.inspector-panel').getByText('3 layers selected', { exact: true }).first()).toBeVisible();
-  await layerButton('Explore tools').click({ modifiers: ['Meta'] });
+  await layerButton('Scene 01').click({ modifiers: ['Meta'] });
   await expect(explore).not.toHaveClass(/selected/);
   await expect(research).toHaveClass(/selected/);
   await expect(editable).toHaveClass(/selected/);
@@ -170,7 +170,7 @@ test('space, middle mouse, and trackpad navigation do not disturb layer selectio
   expect(paneBox).toBeTruthy();
   const start = { x: paneBox!.x + 55, y: paneBox!.y + 75 };
 
-  await canvasNode(page, 'Research').click();
+  await canvasNode(page, 'Story Premise').click();
   const beforeSpacePan = await viewport.getAttribute('style');
   await page.keyboard.down('Space');
   await expect(handTool).toHaveAttribute('aria-pressed', 'true');
@@ -180,7 +180,7 @@ test('space, middle mouse, and trackpad navigation do not disturb layer selectio
   await page.mouse.up();
   await page.keyboard.up('Space');
   expect(await viewport.getAttribute('style')).not.toBe(beforeSpacePan);
-  await expect(canvasNode(page, 'Research')).toHaveClass(/selected/);
+  await expect(canvasNode(page, 'Story Premise')).toHaveClass(/selected/);
 
   const beforeMiddlePan = await viewport.getAttribute('style');
   await page.mouse.move(start.x, start.y);
@@ -188,13 +188,13 @@ test('space, middle mouse, and trackpad navigation do not disturb layer selectio
   await page.mouse.move(start.x - 45, start.y + 28, { steps: 8 });
   await page.mouse.up({ button: 'middle' });
   expect(await viewport.getAttribute('style')).not.toBe(beforeMiddlePan);
-  await expect(canvasNode(page, 'Research')).toHaveClass(/selected/);
+  await expect(canvasNode(page, 'Story Premise')).toHaveClass(/selected/);
 
   const beforeScroll = await viewport.getAttribute('style');
   await page.mouse.move(start.x, start.y);
   await page.mouse.wheel(0, 180);
   expect(await viewport.getAttribute('style')).not.toBe(beforeScroll);
-  await expect(canvasNode(page, 'Research')).toHaveClass(/selected/);
+  await expect(canvasNode(page, 'Story Premise')).toHaveClass(/selected/);
 });
 
 test('select all respects editing and locked layers and supports bulk actions', async ({ page }) => {
@@ -206,23 +206,23 @@ test('select all respects editing and locked layers and supports bulk actions', 
   await expect(title).toHaveValue('Selection-safe title');
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Lock Research', exact: true }).click();
+  await page.getByRole('button', { name: 'Lock Story Premise', exact: true }).click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
   await expect(page.locator('.inspector-panel').getByText('2 layers selected', { exact: true }).first()).toBeVisible();
-  await expect(canvasNode(page, 'Research')).not.toHaveClass(/selected/);
+  await expect(canvasNode(page, 'Story Premise')).not.toHaveClass(/selected/);
 
   const originalLayerCount = await page.locator('.layer-list > li').count();
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
   await page.getByRole('button', { name: 'Duplicate selected layers', exact: true }).click();
   await expect(page.locator('.layer-list > li')).toHaveCount(originalLayerCount + 2);
-  await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount);
+  await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
   await expect(page.locator('.inspector-panel').getByText('2 layers selected', { exact: true }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Lock selected layers', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Unlock selected layers', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Unlock Editable layers copy', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Unlock Shot 01 copy', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Unlock selected layers', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Lock Editable layers copy', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Lock Shot 01 copy', exact: true })).toBeVisible();
 });
 
 test('double-clicking one layer drills from multi-selection into editing', async ({ page }) => {
@@ -232,7 +232,7 @@ test('double-clicking one layer drills from multi-selection into editing', async
   await expect(page.locator('.node-actionbar')).toHaveCount(0);
   await expect(page.locator('.react-flow__resize-control')).toHaveCount(0);
 
-  await canvasNode(page, 'Research').dblclick();
+  await canvasNode(page, 'Story Premise').dblclick();
   await expect(page.getByRole('group', { name: '3 selected layer actions' })).toBeHidden();
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
   await expect(page.getByLabel('Concept title')).toBeVisible();

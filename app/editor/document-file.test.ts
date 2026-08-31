@@ -6,7 +6,7 @@ import {
   validateEditorDocument,
 } from './document-file';
 
-describe('Canvas Starter project backups', () => {
+describe('Cineserye project backups', () => {
   it('round-trips a valid document through the portable envelope', () => {
     const source = serializeProjectBackup(initialDocument);
     const restored = parseProjectBackup(source);
@@ -185,7 +185,7 @@ describe('Canvas Starter project backups', () => {
     const document = structuredClone(initialDocument);
     mutate(document);
     const envelope = JSON.stringify({
-      format: 'canvas-starter-project',
+      format: 'cineserye-project',
       version: 2,
       document,
     });
@@ -203,7 +203,7 @@ describe('Canvas Starter project backups', () => {
 
   it('rejects unsupported project envelopes', () => {
     expect(() => parseProjectBackup('{"format":"another-app","version":1}')).toThrow(
-      'not a supported Canvas Starter',
+      'not a supported Cineserye',
     );
   });
 });

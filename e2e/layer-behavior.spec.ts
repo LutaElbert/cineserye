@@ -22,7 +22,7 @@ async function flowNodeSize(node: Locator) {
 
 test('double-click edits a canvas concept and cancel is a clean no-op', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   const originalStyle = await research.getAttribute('style');
   const originalTransform = originalStyle?.match(/transform:\s*[^;]+/)?.[0];
   expect(originalTransform).toBeTruthy();
@@ -34,7 +34,7 @@ test('double-click edits a canvas concept and cancel is a clean no-op', async ({
   await page.getByLabel('Concept title').fill('Temporary double-click edit');
   await page.getByRole('button', { name: 'Cancel editing', exact: true }).click();
 
-  await expect(research.getByText('Research', { exact: true })).toBeVisible();
+  await expect(research.getByText('Story Premise', { exact: true })).toBeVisible();
   await expect(research).toBeFocused();
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
   await expect(page.locator('.react-flow__node')).toHaveCount(originalNodeCount);
@@ -44,7 +44,7 @@ test('double-click edits a canvas concept and cancel is a clean no-op', async ({
 
 test('outside-click commits concept text and only grows geometry when committed content needs it', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   const originalBox = await research.boundingBox();
   const originalSize = await flowNodeSize(research);
   const originalStyle = await research.getAttribute('style');
@@ -73,7 +73,7 @@ test('outside-click commits concept text and only grows geometry when committed 
   expect(await committed.getAttribute('style')).toContain(originalTransform!);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(canvasNode(page, 'Research').getByText('Research', { exact: true })).toBeVisible();
+  await expect(canvasNode(page, 'Story Premise').getByText('Story Premise', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await waitForSaved(page);
   await page.reload();
@@ -86,7 +86,7 @@ test('outside-click commits concept text and only grows geometry when committed 
 
 test('all formatting tools target the active title or body and can be toggled off', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   await research.locator('.concept-node').dblclick();
   const title = page.getByLabel('Concept title');
   const body = page.getByLabel('Concept body');
@@ -179,12 +179,12 @@ test('all formatting tools target the active title or body and can be toggled of
   await waitForSaved(page);
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
-  await expect(canvasNode(page, 'Research').locator('.concept-title-rich-text strong')).toHaveCount(1);
+  await expect(canvasNode(page, 'Story Premise').locator('.concept-title-rich-text strong')).toHaveCount(1);
 });
 
 test('checklist content auto-sizes its layer and removes the trailing empty row on commit', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   const originalBox = await research.boundingBox();
   expect(originalBox).toBeTruthy();
 
@@ -244,7 +244,7 @@ test('checklist content auto-sizes its layer and removes the trailing empty row 
   expect(Math.abs(handleCenter - cardCenter)).toBeLessThan(3);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(canvasNode(page, 'Research').locator('.concept-task-item')).toHaveCount(0);
+  await expect(canvasNode(page, 'Story Premise').locator('.concept-task-item')).toHaveCount(0);
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(canvasNode(page, 'Checklist sizing').locator('.concept-task-item')).toHaveCount(items.length);
   await waitForSaved(page);
@@ -263,12 +263,12 @@ test('child and sibling actions create compact layers below the parent with vert
   await openEditor(page);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
-  await page.getByRole('button', { name: 'Research', exact: true }).click();
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await page.getByRole('button', { name: 'Add child', exact: true }).click();
   await page.getByLabel('Concept title').fill('Compact child');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
 
-  const parent = canvasNode(page, 'Research');
+  const parent = canvasNode(page, 'Story Premise');
   const child = canvasNode(page, 'Compact child');
   const parentBox = await parent.boundingBox();
   const childBox = await child.boundingBox();
@@ -323,7 +323,7 @@ test('image actions add editable concept children and parent-aware siblings', as
   await page.getByRole('button', { name: 'Fit View' }).click();
   let imageNode = page.locator('.react-flow__node.selected');
   await expect(imageNode).toHaveCount(1);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   const sourceHandle = research.locator('.react-flow__handle.source').first();
   const targetHandle = imageNode.locator('.react-flow__handle.target').first();
   const sourceBox = await sourceHandle.boundingBox();
@@ -334,7 +334,7 @@ test('image actions add editable concept children and parent-aware siblings', as
   await page.mouse.down();
   await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 10 });
   await page.mouse.up();
-  await expect(page.getByLabel('Connector from Research to story-reference.png')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to story-reference.png')).toBeVisible();
 
   await imageLayer.click();
   await expect(page.getByRole('button', { name: 'Add child', exact: true })).toBeVisible();
@@ -355,17 +355,17 @@ test('image actions add editable concept children and parent-aware siblings', as
   await page.getByRole('button', { name: 'Add sibling', exact: true }).click();
   await page.getByLabel('Concept title').fill('Image sibling');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
-  await expect(page.getByLabel('Connector from Research to Image sibling')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Image sibling')).toBeVisible();
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Image sibling', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Image sibling', exact: true })).toBeVisible();
-  await expect(page.getByLabel('Connector from Research to Image sibling')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Image sibling')).toBeVisible();
   await waitForSaved(page);
   await page.reload();
   await expect(page.getByLabel('Connector from story-reference.png to Image observation')).toBeVisible();
-  await expect(page.getByLabel('Connector from Research to Image sibling')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Image sibling')).toBeVisible();
 });
 
 test('image branch shortcuts work and locked images do not expose branch actions', async ({ page }) => {
@@ -401,7 +401,7 @@ test('image branch shortcuts work and locked images do not expose branch actions
 
 test('content alignment is accessible, undoable, and persistent on resized concepts', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   await research.click();
   await dragResizeControl(page, research, '.react-flow__resize-control.handle.bottom.right', 90, 120);
   const titleBefore = await research.locator('.concept-title-rich-text').boundingBox();
@@ -427,14 +427,14 @@ test('content alignment is accessible, undoable, and persistent on resized conce
   await waitForSaved(page);
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Research', exact: true }).click();
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Align content center', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: 'Align content bottom', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('double-click and F2 rename a layer with commit, cancel, undo, and redo', async ({ page }) => {
   await openEditor(page);
-  const researchLayer = page.getByRole('button', { name: 'Research', exact: true });
+  const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
 
   await researchLayer.dblclick();
   const nameEditor = page.getByLabel('Layer name');
@@ -444,7 +444,7 @@ test('double-click and F2 rename a layer with commit, cancel, undo, and redo', a
   await expect(page.getByRole('button', { name: 'Discovery', exact: true })).toBeFocused();
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Research', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   const discoveryLayer = page.getByRole('button', { name: 'Discovery', exact: true });
   await expect(discoveryLayer).toBeVisible();
@@ -474,16 +474,16 @@ test('double-click rename works for raster layers while vectorization is disable
 
 test('locked layers reject canvas editing, renaming, and new connections', async ({ page }) => {
   await openEditor(page);
-  await page.getByRole('button', { name: 'Lock Explore tools', exact: true }).click();
-  const explore = canvasNode(page, 'Explore tools');
+  await page.getByRole('button', { name: 'Lock Scene 01', exact: true }).click();
+  const explore = canvasNode(page, 'Scene 01');
 
   await explore.locator('.concept-node').dblclick();
   await expect(page.getByLabel('Concept title')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Explore tools', exact: true }).dblclick();
+  await page.getByRole('button', { name: 'Scene 01', exact: true }).dblclick();
   await expect(page.getByLabel('Layer name')).toHaveCount(0);
 
   const edgeCount = await page.locator('.react-flow__edge').count();
-  await connectLayers(page, 'Editable layers', 'Explore tools');
+  await connectLayers(page, 'Shot 01', 'Scene 01');
   await expect(page.locator('.react-flow__edge')).toHaveCount(edgeCount);
 });
 
@@ -491,14 +491,14 @@ test('connection rules reject self and duplicate edges but allow reverse cycles'
   await openEditor(page);
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
 
-  await connectLayers(page, 'Research', 'Research');
+  await connectLayers(page, 'Story Premise', 'Story Premise');
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount);
-  await connectLayers(page, 'Research', 'Explore tools');
+  await connectLayers(page, 'Story Premise', 'Scene 01');
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount);
 
-  await connectLayers(page, 'Explore tools', 'Research');
+  await connectLayers(page, 'Scene 01', 'Story Premise');
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
-  await expect(page.getByLabel('Connector from Explore tools to Research')).toBeVisible();
+  await expect(page.getByLabel('Connector from Scene 01 to Story Premise')).toBeVisible();
 
   await page.getByRole('button', { name: 'Tidy diagram layout' }).click();
   await expect(page.getByText('Diagram layout tidied.')).toBeVisible();
@@ -507,7 +507,7 @@ test('connection rules reject self and duplicate edges but allow reverse cycles'
 test('reconnects a connector endpoint as one undoable operation', async ({ page }) => {
   await openEditor(page);
   await page.getByRole('button', { name: 'Add concept layer' }).click();
-  const originalEdge = page.getByLabel('Connector from Research to Explore tools');
+  const originalEdge = page.getByLabel('Connector from Story Premise to Scene 01');
   await originalEdge.locator('.react-flow__edge-path').click({ force: true });
   const updater = originalEdge.locator('.react-flow__edgeupdater-target');
   const targetHandle = canvasNode(page, 'New concept').locator('.react-flow__handle.target').first();
@@ -520,15 +520,22 @@ test('reconnects a connector endpoint as one undoable operation', async ({ page 
   await page.mouse.down();
   await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 10 });
   await page.mouse.up();
-  await expect(page.getByLabel('Connector from Research to New concept')).toBeVisible();
-  await expect(page.getByLabel('Connector from Research to Explore tools')).toHaveCount(0);
+  await expect(page.getByLabel('Connector from Story Premise to New concept')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  const restoredOriginalEdge = page.getByLabel('Connector from Research to Explore tools');
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toBeVisible();
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(page.getByLabel('Connector from Story Premise to New concept')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+
+  await connectLayers(page, 'Story Premise', 'Shot 01');
+  const restoredOriginalEdge = page.getByLabel('Connector from Story Premise to Scene 01');
   await expect(restoredOriginalEdge).toBeVisible();
   await restoredOriginalEdge.locator('.react-flow__edge-path').click({ force: true });
   const duplicateUpdater = restoredOriginalEdge.locator('.react-flow__edgeupdater-target');
-  const duplicateTarget = canvasNode(page, 'Editable layers').locator('.react-flow__handle.target').first();
+  const duplicateTarget = canvasNode(page, 'Shot 01').locator('.react-flow__handle.target').first();
   const duplicateUpdaterBox = await duplicateUpdater.boundingBox();
   const duplicateTargetBox = await duplicateTarget.boundingBox();
   expect(duplicateUpdaterBox).toBeTruthy();
@@ -537,33 +544,31 @@ test('reconnects a connector endpoint as one undoable operation', async ({ page 
   await page.mouse.down();
   await page.mouse.move(duplicateTargetBox!.x + duplicateTargetBox!.width / 2, duplicateTargetBox!.y + duplicateTargetBox!.height / 2, { steps: 10 });
   await page.mouse.up();
-  await expect(page.getByLabel('Connector from Research to Explore tools')).toBeVisible();
-  await expect(page.getByLabel('Connector from Research to Editable layers')).toBeVisible();
-  await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await expect(page.getByLabel('Connector from Research to New concept')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Shot 01')).toBeVisible();
 });
 
 test('connector deletion and layer deletion cascade through undo and redo', async ({ page }) => {
   await openEditor(page);
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
-  await connectLayers(page, 'Explore tools', 'Research');
-  const reverseEdge = page.getByLabel('Connector from Explore tools to Research');
+  await connectLayers(page, 'Scene 01', 'Story Premise');
+  const reverseEdge = page.getByLabel('Connector from Scene 01 to Story Premise');
   await reverseEdge.click();
   await page.getByRole('button', { name: 'Delete connector', exact: true }).click();
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  const restoredReverseEdge = page.getByLabel('Connector from Explore tools to Research');
+  const restoredReverseEdge = page.getByLabel('Connector from Scene 01 to Story Premise');
   await expect(restoredReverseEdge).toBeVisible();
   await restoredReverseEdge.focus();
   await restoredReverseEdge.press('Delete');
-  await expect(page.getByLabel('Connector from Explore tools to Research')).toHaveCount(0);
+  await expect(page.getByLabel('Connector from Scene 01 to Story Premise')).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(page.getByLabel('Connector from Explore tools to Research')).toBeVisible();
+  await expect(page.getByLabel('Connector from Scene 01 to Story Premise')).toBeVisible();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await expect(page.getByLabel('Connector from Explore tools to Research')).toHaveCount(0);
+  await expect(page.getByLabel('Connector from Scene 01 to Story Premise')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Add concept layer' }).click();
-  await connectLayers(page, 'Editable layers', 'New concept');
+  await connectLayers(page, 'Shot 01', 'New concept');
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
   const newConceptNode = canvasNode(page, 'New concept');
   await newConceptNode.focus();
@@ -584,38 +589,38 @@ test('connector deletion and layer deletion cascade through undo and redo', asyn
 
 test('mixed locked selection changes and deletes only unlocked layers', async ({ page }) => {
   await openEditor(page);
-  await page.getByRole('button', { name: 'Lock Explore tools', exact: true }).click();
-  await page.getByRole('button', { name: 'Explore tools', exact: true }).click();
-  await page.getByRole('button', { name: 'Editable layers', exact: true }).click({ modifiers: ['Meta'] });
+  await page.getByRole('button', { name: 'Lock Scene 01', exact: true }).click();
+  await page.getByRole('button', { name: 'Scene 01', exact: true }).click();
+  await page.getByRole('button', { name: 'Shot 01', exact: true }).click({ modifiers: ['Meta'] });
   await expect(page.locator('.inspector-panel').getByText('2 layers selected', { exact: true }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Indigo', exact: true }).click();
-  await expect(canvasNode(page, 'Explore tools').locator('.concept-node')).toHaveClass(/tone-ink/);
-  await expect(canvasNode(page, 'Editable layers').locator('.concept-node')).toHaveClass(/tone-indigo/);
+  await expect(canvasNode(page, 'Scene 01').locator('.concept-node')).toHaveClass(/tone-ink/);
+  await expect(canvasNode(page, 'Shot 01').locator('.concept-node')).toHaveClass(/tone-indigo/);
 
   await page.getByRole('button', { name: 'Delete unlocked layers', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Explore tools', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Editable layers', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Scene 01', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Shot 01', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Editable layers', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Shot 01', exact: true })).toBeVisible();
 });
 
 test('layer ordering is deterministic and undoable', async ({ page }) => {
   await openEditor(page);
   const layerNames = () => page.locator('.layer-list > li .layer-main').allTextContents();
-  expect(await layerNames()).toEqual(['Editable layers', 'Explore tools', 'Research']);
-  await page.getByRole('button', { name: 'Research', exact: true }).click();
+  expect(await layerNames()).toEqual(['Shot 01', 'Scene 01', 'Story Premise']);
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await page.getByRole('button', { name: 'Move layer up', exact: true }).click();
-  expect(await layerNames()).toEqual(['Editable layers', 'Research', 'Explore tools']);
+  expect(await layerNames()).toEqual(['Shot 01', 'Story Premise', 'Scene 01']);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  expect(await layerNames()).toEqual(['Editable layers', 'Explore tools', 'Research']);
+  expect(await layerNames()).toEqual(['Shot 01', 'Scene 01', 'Story Premise']);
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  expect(await layerNames()).toEqual(['Editable layers', 'Research', 'Explore tools']);
+  expect(await layerNames()).toEqual(['Shot 01', 'Story Premise', 'Scene 01']);
 });
 
 test('dragged layer position survives undo, redo, autosave, and reload', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   await research.click();
   const xInput = page.locator('.inspector-panel').getByRole('spinbutton', { name: 'X', exact: true });
   const yInput = page.locator('.inspector-panel').getByRole('spinbutton', { name: 'Y', exact: true });
@@ -642,7 +647,7 @@ test('dragged layer position survives undo, redo, autosave, and reload', async (
 
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Research', exact: true }).click();
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await expect(page.locator('.inspector-panel').getByRole('spinbutton', { name: 'X', exact: true })).toHaveValue(String(movedX));
   await expect(page.locator('.inspector-panel').getByRole('spinbutton', { name: 'Y', exact: true })).toHaveValue(String(movedY));
 });
@@ -651,7 +656,7 @@ test('resized layer dimensions are undoable and persist after reload', async ({ 
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   await research.click();
   const originalSize = await flowNodeSize(research);
   const resizeHandle = research.locator('.react-flow__resize-control.handle.bottom.right');
@@ -686,7 +691,7 @@ test('resized layer dimensions are undoable and persist after reload', async ({ 
 
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
-  const restoredSize = await flowNodeSize(canvasNode(page, 'Research'));
+  const restoredSize = await flowNodeSize(canvasNode(page, 'Story Premise'));
   expect(Math.abs(restoredSize.width - resizedSize.width)).toBeLessThan(2);
   expect(Math.abs(restoredSize.height - resizedSize.height)).toBeLessThan(2);
   const unexpectedErrors = pageErrors.filter((message) => ![
@@ -698,7 +703,7 @@ test('resized layer dimensions are undoable and persist after reload', async ({ 
 
 test('top-left resizing updates position, respects minimums, and hides controls while locked or editing', async ({ page }) => {
   await openEditor(page);
-  const research = canvasNode(page, 'Research');
+  const research = canvasNode(page, 'Story Premise');
   await research.click();
   const originalBox = await research.boundingBox();
   expect(originalBox).toBeTruthy();

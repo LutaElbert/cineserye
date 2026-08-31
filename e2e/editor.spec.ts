@@ -30,7 +30,7 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
   const backupDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download backup' }).click();
   const backup = await backupDownload;
-  expect(backup.suggestedFilename()).toMatch(/\.canvas$/);
+  expect(backup.suggestedFilename()).toMatch(/\.cineserye$/);
   const backupPath = await backup.path();
   expect(backupPath).toBeTruthy();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -41,7 +41,7 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
 
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByLabel('Choose a Canvas Starter project backup').setInputFiles(backupPath!);
+  await page.getByLabel('Choose a Cineserye project backup').setInputFiles(backupPath!);
   await expect(page.getByText('Project backup restored.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'test-map.png', exact: true })).toBeVisible();
 
@@ -63,7 +63,7 @@ test('edits, hides, locks, duplicates, deletes, undoes, and redoes layers', asyn
   await page.getByRole('button', { name: 'Add concept layer' }).click();
   const inspector = page.locator('.inspector-panel');
   const edgeCount = await page.locator('.react-flow__edge').count();
-  const sourceHandle = page.locator('.react-flow__node').filter({ hasText: 'Research' }).locator('.react-flow__handle.source').first();
+  const sourceHandle = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).locator('.react-flow__handle.source').first();
   const targetHandle = page.locator('.react-flow__node').filter({ hasText: 'New concept' }).locator('.react-flow__handle.target').first();
   const sourceBox = await sourceHandle.boundingBox();
   const targetBox = await targetHandle.boundingBox();
@@ -167,11 +167,11 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
   await page.goto('/');
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
 
-  const researchNode = page.locator('.react-flow__node').filter({ hasText: 'Research' }).first();
+  const researchNode = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).first();
   await researchNode.locator('.concept-node').dblclick();
   const title = page.getByLabel('Concept title');
   await expect(title).toBeVisible();
-  await title.fill('Research plan');
+  await title.fill('Story Premise plan');
 
   const body = page.locator('.concept-body-editor');
   await body.fill('First milestone');
@@ -180,34 +180,34 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
   await page.getByRole('button', { name: 'Bulleted list', exact: true }).click();
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
 
-  await expect(researchNode.getByText('Research plan', { exact: true })).toBeVisible();
+  await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();
   await expect(researchNode.getByText('First milestone', { exact: true })).toBeVisible();
   const renderedBulletList = researchNode.locator('.concept-rich-text ul:not(.concept-task-list)');
   await expect(renderedBulletList).toBeVisible();
   await expect(renderedBulletList).toHaveCSS('list-style-type', 'disc');
   await expect(renderedBulletList).toHaveCSS('list-style-position', 'outside');
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(researchNode.getByText('Research', { exact: true })).toBeVisible();
+  await expect(researchNode.getByText('Story Premise', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await expect(researchNode.getByText('Research plan', { exact: true })).toBeVisible();
+  await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();
 
   await researchNode.locator('.concept-node').dblclick();
   await page.getByLabel('Concept title').fill('Discard this');
   await page.getByLabel('Concept title').press('Escape');
-  await expect(researchNode.getByText('Research plan', { exact: true })).toBeVisible();
+  await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();
 
   await researchNode.locator('.concept-node').dblclick();
   await page.getByLabel('Concept title').fill('Discard with button');
   await page.getByRole('button', { name: 'Cancel editing', exact: true }).click();
-  await expect(researchNode.getByText('Research plan', { exact: true })).toBeVisible();
+  await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();
   await expect(page.locator('main[data-save-state="saved"]')).toBeVisible();
 
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
-  const restoredResearchNode = page.locator('.react-flow__node').filter({ hasText: 'Research plan' });
-  await expect(restoredResearchNode).toBeVisible();
+  const restoredPremiseNode = page.locator('.react-flow__node').filter({ hasText: 'Story Premise plan' });
+  await expect(restoredPremiseNode).toBeVisible();
   await expect(page.locator('.react-flow__node').filter({ hasText: 'First milestone' })).toBeVisible();
-  await expect(restoredResearchNode.locator('.concept-rich-text ul:not(.concept-task-list)')).toHaveCSS('list-style-type', 'disc');
+  await expect(restoredPremiseNode.locator('.concept-rich-text ul:not(.concept-task-list)')).toHaveCSS('list-style-type', 'disc');
   expect(runtimeErrors).toEqual([]);
 });
 
@@ -215,7 +215,7 @@ test('renames layers, searches content, adds and collapses branches, and saves c
   await page.goto('/');
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
 
-  const researchLayer = page.getByRole('button', { name: 'Research', exact: true });
+  const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
   await researchLayer.dblclick();
   const layerName = page.getByLabel('Layer name');
   await layerName.fill('Discovery layer');
@@ -234,15 +234,15 @@ test('renames layers, searches content, adds and collapses branches, and saves c
   await page.getByPlaceholder('Search layers and notes').fill('');
   await page.getByRole('button', { name: 'Discovery layer', exact: true }).click();
 
-  const parentNode = page.locator('.react-flow__node').filter({ hasText: 'Research' }).first();
-  await parentNode.getByRole('button', { name: 'Collapse branch from Research' }).click();
+  const parentNode = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).first();
+  await parentNode.getByRole('button', { name: 'Collapse branch from Story Premise' }).click();
   await expect(page.locator('.react-flow__node').filter({ hasText: 'Evidence review' })).toBeHidden();
-  await parentNode.getByRole('button', { name: 'Expand branch from Research' }).click();
+  await parentNode.getByRole('button', { name: 'Expand branch from Story Premise' }).click();
   await expect(page.locator('.react-flow__node').filter({ hasText: 'Evidence review' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
   await page.getByRole('button', { name: 'Save checkpoint' }).click();
-  await expect(page.getByRole('button', { name: /Untitled canvas/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Untitled Cineserye/ }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 
   const inspector = page.locator('.inspector-panel');
@@ -250,12 +250,12 @@ test('renames layers, searches content, adds and collapses branches, and saves c
   await inspector.getByLabel('Label').blur();
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: /Untitled canvas/ }).first().click();
+  await page.getByRole('button', { name: /Untitled Cineserye/ }).first().click();
   await expect(page.getByText('Checkpoint restored.')).toBeVisible();
-  await expect(page.locator('.react-flow__node').filter({ hasText: 'Research' }).first()).toBeVisible();
+  await expect(page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).first()).toBeVisible();
 
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
-  await page.getByRole('button', { name: 'Delete checkpoint Untitled canvas' }).click();
+  await page.getByRole('button', { name: 'Delete checkpoint Untitled Cineserye' }).click();
   await expect(page.getByText('No checkpoints yet. Save one before a major edit.')).toBeVisible();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 });
@@ -264,8 +264,8 @@ test('bulk-arranges selected layers and edits connector labels and styles', asyn
   await page.goto('/');
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Research', exact: true }).click();
-  await page.getByRole('button', { name: 'Explore tools', exact: true }).click({ modifiers: ['Meta'] });
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
+  await page.getByRole('button', { name: 'Scene 01', exact: true }).click({ modifiers: ['Meta'] });
   await expect(page.locator('.inspector-panel').getByText('2 layers selected', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Align left', exact: true }).click();
   await page.getByRole('button', { name: 'Indigo', exact: true }).click();

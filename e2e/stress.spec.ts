@@ -55,7 +55,7 @@ function stressProject(nodeCount = 500, edgeCount = 800) {
     });
   }
   return JSON.stringify({
-    format: 'canvas-starter-project',
+    format: 'cineserye-project',
     version: 3,
     exportedAt: new Date(0).toISOString(),
     document: {
@@ -81,8 +81,8 @@ test('keeps a 500-layer, 800-connector document responsive and persistent', asyn
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
   page.once('dialog', (dialog) => dialog.accept());
   const restoreStarted = Date.now();
-  await page.getByLabel('Choose a Canvas Starter project backup').setInputFiles({
-    name: 'stress-graph.canvas',
+  await page.getByLabel('Choose a Cineserye project backup').setInputFiles({
+    name: 'stress-graph.cineserye',
     mimeType: 'application/json',
     buffer: Buffer.from(stressProject()),
   });

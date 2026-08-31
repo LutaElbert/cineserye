@@ -90,6 +90,8 @@ describe('buildSvgDocument', () => {
     const svg = buildSvgDocument(nodes, []);
 
     expect(svg).toContain('<svg');
+    expect(svg).toContain('<title id="title">Cineserye editable story canvas</title>');
+    expect(svg).toContain('exported from Cineserye');
     expect(svg).toContain('Ideas &amp; notes');
     expect(svg).toContain('font-style="italic"');
     expect(svg).toContain('Bold action');

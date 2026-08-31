@@ -1,8 +1,8 @@
-# Layer and connection test plan
+# Cineserye foundation test plan
 
 ## Purpose
 
-Protect the editor's graph integrity and make layer editing predictable across pointer, keyboard, persistence, and recovery workflows. These checks run locally and in CI; they do not deploy or modify Cloudflare resources.
+Protect Cineserye's generic editor integrity and make layer editing predictable across pointer, keyboard, persistence, and recovery workflows. These checks run locally and in CI; they do not deploy or modify Cloudflare resources.
 
 ## Behavior contract
 
@@ -29,6 +29,8 @@ Protect the editor's graph integrity and make layer editing predictable across p
 | Mutation safety | Keyboard and inspector deletion, cascade cleanup, mixed locked selection, ordering, duplicate-layer isolation, undo/redo |
 | Persistence | Drag and resize autosave/reload, project backup/restore, malformed graph rejection and saved-state repair |
 | Graph algorithms | Cyclic collapse and tidy termination, deterministic positioning, hidden descendants, integrity diagnostics |
+| Copilot boundary | Atomic cloned proposals, runtime validation, graph enforcement, lock enforcement, and unsupported-command rejection |
+| Cinema extensions | Planned `scene`, `shot`, `character`, `asset`, and `agent-run` kinds with versioned domain validators |
 | Accessibility | Serious/critical axe scan, semantic selected/locked/hidden state, keyboard entry and cancellation, reduced motion, 200% text, mobile panels |
 | Scale | 500 layers and 800 connectors restored, searched, tidied, autosaved, and reloaded without runtime errors |
 | Browser regression | Production-built Worker in Chromium, Firefox, and WebKit |
@@ -49,19 +51,24 @@ npm audit --audit-level=high
 
 The local Worker must return the configured CSP, framing, MIME-sniffing, referrer, permissions, HSTS, and cross-origin headers. `git diff --check` must report no whitespace errors.
 
-## Latest local evidence — 2026-08-31
+## Evidence recording
 
-- 46/46 unit tests passed.
-- 112 browser checks passed: 38 Chromium, 37 Firefox, and 37 WebKit, with two intentional non-Chromium stress-test skips.
-- Image child/sibling toolbar actions, keyboard shortcuts, parent-aware layout, connector handles, locking, undo/redo, and reload passed in all three engines.
-- Double-click, outside-click geometry restoration, all inline formatting controls, drag/resize history, and reload persistence passed in all three engines.
-- The Chromium scale fixture passed with 500 layers and 800 connectors.
-- The autosave stress fixture and the undo/redo persistence path passed repeated concurrent browser runs.
-- Vinext compatibility is 100%, the production build succeeds, and the dependency audit reports zero vulnerabilities.
+Record the exact compatibility score, unit count, browser count, build result, and audit result after each baseline verification. Keep generated reports and browser traces out of the committed source unless they explain a reproducible failure.
+
+## Isolated baseline evidence — 2026-08-31
+
+- Vinext compatibility: 100% (6 supported, 0 partial, 0 issues).
+- TypeScript and ESLint: passed with no errors.
+- Unit tests: 53/53 passed across 9 files.
+- Production build: passed.
+- Dependency audit: zero vulnerabilities at the high severity gate.
+- Playwright against the local development server: 112 passed, with the Firefox and WebKit copies of the Chromium-only stress test intentionally skipped.
+- Playwright against the locally built Cloudflare Worker: 112 passed with the same 2 intentional skips; no Worker was deployed.
+- Whitespace validation: `git diff --check` passed.
 
 ## Manual acceptance still required
 
-- Try representative real concept-map screenshots and confirm image references, child ideas, sibling placement, and intended connections are useful.
+- Confirm the fresh local state visibly presents `Story Premise → Scene 01 → Shot 01`.
 - Repeat pointer editing and drag/resize on at least one physical touch device.
 - Review VoiceOver/Safari or another screen-reader/browser combination.
-- Approve the release candidate before any preview deployment, merge, or production deployment.
+- Approve a separate release candidate before any preview or production deployment.

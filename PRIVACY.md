@@ -1,20 +1,21 @@
-# Canvas Starter privacy baseline
+# Cineserye privacy baseline
 
-Canvas Starter processes imported images and editable canvas documents on the user's device. Image vectorization is disabled in the default interface.
+Cineserye currently processes imported images and editable story-canvas documents on the user's device. Image vectorization is disabled in the default interface. The planned copilot and cinema-domain node types are not active.
 
-## Data handling
+## Current data handling
 
-- Imported images, editable paths, names, and canvas state are saved in that browser's IndexedDB.
-- The starter does not upload images or document contents to a server or AI provider.
-- Project backups and SVG exports are created only after the user requests a download.
-- Clearing browser site data removes the locally saved project for that origin. A downloaded backup is the recovery mechanism.
+- Imported images, editable paths, project names, and canvas state are stored in that browser's `cineserye-local` IndexedDB database.
+- Cineserye does not send images, story content, character data, prompts, or project documents to a server or AI provider.
+- There are no API keys, user accounts, authentication flows, analytics SDKs, agent executions, or media-generation requests in this baseline.
+- `.cineserye` project backups and SVG exports are created only after the user requests a download.
+- Clearing browser site data removes the locally saved project for that origin. A downloaded `.cineserye` backup is the recovery mechanism.
 
 ## Hosting metadata
 
-The hosting provider may process standard HTTP request metadata needed to deliver the application, such as IP address, user agent, requested URL, timing, and error status. Application logs must never include imported images, SVG path data, project names, or document contents.
+If Cineserye is deployed later, the hosting provider may process standard HTTP request metadata needed to deliver the application, such as IP address, user agent, requested URL, timing, and error status. Application logs must never include imported media, SVG path data, project names, scripts, prompts, character details, or canvas contents.
 
-## Before adding cloud or AI features
+## Requirements before a copilot or cloud feature
 
-A derived app must document each provider, what data leaves the browser, why it is sent, retention and deletion behavior, user controls, and cost limits. Add explicit consent before the first transfer and provide a way to cancel agent work.
+Document each provider, the exact fields sent, the purpose of the transfer, retention and deletion behavior, regional processing, user controls, and cost limits. Obtain explicit consent before the first content transfer. Agent proposals must remain previewable and rejectable, provider work must be cancellable, and secrets must remain server-side.
 
-This document is a technical baseline, not a complete privacy policy for a derived product.
+This technical baseline is not a complete privacy policy for a deployed product.

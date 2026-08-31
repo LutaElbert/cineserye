@@ -28,7 +28,7 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox webkit
       - name: Test the built Cloudflare Worker
         run: |
-          npx wrangler dev --config dist/server/wrangler.json --port 8787 > /tmp/canvas-starter-wrangler.log 2>&1 &
+          npx wrangler dev --config dist/server/wrangler.json --port 8787 > /tmp/cineserye-wrangler.log 2>&1 &
           worker_pid=$!
           trap 'kill "$worker_pid"' EXIT
           for attempt in {1..60}; do
@@ -36,7 +36,7 @@ jobs:
               break
             fi
             if [ "$attempt" -eq 60 ]; then
-              cat /tmp/canvas-starter-wrangler.log
+              cat /tmp/cineserye-wrangler.log
               exit 1
             fi
             sleep 1
