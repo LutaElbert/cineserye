@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  curateCinemaResearchSource,
   createEmptyCinemaProjectData,
   removeCinemaRecordsForNodes,
+  supportedCitationIds,
   type CinemaProjectDataV1,
   validateCinemaProjectData,
 } from './project-data';
@@ -20,9 +22,15 @@ function completeCinemaData(): CinemaProjectDataV1 {
         synopsis: 'Mara discovers an impossible film.', dramaticPurpose: 'Reveal the threat.',
         status: 'draft' as const, continuityNotes: 'Keep the projector screen-right.',
         brief: {
-          tone: 'Restrained suspense', locationPeriod: 'Manila, late 1980s', budgetBand: 'micro' as const,
-          currency: 'PHP' as const, budgetCeiling: 1_200, targetDurationSeconds: 6,
-          availableEquipment: ['phone camera', 'tripod'],
+          version: 2, creationMode: 'ai-generated', aspectRatio: '9:16', targetPlatform: 'short-form',
+          genreTone: 'Restrained suspense', locationPeriod: 'Manila, late 1980s',
+          dialogueAudioIntent: 'sound-design-led', targetDurationSeconds: 6,
+          requiredBeats: ['Projector starts'], mustInclude: ['Projector'], mustAvoid: ['Gore'],
+          generationBudget: { pricingMode: 'currency', currency: 'PHP', ceiling: 1_200, maxAttempts: 2 },
+          productionConstraints: {
+            budgetBand: 'micro', currency: 'PHP', budgetCeiling: null,
+            availableEquipment: ['phone camera', 'tripod'],
+          },
         },
         shotIds: ['shot-01'],
       },
@@ -64,14 +72,17 @@ function completeCinemaData(): CinemaProjectDataV1 {
       'source-01': {
         id: 'source-01', runId: 'run-01', title: '35mm projector anatomy', publisher: 'Fixture',
         url: 'https://example.test/projector', finding: 'Exposed reels make the mechanism readable.',
-        queryPurpose: 'Period prop reference', status: 'pinned' as const, isMock: true, retrievedAt,
+        queryPurpose: 'Period prop reference', status: 'supported' as const,
+        creatorPinned: false, isMock: true, retrievedAt,
       },
     },
     costs: {
       'cost-01': {
-        id: 'cost-01', runId: 'run-01', sceneId: 'scene-01', currency: 'PHP' as const,
+        id: 'cost-01', runId: 'run-01', sceneId: 'scene-01', pricingMode: 'currency', currency: 'PHP' as const,
         minimum: 100, expected: 200, highRisk: 300, ceiling: 1_200,
-        isIllustrative: true as const, assumptions: ['Two attempts'],
+        isIllustrative: true as const, assumptionProfileVersion: 1, provider: 'fixture', model: 'fixture-v1',
+        resolution: '9:16', outputCount: 1, retryAllowance: 1, pricingSnapshotDate: null,
+        assumptions: ['Two attempts'],
       },
     },
   };
@@ -96,6 +107,50 @@ describe('cinema project data', () => {
     const value = completeCinemaData();
     value['x-cineserye-test'] = { enabled: true };
     expect(validateCinemaProjectData(value, hostNodeIds)['x-cineserye-test']).toEqual({ enabled: true });
+  });
+
+  it('migrates legacy brief, source, and cost records without inventing production spend', () => {
+    const value = completeCinemaData() as unknown as Record<string, unknown>;
+    const scene = (value.scenes as Record<string, Record<string, unknown>>)['scene-01'];
+    scene.brief = {
+      tone: 'Restrained suspense', locationPeriod: 'Manila, late 1980s', budgetBand: 'micro',
+      currency: 'PHP', budgetCeiling: 1_200, targetDurationSeconds: 6,
+      availableEquipment: ['tripod'],
+    };
+    const source = (value.sources as Record<string, Record<string, unknown>>)['source-01'];
+    source.status = 'pinned';
+    delete source.creatorPinned;
+    const cost = (value.costs as Record<string, Record<string, unknown>>)['cost-01'];
+    delete cost.pricingMode;
+    delete cost.assumptionProfileVersion;
+    delete cost.provider;
+    delete cost.model;
+    delete cost.resolution;
+    delete cost.outputCount;
+    delete cost.retryAllowance;
+    delete cost.pricingSnapshotDate;
+
+    const result = validateCinemaProjectData(value, hostNodeIds);
+    expect(result.scenes['scene-01'].brief).toMatchObject({
+      version: 2,
+      genreTone: 'Restrained suspense',
+      generationBudget: { ceiling: 1_200 },
+      productionConstraints: { budgetCeiling: null },
+    });
+    expect(result.sources['source-01']).toMatchObject({ status: 'supported', creatorPinned: true });
+    expect(result.costs['cost-01']).toMatchObject({ pricingMode: 'currency', assumptionProfileVersion: 1 });
+  });
+
+  it('curates proposal sources without leaving fallback citation relationships', () => {
+    const value = completeCinemaData();
+    const verification = curateCinemaResearchSource(value, 'source-01', {
+      type: 'set-status', status: 'needs-verification',
+    });
+    expect(supportedCitationIds(verification, ['source-01', 'missing-source'])).toEqual([]);
+    const removed = curateCinemaResearchSource(verification, 'source-01', { type: 'remove' });
+    expect(removed.sources).toEqual({});
+    expect(removed.agentRuns['run-01'].sourceIds).toEqual([]);
+    expect(removed.prompts['prompt-01'].researchSourceIds).toEqual([]);
   });
 
   it('rejects unsupported future versions', () => {

@@ -1,6 +1,10 @@
 export type CinemaCurrency = 'PHP' | 'USD';
 export type CinemaRisk = 'none' | 'low' | 'medium' | 'high';
 export type CinemaBudgetBand = 'micro' | 'lean' | 'indie' | 'custom';
+export type CinemaCreationMode = 'ai-generated' | 'live-action' | 'hybrid';
+export type CinemaAspectRatio = '9:16' | '16:9' | '1:1' | '4:5';
+export type CinemaTargetPlatform = 'short-form' | 'youtube' | 'film-festival' | 'commercial' | 'other';
+export type CinemaDialogueAudioIntent = 'dialogue-led' | 'music-led' | 'sound-design-led' | 'silent' | 'mixed';
 export type CinemaPromptPurpose = 'scene-direction' | 'reference-sheet' | 'storyboard' | 'video';
 export type CinemaRunStatus =
   | 'draft'
@@ -13,14 +17,34 @@ export type CinemaRunStatus =
   | 'rejected'
   | 'accepted';
 
-export type CinemaSceneBrief = {
-  tone: string;
-  locationPeriod: string;
+export type CinemaGenerationBudget = {
+  pricingMode: 'unpriced' | 'credits' | 'currency';
+  currency: CinemaCurrency | null;
+  ceiling: number | null;
+  maxAttempts: number;
+};
+
+export type CinemaProductionConstraints = {
   budgetBand: CinemaBudgetBand;
   currency: CinemaCurrency;
   budgetCeiling: number | null;
-  targetDurationSeconds: number;
   availableEquipment: string[];
+};
+
+export type CinemaSceneBrief = {
+  version: 2;
+  creationMode: CinemaCreationMode;
+  aspectRatio: CinemaAspectRatio;
+  targetPlatform: CinemaTargetPlatform;
+  genreTone: string;
+  locationPeriod: string;
+  dialogueAudioIntent: CinemaDialogueAudioIntent;
+  targetDurationSeconds: number;
+  requiredBeats: string[];
+  mustInclude: string[];
+  mustAvoid: string[];
+  generationBudget: CinemaGenerationBudget;
+  productionConstraints: CinemaProductionConstraints;
 };
 
 export type CinemaSceneRecord = {
@@ -117,7 +141,8 @@ export type CinemaResearchSourceRecord = {
   url: string | null;
   finding: string;
   queryPurpose: string;
-  status: 'pinned' | 'suggested';
+  status: 'supported' | 'needs-verification' | 'irrelevant';
+  creatorPinned: boolean;
   isMock: boolean;
   retrievedAt: string;
 };
@@ -126,12 +151,20 @@ export type CinemaCostEstimateRecord = {
   id: string;
   runId: string;
   sceneId: string;
-  currency: CinemaCurrency;
-  minimum: number;
-  expected: number;
-  highRisk: number;
+  pricingMode: 'unpriced' | 'credits' | 'currency';
+  currency: CinemaCurrency | null;
+  minimum: number | null;
+  expected: number | null;
+  highRisk: number | null;
   ceiling: number | null;
   isIllustrative: true;
+  assumptionProfileVersion: 1;
+  provider: string;
+  model: string;
+  resolution: string;
+  outputCount: number;
+  retryAllowance: number;
+  pricingSnapshotDate: string | null;
   assumptions: string[];
 };
 
@@ -194,6 +227,10 @@ function integer(value: unknown, label: string): number {
 
 function nullableNumber(value: unknown, label: string): number | null {
   return value === null ? null : finiteNonNegative(value, label);
+}
+
+function nullablePositive(value: unknown, label: string): number | null {
+  return value === null ? null : positive(value, label);
 }
 
 function nullableIsoDate(value: unknown, label: string): string | null {
@@ -261,15 +298,102 @@ function recordMap<T>(
 function sceneBrief(value: unknown): CinemaSceneBrief | null {
   if (value === null) return null;
   if (!isRecord(value)) throw new Error('Scene brief is invalid.');
+  if (value.version === undefined || value.version === 1) {
+    const currency = oneOf(value.currency, ['PHP', 'USD'], 'Budget currency');
+    return {
+      ...extensions(value),
+      version: 2,
+      creationMode: 'ai-generated',
+      aspectRatio: '9:16',
+      targetPlatform: 'short-form',
+      genreTone: text(value.tone, 'Scene tone', MAX_SHORT_TEXT),
+      locationPeriod: text(value.locationPeriod, 'Scene location and period', MAX_SHORT_TEXT),
+      dialogueAudioIntent: 'mixed',
+      targetDurationSeconds: positive(value.targetDurationSeconds, 'Target duration'),
+      requiredBeats: [],
+      mustInclude: [],
+      mustAvoid: [],
+      generationBudget: {
+        pricingMode: 'currency',
+        currency,
+        ceiling: nullableNumber(value.budgetCeiling, 'Generation budget ceiling'),
+        maxAttempts: 2,
+      },
+      productionConstraints: {
+        budgetBand: oneOf(value.budgetBand, ['micro', 'lean', 'indie', 'custom'], 'Budget band'),
+        currency,
+        budgetCeiling: null,
+        availableEquipment: stringList(value.availableEquipment, 'Available equipment', 100),
+      },
+    };
+  }
+  if (value.version !== 2 || !isRecord(value.generationBudget) || !isRecord(value.productionConstraints)) {
+    throw new Error('This scene brief version is unsupported.');
+  }
+  const pricingMode = oneOf(
+    value.generationBudget.pricingMode,
+    ['unpriced', 'credits', 'currency'],
+    'Generation pricing mode',
+  );
+  const generationCurrency = value.generationBudget.currency === null
+    ? null
+    : oneOf(value.generationBudget.currency, ['PHP', 'USD'], 'Generation budget currency');
+  const generationCeiling = nullablePositive(value.generationBudget.ceiling, 'Generation budget ceiling');
+  const maxAttempts = integer(value.generationBudget.maxAttempts, 'Generation attempts');
+  if (maxAttempts < 1 || maxAttempts > 20) throw new Error('Generation attempts must be between 1 and 20.');
+  if (pricingMode === 'currency' && generationCurrency === null) {
+    throw new Error('Currency-priced generation budgets require a currency.');
+  }
+  if (pricingMode !== 'currency' && generationCurrency !== null) {
+    throw new Error('Only currency-priced generation budgets can include a currency.');
+  }
+  if (pricingMode === 'unpriced' && generationCeiling !== null) {
+    throw new Error('Unpriced generation budgets cannot include a ceiling.');
+  }
   return {
     ...extensions(value),
-    tone: text(value.tone, 'Scene tone', MAX_SHORT_TEXT),
+    version: 2,
+    creationMode: oneOf(value.creationMode, ['ai-generated', 'live-action', 'hybrid'], 'Creation mode'),
+    aspectRatio: oneOf(value.aspectRatio, ['9:16', '16:9', '1:1', '4:5'], 'Aspect ratio'),
+    targetPlatform: oneOf(
+      value.targetPlatform,
+      ['short-form', 'youtube', 'film-festival', 'commercial', 'other'],
+      'Target platform',
+    ),
+    genreTone: text(value.genreTone, 'Scene genre and tone', MAX_SHORT_TEXT),
     locationPeriod: text(value.locationPeriod, 'Scene location and period', MAX_SHORT_TEXT),
-    budgetBand: oneOf(value.budgetBand, ['micro', 'lean', 'indie', 'custom'], 'Budget band'),
-    currency: oneOf(value.currency, ['PHP', 'USD'], 'Budget currency'),
-    budgetCeiling: nullableNumber(value.budgetCeiling, 'Budget ceiling'),
+    dialogueAudioIntent: oneOf(
+      value.dialogueAudioIntent,
+      ['dialogue-led', 'music-led', 'sound-design-led', 'silent', 'mixed'],
+      'Dialogue and audio intent',
+    ),
     targetDurationSeconds: positive(value.targetDurationSeconds, 'Target duration'),
-    availableEquipment: stringList(value.availableEquipment, 'Available equipment', 100),
+    requiredBeats: stringList(value.requiredBeats, 'Required beats', 24),
+    mustInclude: stringList(value.mustInclude, 'Must include', 24),
+    mustAvoid: stringList(value.mustAvoid, 'Must avoid', 24),
+    generationBudget: {
+      pricingMode,
+      currency: generationCurrency,
+      ceiling: generationCeiling,
+      maxAttempts,
+    },
+    productionConstraints: {
+      budgetBand: oneOf(
+        value.productionConstraints.budgetBand,
+        ['micro', 'lean', 'indie', 'custom'],
+        'Physical-production budget band',
+      ),
+      currency: oneOf(value.productionConstraints.currency, ['PHP', 'USD'], 'Production currency'),
+      budgetCeiling: nullablePositive(
+        value.productionConstraints.budgetCeiling,
+        'Physical-production budget ceiling',
+      ),
+      availableEquipment: stringList(
+        value.productionConstraints.availableEquipment,
+        'Available equipment',
+        100,
+      ),
+    },
   };
 }
 
@@ -404,32 +528,85 @@ export function validateCinemaProjectData(
     version: integer(record.version, 'Prompt version'),
     status: oneOf(record.status, ['draft', 'approved'], 'Prompt status'),
   }));
-  const sources = recordMap(value.sources, 'Research source', (record) => ({
-    ...extensions(record),
-    id: id(record.id, 'Research source id'),
-    runId: id(record.runId, 'Research source run id'),
-    title: text(record.title, 'Research source title', MAX_SHORT_TEXT),
-    publisher: text(record.publisher, 'Research source publisher', MAX_SHORT_TEXT),
-    url: record.url === null ? null : text(record.url, 'Research source URL', 4_000),
-    finding: text(record.finding, 'Research finding'),
-    queryPurpose: text(record.queryPurpose, 'Research query purpose', MAX_SHORT_TEXT),
-    status: oneOf(record.status, ['pinned', 'suggested'], 'Research source status'),
-    isMock: record.isMock === true,
-    retrievedAt: isoDate(record.retrievedAt, 'Research retrieval time'),
-  }));
-  const costs = recordMap(value.costs, 'Cost estimate', (record) => ({
-    ...extensions(record),
-    id: id(record.id, 'Cost estimate id'),
-    runId: id(record.runId, 'Cost estimate run id'),
-    sceneId: id(record.sceneId, 'Cost estimate scene id'),
-    currency: oneOf(record.currency, ['PHP', 'USD'], 'Cost currency'),
-    minimum: finiteNonNegative(record.minimum, 'Minimum cost'),
-    expected: finiteNonNegative(record.expected, 'Expected cost'),
-    highRisk: finiteNonNegative(record.highRisk, 'High-risk cost'),
-    ceiling: nullableNumber(record.ceiling, 'Cost ceiling'),
-    isIllustrative: true as const,
-    assumptions: stringList(record.assumptions, 'Cost assumptions'),
-  }));
+  const sources = recordMap(value.sources, 'Research source', (record) => {
+    const legacyStatus = record.status === 'pinned' || record.status === 'suggested'
+      ? record.status
+      : null;
+    return {
+      ...extensions(record),
+      id: id(record.id, 'Research source id'),
+      runId: id(record.runId, 'Research source run id'),
+      title: text(record.title, 'Research source title', MAX_SHORT_TEXT),
+      publisher: text(record.publisher, 'Research source publisher', MAX_SHORT_TEXT),
+      url: record.url === null ? null : text(record.url, 'Research source URL', 4_000),
+      finding: text(record.finding, 'Research finding'),
+      queryPurpose: text(record.queryPurpose, 'Research query purpose', MAX_SHORT_TEXT),
+      status: legacyStatus
+        ? legacyStatus === 'pinned' ? 'supported' as const : 'needs-verification' as const
+        : oneOf(
+          record.status,
+          ['supported', 'needs-verification', 'irrelevant'],
+          'Research source status',
+        ),
+      creatorPinned: legacyStatus === 'pinned' || record.creatorPinned === true,
+      isMock: record.isMock === true,
+      retrievedAt: isoDate(record.retrievedAt, 'Research retrieval time'),
+    };
+  });
+  const costs = recordMap(value.costs, 'Cost estimate', (record) => {
+    const pricingMode = record.pricingMode === undefined
+      ? 'currency' as const
+      : oneOf(record.pricingMode, ['unpriced', 'credits', 'currency'], 'Cost pricing mode');
+    const currency = record.currency === null
+      ? null
+      : oneOf(record.currency, ['PHP', 'USD'], 'Cost currency');
+    const minimum = record.minimum === null ? null : finiteNonNegative(record.minimum, 'Minimum cost');
+    const expected = record.expected === null ? null : finiteNonNegative(record.expected, 'Expected cost');
+    const highRisk = record.highRisk === null ? null : finiteNonNegative(record.highRisk, 'High-risk cost');
+    const ceiling = nullableNumber(record.ceiling, 'Cost ceiling');
+    if (pricingMode === 'currency' && currency === null) {
+      throw new Error('Currency-priced estimates require a currency.');
+    }
+    if (pricingMode !== 'currency' && currency !== null) {
+      throw new Error('Only currency-priced estimates can include a currency.');
+    }
+    if (pricingMode === 'unpriced' && [minimum, expected, highRisk, ceiling].some((amount) => amount !== null)) {
+      throw new Error('Unpriced estimates cannot include numeric amounts.');
+    }
+    if (pricingMode !== 'unpriced' && [minimum, expected, highRisk].some((amount) => amount === null)) {
+      throw new Error('Priced estimates require complete ranges.');
+    }
+    const assumptionProfileVersion = record.assumptionProfileVersion === undefined
+      ? 1
+      : integer(record.assumptionProfileVersion, 'Cost assumption profile');
+    if (assumptionProfileVersion !== 1) throw new Error('Cost assumption profile is unsupported.');
+    const outputCount = record.outputCount === undefined ? 1 : integer(record.outputCount, 'Cost output count');
+    const retryAllowance = record.retryAllowance === undefined ? 1 : integer(record.retryAllowance, 'Cost retry allowance');
+    if (outputCount < 1) throw new Error('Cost output count must be greater than zero.');
+    return {
+      ...extensions(record),
+      id: id(record.id, 'Cost estimate id'),
+      runId: id(record.runId, 'Cost estimate run id'),
+      sceneId: id(record.sceneId, 'Cost estimate scene id'),
+      pricingMode,
+      currency,
+      minimum,
+      expected,
+      highRisk,
+      ceiling,
+      isIllustrative: true as const,
+      assumptionProfileVersion: 1 as const,
+      provider: record.provider === undefined ? 'unspecified' : text(record.provider, 'Cost provider', MAX_SHORT_TEXT),
+      model: record.model === undefined ? 'unspecified' : text(record.model, 'Cost model', MAX_SHORT_TEXT),
+      resolution: record.resolution === undefined ? 'unspecified' : text(record.resolution, 'Cost resolution', MAX_SHORT_TEXT),
+      outputCount,
+      retryAllowance,
+      pricingSnapshotDate: record.pricingSnapshotDate === undefined
+        ? null
+        : nullableIsoDate(record.pricingSnapshotDate, 'Cost pricing snapshot date'),
+      assumptions: stringList(record.assumptions, 'Cost assumptions'),
+    };
+  });
 
   const projectNodeId = value.projectNodeId === null ? null : id(value.projectNodeId, 'Project canvas node id');
   const activeSceneId = value.activeSceneId === null ? null : id(value.activeSceneId, 'Active scene id');
@@ -488,7 +665,12 @@ export function validateCinemaProjectData(
   for (const cost of Object.values(costs)) {
     requireReference(agentRuns, cost.runId, `Cost estimate ${cost.id}`);
     requireReference(scenes, cost.sceneId, `Cost estimate ${cost.id}`);
-    if (cost.minimum > cost.expected || cost.expected > cost.highRisk) {
+    if (
+      cost.minimum !== null
+      && cost.expected !== null
+      && cost.highRisk !== null
+      && (cost.minimum > cost.expected || cost.expected > cost.highRisk)
+    ) {
       throw new Error(`Cost estimate ${cost.id} ranges are out of order.`);
     }
   }
@@ -508,6 +690,45 @@ export function validateCinemaProjectData(
     sources,
     costs,
   };
+}
+
+export type ResearchSourceCuration =
+  | { type: 'set-status'; status: CinemaResearchSourceRecord['status'] }
+  | { type: 'set-pinned'; pinned: boolean }
+  | { type: 'remove' };
+
+export function curateCinemaResearchSource(
+  project: CinemaProjectDataV1,
+  sourceId: string,
+  action: ResearchSourceCuration,
+): CinemaProjectDataV1 {
+  if (!project.sources[sourceId]) throw new Error(`Research source ${sourceId} is missing.`);
+  const next = structuredClone(project);
+  if (action.type === 'set-status') {
+    next.sources[sourceId].status = action.status;
+    if (action.status === 'irrelevant') next.sources[sourceId].creatorPinned = false;
+  } else if (action.type === 'set-pinned') {
+    if (action.pinned && next.sources[sourceId].status === 'irrelevant') {
+      throw new Error('An irrelevant source cannot be pinned.');
+    }
+    next.sources[sourceId].creatorPinned = action.pinned;
+  } else {
+    delete next.sources[sourceId];
+    for (const run of Object.values(next.agentRuns)) {
+      run.sourceIds = run.sourceIds.filter((id) => id !== sourceId);
+    }
+    for (const prompt of Object.values(next.prompts)) {
+      prompt.researchSourceIds = prompt.researchSourceIds.filter((id) => id !== sourceId);
+    }
+  }
+  return next;
+}
+
+export function supportedCitationIds(
+  project: CinemaProjectDataV1,
+  sourceIds: readonly string[],
+): string[] {
+  return [...new Set(sourceIds.filter((sourceId) => project.sources[sourceId]?.status === 'supported'))];
 }
 
 export function removeCinemaRecordsForNodes(

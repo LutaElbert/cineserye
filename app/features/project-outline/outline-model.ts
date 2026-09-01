@@ -33,8 +33,7 @@ export type CinemaOutlineModel = {
   groups: CinemaOutlineGroup[];
   shotCount: number;
   targetDurationSeconds: number;
-  expectedCost: number;
-  currency: 'PHP' | 'USD';
+  expectedCostLabel: string;
   visibleItemCount: number;
   totalItemCount: number;
 };
@@ -147,8 +146,15 @@ export function buildCinemaOutline(
     groups,
     shotCount: project.shotNodeIds.filter((nodeId) => available.has(nodeId)).length,
     targetDurationSeconds: project.targetDurationSeconds,
-    expectedCost: project.cost.expected,
-    currency: project.cost.currency,
+    expectedCostLabel: project.cost.expected === null || project.cost.pricingMode === 'unpriced'
+      ? 'Unpriced'
+      : project.cost.pricingMode === 'credits'
+        ? `${project.cost.expected.toLocaleString('en-US')} credits`
+        : new Intl.NumberFormat('en-PH', {
+          style: 'currency',
+          currency: project.cost.currency ?? 'USD',
+          maximumFractionDigits: project.cost.currency === 'PHP' ? 0 : 2,
+        }).format(project.cost.expected),
     visibleItemCount: query
       ? rootMatches + groups.reduce((total, group) => total + group.items.length, 0)
       : totalItemCount,

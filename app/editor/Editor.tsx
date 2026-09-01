@@ -135,10 +135,18 @@ import type {
   VectorPathLayer,
 } from './types';
 import { vectorizeDataUrl } from './vectorize';
-import { REEL_KNOWS_TOMORROW } from '../domain/cinema/mock/reel-knows-tomorrow';
+import {
+  MOCK_CINEMA_PROJECT_DATA,
+  MOCK_SHOT_PLAN_PROPOSAL,
+  REEL_KNOWS_TOMORROW,
+} from '../domain/cinema/mock/reel-knows-tomorrow';
 import { cinemaProjectPresentation } from '../domain/cinema/project-presentation';
 import type { CinemaProjectDataV1 } from '../domain/cinema/project-data';
-import { removeCinemaRecordsForNodes } from '../domain/cinema/project-data';
+import {
+  curateCinemaResearchSource,
+  removeCinemaRecordsForNodes,
+  type ResearchSourceCuration,
+} from '../domain/cinema/project-data';
 import type { CinemaProjectPresentation } from '../domain/cinema/prompt-artifacts';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
 import { buildCinemaOutline } from '../features/project-outline/outline-model';
@@ -153,6 +161,9 @@ import type {
   PlanSceneRequest,
   PlanSceneResponse,
 } from '../features/scene-planner/plan-scene-api';
+import { planningLabel, type PlanningUiState } from '../features/scene-planner/planning-labels';
+import { FirstRunChooser } from '../features/onboarding/FirstRunChooser';
+import { ProjectActionsMenu } from '../features/project-actions/ProjectActionsMenu';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
@@ -533,6 +544,16 @@ function formatCinemaMoney(value: number, currency: 'PHP' | 'USD') {
   }).format(value);
 }
 
+function formatCinemaCost(
+  value: number | null,
+  pricingMode: CinemaProjectPresentation['cost']['pricingMode'],
+  currency: CinemaProjectPresentation['cost']['currency'],
+) {
+  if (value === null || pricingMode === 'unpriced') return 'Unpriced';
+  if (pricingMode === 'credits') return `${value.toLocaleString('en-US')} credits`;
+  return formatCinemaMoney(value, currency ?? 'USD');
+}
+
 function estimateSnapshotBytes(snapshot: EditorSnapshot) {
   let characters = snapshot.edges.length * 280
     + snapshot.nodes.length * 360
@@ -578,6 +599,7 @@ function EditorInner() {
   const [viewportZoom, setViewportZoom] = useState(1);
   const [dragActive, setDragActive] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [firstRunOpen, setFirstRunOpen] = useState(false);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [convertingId, setConvertingId] = useState<string | null>(null);
@@ -765,8 +787,8 @@ function EditorInner() {
     liveProviderConsent: boolean,
   ) => {
     if (mockProposalStage !== 'idle' || mockProposalPreview) return;
-    if (!nodesRef.current.some((node) => node.id === REEL_KNOWS_TOMORROW.sceneNodeId)) {
-      announce('The demo scene is not available in this document.', 'error');
+    if (!nodesRef.current.some((node) => node.id === brief.sceneNodeId)) {
+      announce('The selected scene is not available in this document.', 'error');
       return;
     }
     if (nodesRef.current.some((node) => node.id === 'cine-agent-plan')) {
@@ -775,7 +797,7 @@ function EditorInner() {
     }
     setMockProposalStage('planning');
     setMobilePanel('inspector');
-    announce('Running the configured research and shot-planning workflow.');
+    announce('Generating a shot plan with the configured research and planning providers.');
     const sourceDocument = getCurrentDocument();
     const controller = new AbortController();
     planningControllerRef.current = controller;
@@ -800,7 +822,7 @@ function EditorInner() {
       setMockProposalStage('ready');
       window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
       announce(
-        `${payload.mode === 'live' ? 'Live cited' : 'Fixture'} proposal ready: ${Object.keys(payload.cinema.shots).length} shots, reusable elements, ${payload.sourceCount} sources, and cost ranges.`,
+        `${payload.mode === 'live' ? 'Live' : 'Fixture'} shot plan ready for review: ${Object.keys(payload.cinema.shots).length} shots, reusable elements, ${payload.sourceCount} sources, and explicit cost assumptions.`,
         'success',
       );
     } catch (error) {
@@ -825,7 +847,6 @@ function EditorInner() {
     const sceneNode = selected.length === 1 ? selected[0] : null;
     if (
       !sceneNode
-      || sceneNode.id !== REEL_KNOWS_TOMORROW.sceneNodeId
       || sceneNode.data.kind !== 'concept'
     ) {
       announce('Select exactly one scene before planning.', 'error');
@@ -834,20 +855,31 @@ function EditorInner() {
     const existing = cinemaRef.current?.scenes[sceneNode.id]?.brief;
     const sceneText = richTextToPlainText(sceneNode.data.body).trim() || sceneNode.data.label.trim();
     setSceneBriefDefaults({
-      version: 1,
+      version: 2,
       sceneNodeId: sceneNode.id,
       sceneText,
-      tone: existing?.tone ?? 'Restrained supernatural suspense',
-      locationPeriod: existing?.locationPeriod ?? 'Manila single-screen cinema · late 1980s',
-      budgetBand: existing?.budgetBand ?? 'micro',
-      currency: existing?.currency ?? 'PHP',
-      budgetCeiling: existing?.budgetCeiling ?? 1_200,
+      creationMode: existing?.creationMode ?? 'ai-generated',
+      aspectRatio: existing?.aspectRatio ?? '9:16',
+      targetPlatform: existing?.targetPlatform ?? 'short-form',
+      genreTone: existing?.genreTone ?? '',
+      locationPeriod: existing?.locationPeriod ?? '',
+      dialogueAudioIntent: existing?.dialogueAudioIntent ?? 'mixed',
       targetDurationSeconds: existing?.targetDurationSeconds ?? 36,
-      availableEquipment: existing?.availableEquipment ?? [
-        'Phone or compact cinema camera',
-        'Tripod',
-        'One practical flashlight',
-      ],
+      requiredBeats: existing?.requiredBeats ?? [],
+      mustInclude: existing?.mustInclude ?? [],
+      mustAvoid: existing?.mustAvoid ?? [],
+      generationBudget: existing?.generationBudget ?? {
+        pricingMode: 'unpriced',
+        currency: null,
+        ceiling: null,
+        maxAttempts: 2,
+      },
+      productionConstraints: existing?.productionConstraints ?? {
+        budgetBand: 'micro',
+        currency: 'PHP',
+        budgetCeiling: null,
+        availableEquipment: [],
+      },
     });
   }, [announce, configuredProviderMode, mockProposalPreview, mockProposalStage, sceneBriefDefaults]);
 
@@ -869,6 +901,24 @@ function EditorInner() {
     window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
     announce('Proposal rejected. The saved canvas was not changed.');
   }, [announce, fitView]);
+
+  const curateProposalSource = useCallback((sourceId: string, action: ResearchSourceCuration) => {
+    setProposalCinema((current) => {
+      if (!current) return current;
+      try {
+        return curateCinemaResearchSource(current, sourceId, action);
+      } catch (error) {
+        announce(error instanceof Error ? error.message : 'The source could not be updated.', 'error');
+        return current;
+      }
+    });
+    const message = action.type === 'remove'
+      ? 'Source removed from the proposal and its citation relationships.'
+      : action.type === 'set-pinned'
+        ? action.pinned ? 'Source pinned by the creator.' : 'Creator pin removed.'
+        : `Source marked ${action.status.replace('-', ' ')}.`;
+    announce(message, 'success');
+  }, [announce]);
 
   const acceptMockProposal = useCallback(() => {
     if (!mockProposalPreview || !proposalCinema) return;
@@ -920,7 +970,10 @@ function EditorInner() {
       .then(([document, storedCheckpoints]) => {
         if (!active) return;
         setCheckpoints(storedCheckpoints);
-        if (!document) return;
+        if (!document) {
+          setFirstRunOpen(true);
+          return;
+        }
         setNodes(document.nodes.map((node) => ({ ...node, selected: false })));
         setEdges(document.edges.map((edge) => ({ ...edge, selected: false })));
         setTitle(document.title);
@@ -937,7 +990,7 @@ function EditorInner() {
   }, [announce]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || firstRunOpen) return;
     // The layout effect already invalidated older writes for changed content.
     // Allocate a ticket here only for the initial hydrated document.
     const ticket = saveTicketRef.current || ++saveTicketRef.current;
@@ -947,7 +1000,7 @@ function EditorInner() {
     return () => {
       window.clearTimeout(saveTimeout);
     };
-  }, [autosaveRevision, getCurrentDocument, hydrated, queueDocumentSave]);
+  }, [autosaveRevision, firstRunOpen, getCurrentDocument, hydrated, queueDocumentSave]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1450,6 +1503,14 @@ function EditorInner() {
   );
   const presentedEdges = mockProposalPreview?.document.edges ?? edges;
   const mockPlanAccepted = nodes.some((node) => node.id === 'cine-agent-plan');
+  const planningUiState: PlanningUiState = mockProposalStage === 'planning'
+    ? 'planning'
+    : mockProposalPreview
+      ? 'ready'
+      : mockPlanAccepted
+        ? 'accepted'
+        : 'idle';
+  const currentPlanningLabel = planningLabel(planningUiState);
   const cinemaOutlineActive = Boolean(mockProposalPreview || mockPlanAccepted);
   const activeCinemaData = mockProposalPreview ? proposalCinema : cinema;
   const activeCinemaProject = useMemo(
@@ -1476,7 +1537,11 @@ function EditorInner() {
     || selectedNode.id === REEL_KNOWS_TOMORROW.sceneNodeId
   ) ? activeCinemaProject.nodes[selectedNode.id] ?? null : null;
   const planningSceneSelected = selectedNodes.length === 1
-    && selectedNode?.id === REEL_KNOWS_TOMORROW.sceneNodeId;
+    && selectedNode?.data.kind === 'concept'
+    && (
+      selectedNode.data.eyebrow.trim().toLocaleLowerCase() === 'scene'
+      || Object.values(cinema?.scenes ?? {}).some((scene) => scene.nodeId === selectedNode.id)
+    );
   const selectedVectorPath = useMemo(() => {
     if (!selectedPath) return null;
     const node = nodes.find((item) => item.id === selectedPath.nodeId);
@@ -1986,11 +2051,36 @@ function EditorInner() {
       setProposalCinema(null);
       setProposalMode(null);
       refreshHistoryState();
+      window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
       announce('New local document created.', 'success');
     } catch {
       announce('The local project could not be cleared. Download a backup before trying again.', 'error');
     }
-  }, [announce, refreshHistoryState]);
+  }, [announce, fitView, refreshHistoryState]);
+
+  const chooseStartScene = useCallback(() => {
+    setNodes(structuredClone(initialDocument.nodes).map((node) => ({
+      ...node,
+      selected: false,
+    })));
+    setEdges(structuredClone(initialDocument.edges));
+    setTitle(initialDocument.title);
+    setCinema(undefined);
+    setFirstRunOpen(false);
+    window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
+    announce('Clean scene workspace ready. Edit Scene 01, then generate a shot plan.', 'success');
+  }, [announce, fitView]);
+
+  const chooseSampleProject = useCallback(() => {
+    const sample = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
+    setNodes(sample.nodes.map((node) => ({ ...node, selected: node.id === 'cine-shot-03' })));
+    setEdges(sample.edges.map((edge) => ({ ...edge, selected: false })));
+    setTitle(REEL_KNOWS_TOMORROW.title);
+    setCinema(structuredClone(MOCK_CINEMA_PROJECT_DATA));
+    setFirstRunOpen(false);
+    window.setTimeout(() => fitView({ duration: 320, padding: 0.14 }), 0);
+    announce('Sample opened locally with fixture sources. No external request was made.', 'success');
+  }, [announce, fitView]);
 
   const openExport = useCallback(() => setExportOpen(true), []);
   const openBackup = useCallback(() => setBackupOpen(true), []);
@@ -2285,6 +2375,21 @@ function EditorInner() {
     },
     [collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
   );
+  const planningActionDisabled = mockProposalStage === 'planning'
+    || Boolean(sceneBriefDefaults)
+    || (planningUiState === 'idle' && !planningSceneSelected);
+  const handlePlanningAction = () => {
+    if (mockProposalPreview) {
+      setMobilePanel('inspector');
+      return;
+    }
+    if (mockPlanAccepted) {
+      revealAndSelectNode('cine-agent-plan');
+      setMobilePanel('inspector');
+      return;
+    }
+    planMockScene();
+  };
 
   return (
     <SelectedNodeCountContext.Provider value={selectedNodeCount}>
@@ -2313,6 +2418,15 @@ function EditorInner() {
             </span>
           </label>
           <div className="topbar-actions">
+            <span
+              className={`provider-mode-badge desktop-provider-mode mode-${configuredProviderMode === 'live' ? 'live' : 'fixture'}`}
+              role="status"
+              aria-label={configuredProviderMode === 'loading'
+                ? 'Provider status loading'
+                : `${configuredProviderMode} provider mode`}
+            >
+              {configuredProviderMode === 'live' ? 'Live mode' : configuredProviderMode === 'fixture' ? 'Fixture mode' : 'Checking…'}
+            </span>
             <button
               type="button"
               className="icon-button mobile-layers-button"
@@ -2334,24 +2448,12 @@ function EditorInner() {
             <button
               type="button"
               className="ghost-button plan-scene-button"
-              aria-label={mockProposalStage === 'planning' ? 'Planning scene' : mockPlanAccepted ? 'Plan ready' : 'Plan scene'}
-              disabled={
-                mockProposalStage === 'planning'
-                || mockProposalStage === 'ready'
-                || Boolean(sceneBriefDefaults)
-                || (!mockPlanAccepted && !planningSceneSelected)
-              }
-              onClick={() => {
-                if (mockPlanAccepted) {
-                  revealAndSelectNode('cine-agent-plan');
-                  setMobilePanel('inspector');
-                  return;
-                }
-                planMockScene();
-              }}
+              aria-label={currentPlanningLabel}
+              disabled={planningActionDisabled}
+              onClick={handlePlanningAction}
             >
               {mockProposalStage === 'planning' ? <LoaderCircle className="spin" size={14} /> : mockPlanAccepted ? <Check size={14} /> : <Sparkles size={14} />}
-              <span>{mockProposalStage === 'planning' ? 'Planning…' : mockPlanAccepted ? 'Plan ready' : 'Plan scene'}</span>
+              <span>{currentPlanningLabel}</span>
             </button>
             <button type="button" className="icon-button backup-button" aria-label="Project backup and restore" onClick={openBackup}>
               <HardDrive size={16} />
@@ -2382,6 +2484,15 @@ function EditorInner() {
             <button type="button" className="primary-button" aria-label="Export SVG" onClick={openExport}>
               <Download size={14} /> <span className="button-label">Export SVG</span>
             </button>
+            <ProjectActionsMenu
+              providerMode={configuredProviderMode}
+              planningLabel={currentPlanningLabel}
+              planningDisabled={planningActionDisabled}
+              onPlan={handlePlanningAction}
+              onBackup={openBackup}
+              onNew={() => void resetDocument()}
+              onExport={openExport}
+            />
           </div>
         </header>
 
@@ -2767,7 +2878,7 @@ function EditorInner() {
             <div className="mock-planning-card" role="status">
               <span className="mock-planning-icon"><LoaderCircle className="spin" size={18} /></span>
               <div>
-                <strong>Drafting the prompt package</strong>
+                <strong>Generating shot plan</strong>
                 <span>Research → continuity elements → shots → validated cost range</span>
               </div>
             </div>
@@ -2776,13 +2887,13 @@ function EditorInner() {
             <section className="proposal-review-bar" aria-label="Shot proposal review">
               <div className="proposal-review-icon" aria-hidden="true"><Sparkles size={16} /></div>
               <div className="proposal-review-copy">
-                <span>{proposalMode === 'live' ? 'Live cited proposal ready' : 'Fixture proposal ready'}</span>
-                <strong>{activeCinemaProject.shotNodeIds.length} shots · {activeCinemaProject.targetDurationSeconds} sec · {formatCinemaMoney(activeCinemaProject.cost.expected, activeCinemaProject.cost.currency)} expected</strong>
+                <span>{proposalMode === 'live' ? 'Live shot plan ready' : 'Fixture shot plan ready'}</span>
+                <strong>{activeCinemaProject.shotNodeIds.length} shots · {activeCinemaProject.targetDurationSeconds} sec · {formatCinemaCost(activeCinemaProject.cost.expected, activeCinemaProject.cost.pricingMode, activeCinemaProject.cost.currency)} expected</strong>
                 <small>Inspect every ghost node before committing one undoable change.</small>
               </div>
               <div className="proposal-cost-range" aria-label="Illustrative cost range">
-                <span><small>Minimum</small>{formatCinemaMoney(activeCinemaProject.cost.minimum, activeCinemaProject.cost.currency)}</span>
-                <span><small>High risk</small>{formatCinemaMoney(activeCinemaProject.cost.highRisk, activeCinemaProject.cost.currency)}</span>
+                <span><small>Minimum</small>{formatCinemaCost(activeCinemaProject.cost.minimum, activeCinemaProject.cost.pricingMode, activeCinemaProject.cost.currency)}</span>
+                <span><small>High risk</small>{formatCinemaCost(activeCinemaProject.cost.highRisk, activeCinemaProject.cost.pricingMode, activeCinemaProject.cost.currency)}</span>
               </div>
               <div className="proposal-review-actions">
                 <button type="button" className="secondary-button" onClick={rejectMockProposal}>Reject</button>
@@ -2875,6 +2986,7 @@ function EditorInner() {
               planning={mockProposalStage === 'planning'}
               accepted={mockPlanAccepted}
               onPlan={planMockScene}
+              onCurateSource={curateProposalSource}
               onNotice={announce}
             />
           ) : selectedNode ? (
@@ -2903,6 +3015,14 @@ function EditorInner() {
         </aside>
 
         {mobilePanel ? <button type="button" className="panel-scrim" aria-label="Close side panel" onClick={() => setMobilePanel(null)} /> : null}
+
+        {firstRunOpen ? (
+          <FirstRunChooser
+            providerMode={configuredProviderMode}
+            onStartScene={chooseStartScene}
+            onExploreSample={chooseSampleProject}
+          />
+        ) : null}
 
         {sceneBriefDefaults ? (
           <SceneBriefDialog

@@ -8,9 +8,9 @@ describe('cinemaProjectPresentation', () => {
     const scene = cinema.scenes['scene-01'];
     scene.brief = {
       ...scene.brief!,
-      tone: 'Hopeful handheld realism',
+      genreTone: 'Hopeful handheld realism',
       targetDurationSeconds: 42,
-      budgetCeiling: 700,
+      generationBudget: { ...scene.brief!.generationBudget, ceiling: 700 },
     };
     const durations = [7, 6, 8, 7, 6, 8];
     scene.shotIds.forEach((shotId, index) => {
@@ -26,7 +26,7 @@ describe('cinemaProjectPresentation', () => {
     expect(result.targetDurationSeconds).toBe(42);
     expect(result.nodes['scene-01'].metricLabel).toContain('42s');
     expect(result.nodes['scene-01'].fields).toContainEqual({
-      label: 'Tone',
+      label: 'Genre / tone',
       value: 'Hopeful handheld realism',
     });
     expect(result.nodes['cine-shot-01'].fields).toContainEqual({ label: 'Duration', value: '7s' });

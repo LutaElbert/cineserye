@@ -16,6 +16,8 @@ import type {
   CinemaProjectPresentation,
   PromptArtifact,
 } from '../../domain/cinema/prompt-artifacts';
+import type { ResearchSourceCuration } from '../../domain/cinema/project-data';
+import { planningLabel } from './planning-labels';
 
 type InspectorTab = 'details' | 'prompt' | 'sources' | 'cost';
 
@@ -32,6 +34,16 @@ function money(value: number, currency: 'PHP' | 'USD') {
     currency,
     maximumFractionDigits: 0,
   }).format(value);
+}
+
+function costLabel(
+  value: number | null,
+  pricingMode: CinemaProjectPresentation['cost']['pricingMode'],
+  currency: CinemaProjectPresentation['cost']['currency'],
+) {
+  if (value === null || pricingMode === 'unpriced') return 'Unpriced';
+  if (pricingMode === 'credits') return `${value.toLocaleString('en-US')} credits`;
+  return money(value, currency ?? 'USD');
 }
 
 function PromptCard({
@@ -93,6 +105,7 @@ export function CinemaInspector({
   planning,
   accepted,
   onPlan,
+  onCurateSource,
   onNotice,
 }: {
   detail: CinemaNodePresentation;
@@ -101,6 +114,7 @@ export function CinemaInspector({
   planning: boolean;
   accepted: boolean;
   onPlan: () => void;
+  onCurateSource: (sourceId: string, action: ResearchSourceCuration) => void;
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
 }) {
   const [tab, setTab] = useState<InspectorTab>(detail.kind === 'shot' ? 'prompt' : 'details');
@@ -192,7 +206,13 @@ export function CinemaInspector({
                   onClick={onPlan}
                 >
                   {planning ? <LoaderCircle className="spin" size={14} /> : accepted ? <Check size={14} /> : <Sparkles size={14} />}
-                  {planning ? 'Planning scene…' : accepted ? 'Plan accepted' : proposed ? 'Review proposal' : 'Draft shot prompts'}
+                  {planning
+                    ? planningLabel('planning')
+                    : accepted
+                      ? planningLabel('accepted')
+                      : proposed
+                        ? planningLabel('ready')
+                        : planningLabel('idle')}
                 </button>
                 <p>{accepted ? 'The prompt package is on the canvas and remains one undoable change.' : 'Uses the configured server-side providers; the canvas changes only after explicit acceptance.'}</p>
               </div>
@@ -222,7 +242,7 @@ export function CinemaInspector({
               {sources.map((source) => (
                 <article key={source.id} className="source-card">
                   <header>
-                    <span>{source.status}</span>
+                    <span>{source.status.replace('-', ' ')}</span>
                     <span>{source.isMock ? 'Fixture source' : 'Research source'}</span>
                   </header>
                   {source.url ? (
@@ -230,6 +250,45 @@ export function CinemaInspector({
                   ) : <strong>{source.title}</strong>}
                   <small>{source.publisher}</small>
                   <p>{source.finding}</p>
+                  <dl className="source-metadata">
+                    <div><dt>Purpose</dt><dd>{source.queryPurpose}</dd></div>
+                    <div><dt>Retrieved</dt><dd>{new Date(source.retrievedAt).toLocaleString()}</dd></div>
+                    <div><dt>Used by</dt><dd>{source.usageCount} {source.usageCount === 1 ? 'prompt' : 'prompts'}</dd></div>
+                  </dl>
+                  {proposed ? (
+                    <div className="source-curation-actions" aria-label={`Curate ${source.title}`}>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        aria-pressed={source.status === 'supported'}
+                        onClick={() => onCurateSource(source.id, { type: 'set-status', status: 'supported' })}
+                      >Supported</button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        aria-pressed={source.status === 'needs-verification'}
+                        onClick={() => onCurateSource(source.id, { type: 'set-status', status: 'needs-verification' })}
+                      >Verify</button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        aria-pressed={source.status === 'irrelevant'}
+                        onClick={() => onCurateSource(source.id, { type: 'set-status', status: 'irrelevant' })}
+                      >Irrelevant</button>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        aria-pressed={source.creatorPinned}
+                        disabled={source.status === 'irrelevant'}
+                        onClick={() => onCurateSource(source.id, { type: 'set-pinned', pinned: !source.creatorPinned })}
+                      >{source.creatorPinned ? 'Unpin' : 'Pin'}</button>
+                      <button
+                        type="button"
+                        className="secondary-button danger-button"
+                        onClick={() => onCurateSource(source.id, { type: 'remove' })}
+                      >Remove</button>
+                    </div>
+                  ) : source.creatorPinned ? <span className="source-pinned-label">Creator pinned</span> : null}
                 </article>
               ))}
             </div>
@@ -243,28 +302,31 @@ export function CinemaInspector({
             <div className="cost-panel">
               <div className="cost-heading">
                 <CircleDollarSign size={18} />
-                <div><strong>{money(cost.expected, cost.currency)}</strong><span>Expected generation cost</span></div>
+                <div><strong>{costLabel(cost.expected, cost.pricingMode, cost.currency)}</strong><span>Expected AI-generation cost</span></div>
               </div>
-              <div className="cost-range" aria-label="Illustrative generation cost range">
-                <div><span>Minimum</span><strong>{money(cost.minimum, cost.currency)}</strong></div>
-                <div><span>Expected</span><strong>{money(cost.expected, cost.currency)}</strong></div>
-                <div><span>High risk</span><strong>{money(cost.highRisk, cost.currency)}</strong></div>
-              </div>
-              {projectCost?.ceiling !== null && projectCost?.ceiling !== undefined ? (
+              <p className="budget-caption">Physical-production constraints are tracked separately and are never compared with this estimate.</p>
+              {cost.pricingMode !== 'unpriced' ? (
+                <div className="cost-range" aria-label="Illustrative AI-generation cost range">
+                  <div><span>Minimum</span><strong>{costLabel(cost.minimum, cost.pricingMode, cost.currency)}</strong></div>
+                  <div><span>Expected</span><strong>{costLabel(cost.expected, cost.pricingMode, cost.currency)}</strong></div>
+                  <div><span>High risk</span><strong>{costLabel(cost.highRisk, cost.pricingMode, cost.currency)}</strong></div>
+                </div>
+              ) : <p className="budget-caption">Provider pricing is unavailable. Cineserye shows bounded attempt guidance without inventing a quote.</p>}
+              {projectCost?.ceiling !== null && projectCost?.ceiling !== undefined && projectCost.expected !== null ? (
                 <>
                   <div className="budget-meter">
                     <div style={{ inlineSize: `${projectCost.ceiling > 0 ? Math.min(100, (projectCost.expected / projectCost.ceiling) * 100) : 100}%` }} />
                   </div>
                   <p className="budget-caption">{projectCost.expected <= projectCost.ceiling
-                    ? `${money(projectCost.ceiling - projectCost.expected, projectCost.currency)} expected headroom below the ${money(projectCost.ceiling, projectCost.currency)} ceiling.`
-                    : `${money(projectCost.expected - projectCost.ceiling, projectCost.currency)} above the ${money(projectCost.ceiling, projectCost.currency)} ceiling; revise before accepting.`}</p>
+                    ? `${costLabel(projectCost.ceiling - projectCost.expected, projectCost.pricingMode, projectCost.currency)} expected headroom below the ${costLabel(projectCost.ceiling, projectCost.pricingMode, projectCost.currency)} AI-generation ceiling.`
+                    : `${costLabel(projectCost.expected - projectCost.ceiling, projectCost.pricingMode, projectCost.currency)} above the ${costLabel(projectCost.ceiling, projectCost.pricingMode, projectCost.currency)} AI-generation ceiling; revise before accepting.`}</p>
                   <ul className="cost-assumptions">
                     {projectCost.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}
                   </ul>
                 </>
               ) : projectCost ? (
                 <>
-                  <p className="budget-caption">No exact ceiling was set for this production band.</p>
+                  <p className="budget-caption">No exact AI-generation ceiling was set. Physical-production constraints are tracked separately in the scene brief.</p>
                   <ul className="cost-assumptions">
                     {projectCost.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}
                   </ul>

@@ -1,6 +1,6 @@
 # Cineserye privacy baseline
 
-Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, and history are stored in the browser's `cineserye-local` IndexedDB database. `.cineserye` backups and SVG exports are created only when the creator asks for a download.
+Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, illustrative cost profiles, and history are stored in the browser's `cineserye-local` IndexedDB database. `.cineserye` backups and SVG exports are created only when the creator asks for a download.
 
 ## Fixture mode
 
@@ -10,7 +10,7 @@ Fixture mode is the default and makes no external provider requests. Its researc
 
 Live mode is server-configured and requires explicit consent in the one-scene preflight before each request. It transfers:
 
-- the selected scene text, tone, location/period, production band, optional ceiling, target duration, and equipment list to Parallel Search;
+- the selected scene text and the confirmed one-scene brief—including creation mode, format, tone, location, duration, beats, content constraints, generation budget, production band, and equipment—to Parallel Search;
 - that scene brief plus normalized research titles, URLs, findings, and query purpose to Gemini on Google Vertex AI.
 
 Cineserye does not send the full project file, imported images, IndexedDB contents, backups, API keys, Google access tokens, or unrelated scenes. Provider credentials remain server-only. Returned source links and generated prompt artifacts become part of the local project if the creator accepts the proposal, so they may also appear in a requested `.cineserye` backup.
@@ -27,6 +27,9 @@ ADK prompt/response capture and completion upload are disabled by default. Cloud
 
 - Cancelling, timing out, failing, or rejecting creates no canvas history entry.
 - A ready proposal is a locked ghost preview until explicit acceptance.
+- Source pins, support states, and removals made during review affect only the pending preview until acceptance.
+- Displayed citations are limited to explicit, valid planner-to-source relationships; missing source IDs do not receive substitutes.
+- Generation-cost figures are illustrative planning estimates, not provider quotes or billing records. A plan can also be expressed in credits or marked unpriced.
 - Acceptance is one undoable operation.
 - Clearing browser site data removes the local working copy; a downloaded `.cineserye` file is the recovery mechanism.
 - No authentication, collaboration cloud, media generation, or automatic deployment is implemented.

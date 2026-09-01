@@ -36,13 +36,19 @@ function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectDataV1
   };
   cinema.scenes['scene-01'].synopsis = request.brief.sceneText;
   cinema.scenes['scene-01'].brief = {
-    tone: request.brief.tone,
+    version: 2,
+    creationMode: request.brief.creationMode,
+    aspectRatio: request.brief.aspectRatio,
+    targetPlatform: request.brief.targetPlatform,
+    genreTone: request.brief.genreTone,
     locationPeriod: request.brief.locationPeriod,
-    budgetBand: request.brief.budgetBand,
-    currency: request.brief.currency,
-    budgetCeiling: request.brief.budgetCeiling,
+    dialogueAudioIntent: request.brief.dialogueAudioIntent,
     targetDurationSeconds: request.brief.targetDurationSeconds,
-    availableEquipment: [...request.brief.availableEquipment],
+    requiredBeats: [...request.brief.requiredBeats],
+    mustInclude: [...request.brief.mustInclude],
+    mustAvoid: [...request.brief.mustAvoid],
+    generationBudget: structuredClone(request.brief.generationBudget),
+    productionConstraints: structuredClone(request.brief.productionConstraints),
   };
 
   const durations = distributeDuration(request.brief.targetDurationSeconds);
@@ -51,7 +57,7 @@ function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectDataV1
   });
   for (const prompt of Object.values(cinema.prompts)) {
     prompt.runId = request.runId;
-    prompt.generatedText = `${request.brief.tone}. ${request.brief.locationPeriod}. ${prompt.generatedText}`;
+    prompt.generatedText = `${request.brief.genreTone}. ${request.brief.locationPeriod}. ${prompt.generatedText}`;
   }
   cinema.sources = Object.fromEntries(request.research.sources.map((source) => [source.id, {
     ...source,
@@ -59,11 +65,19 @@ function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectDataV1
   }]));
   for (const cost of Object.values(cinema.costs)) {
     cost.runId = request.runId;
-    cost.currency = request.brief.currency;
-    cost.ceiling = request.brief.budgetCeiling;
+    cost.pricingMode = request.brief.generationBudget.pricingMode;
+    cost.currency = request.brief.generationBudget.currency;
+    cost.ceiling = request.brief.generationBudget.ceiling;
+    cost.retryAllowance = Math.max(0, request.brief.generationBudget.maxAttempts - 1);
+    cost.resolution = request.brief.aspectRatio;
+    if (cost.pricingMode === 'unpriced') {
+      cost.minimum = null;
+      cost.expected = null;
+      cost.highRisk = null;
+    }
   }
   const cost = cinema.costs['cost-scene-01'];
-  if (cost.ceiling !== null && cost.expected > cost.ceiling) {
+  if (cost.ceiling !== null && cost.expected !== null && cost.expected > cost.ceiling) {
     cinema.agentRuns[request.runId].warnings.push(
       'The expected generation estimate exceeds the confirmed ceiling.',
     );
@@ -87,6 +101,7 @@ export class FixtureResearchProvider implements ResearchProvider {
         finding: source.finding,
         queryPurpose: 'Deterministic fixture for production reference planning',
         status: source.status,
+        creatorPinned: false,
         isMock: true,
         retrievedAt: '2026-09-01T00:00:00.000Z',
       })),

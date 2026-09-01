@@ -30,14 +30,6 @@ type ProjectOutlineProps = {
   onToggleLock: (id: string) => void;
 };
 
-function currency(value: number, currencyCode: 'PHP' | 'USD') {
-  return new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: currencyCode,
-    maximumFractionDigits: 0,
-  }).format(value);
-}
-
 function groupIcon(id: CinemaOutlineGroupId) {
   if (id === 'planning') return <Bot size={12} />;
   if (id === 'characters') return <UserRound size={12} />;
@@ -173,7 +165,7 @@ export function ProjectOutline({
             </button>
             <button type="button" className="outline-scene-metrics" aria-label="Focus scene nodes" onClick={() => onFocusNodes(sceneNodeIds)}>
               <span>{model.shotCount} shots · {model.targetDurationSeconds}s</span>
-              <span>{currency(model.expectedCost, model.currency)}</span>
+              <span>{model.expectedCostLabel}</span>
             </button>
           </div>
 

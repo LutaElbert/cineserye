@@ -31,15 +31,16 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 
 ## Scene-planner walkthrough
 
-1. Select `Scene 01` or choose **Plan scene** in the top bar.
-2. Confirm tone, location/period, production band, optional generation-cost ceiling, target duration, and available equipment.
-3. In live mode only, explicitly consent to sending that selected brief to Parallel and Vertex AI.
-4. Browse the generated Planning, Characters, Locations, Props, Visual Elements, and Shots groups in the Project Outline.
-5. Select any outline item to focus its corresponding ghost node.
-6. Review **Details**, **Prompt**, **Sources**, and **Cost** in the inspector.
-7. Reject the proposal to leave the canvas unchanged, or accept it as one undoable operation.
+1. On a new browser profile, choose **Start a scene** for a neutral workspace or **Explore sample** for the local demonstration project. Neither choice contacts a provider.
+2. Select the scene, write its creative intent in the node body, then choose **Generate shot plan**.
+3. Confirm creation mode, format, tone, location, duration, story beats, and must-include or must-avoid details. Set AI-generation credits or currency separately from physical-production constraints such as equipment and production band.
+4. In live mode only, explicitly consent to sending that selected brief to Parallel and Vertex AI.
+5. Browse the generated Planning, Characters, Locations, Props, Visual Elements, and Shots groups in the Project Outline.
+6. Select any outline item to focus its corresponding ghost node.
+7. Review **Details**, **Prompt**, **Sources**, and **Cost** in the inspector. Research starts as **Needs verification**; pin useful sources, mark them supported, or remove irrelevant items before acceptance.
+8. Reject the proposal to leave the canvas unchanged, or accept it as one undoable operation.
 
-Fixture mode uses no external requests. Live research cards link to their normalized sources. Generation prices remain visibly illustrative in both modes.
+The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 
 See the [remaining-sprints implementation plan](docs/SPRINT_IMPLEMENTATION_PLAN.md), [current-feature audit](docs/FEATURE_AUDIT.md), [initial vertical-slice plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
 

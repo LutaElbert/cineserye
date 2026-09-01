@@ -28,14 +28,16 @@ Provider prompts, credentials, model SDKs, research logic, and cinema business r
 
 ## Cinema domain and presentation
 
-`app/domain/cinema/project-data.ts` defines the persisted version-1 cinema sidecar. It contains relational records for:
+`app/domain/cinema/project-data.ts` defines the persisted version-1 cinema sidecar. Scene briefs use a separately versioned V2 contract, and valid V1 briefs migrate at the validation boundary. The sidecar contains relational records for:
 
 - `scene`: brief, synopsis, purpose, continuity notes, and chronological shot IDs;
 - `shot`: scene, order, duration, framing, movement, audio, risk, and continuity node IDs;
 - `character`: appearance, voice, and wardrobe references;
 - `asset`: location, prop, visual element, reference, or other reusable item with provenance;
 - `agent-run`: lifecycle, providers/model, warnings, prompts, sources, and timestamps;
-- prompt, research-source, and illustrative cost records.
+- prompt records;
+- research-source records with supported, needs-verification, or irrelevant review state plus creator pinning and usage relationships;
+- illustrative, credits-based, or explicitly unpriced cost records with a versioned profile and visible assumptions.
 
 Runtime validation resolves every scene, shot, character, asset, prompt, source, cost, run, and host canvas node relationship. The sidecar participates in document migrations, IndexedDB autosave, checkpoints, `.cineserye` backup/restore, and undo/redo.
 
@@ -48,7 +50,7 @@ Runtime validation resolves every scene, shot, character, asset, prompt, source,
 - `provider-contracts.ts` separates research from shot planning.
 - `parallel-research-provider.ts` submits four bounded queries, accepts only HTTP(S) URLs, deduplicates results, caps response size/count, and normalizes citations.
 - `vertex-adk-shot-planner.ts` runs an official TypeScript ADK `LlmAgent` against Vertex AI using ADC and a lean response schema.
-- `planner-output.ts` applies the strict Zod boundary, resolves zero-based continuity indexes, reconciles durations exactly, computes illustrative costs deterministically, and produces versioned domain records.
+- `planner-output.ts` applies the strict Zod boundary, resolves zero-based continuity indexes, reconciles durations exactly, computes cost views from a versioned profile, and produces versioned domain records. It accepts only explicit valid source IDs and never invents fallback citations.
 - `provider-resilience.ts` owns cancellation, timeouts, and at most one retry.
 - `telemetry.ts` emits content-free phase events with `scene-planner-v1` and `no-content-v1` identifiers.
 - `proposal-compiler.ts` deterministically compiles the validated sidecar into generic canvas commands. The model never authors editor commands.
@@ -57,11 +59,11 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 
 ## Review and persistence sequence
 
-1. The browser sends one validated scene brief.
+1. The browser sends one validated Scene Brief V2 after the creator reviews the creation, generation-budget, and physical-production sections.
 2. Research runs before planning; neither provider can access editor mutation or storage functions.
 3. Strict validation and deterministic compilation complete on the server.
 4. The browser applies the command proposal to a cloned document through the generic boundary.
-5. The creator inspects locked ghost nodes, prompts, linked sources, continuity, and costs.
+5. The creator inspects locked ghost nodes, prompts, linked sources, continuity, and costs. Source curation mutates only the preview until acceptance.
 6. Reject discards the preview byte-for-byte. Accept records one history snapshot and commits nodes, edges, and cinema sidecar once.
 7. One undo reverses the entire accepted proposal; redo and reload restore it.
 

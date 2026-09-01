@@ -5,16 +5,24 @@ import { fixtureWorkflowDependencies, runCinemaPlanningWorkflow } from './workfl
 
 function brief(overrides: Partial<ScenePlanningBrief> = {}): ScenePlanningBrief {
   return {
-    version: 1,
+    version: 2,
     sceneNodeId: 'scene-01',
     sceneText: 'Mara enters an abandoned cinema and sees her immediate future on screen.',
-    tone: 'Claustrophobic supernatural suspense',
+    creationMode: 'ai-generated',
+    aspectRatio: '9:16',
+    targetPlatform: 'short-form',
+    genreTone: 'Claustrophobic supernatural suspense',
     locationPeriod: 'Manila single-screen cinema · late 1980s',
-    budgetBand: 'micro',
-    currency: 'PHP',
-    budgetCeiling: 900,
+    dialogueAudioIntent: 'sound-design-led',
     targetDurationSeconds: 42,
-    availableEquipment: ['phone camera', 'tripod'],
+    requiredBeats: ['Projector wakes'],
+    mustInclude: ['Flashlight'],
+    mustAvoid: ['Gore'],
+    generationBudget: { pricingMode: 'currency', currency: 'PHP', ceiling: 900, maxAttempts: 2 },
+    productionConstraints: {
+      budgetBand: 'micro', currency: 'PHP', budgetCeiling: 25_000,
+      availableEquipment: ['phone camera', 'tripod'],
+    },
     ...overrides,
   };
 }
@@ -35,8 +43,9 @@ describe('fixture cinema planning workflow', () => {
     expect(Object.keys(result.cinema.shots)).toHaveLength(6);
     expect(Object.values(result.cinema.shots).reduce((sum, shot) => sum + shot.durationSeconds, 0)).toBe(42);
     expect(result.cinema.scenes['scene-01'].brief).toMatchObject({
-      tone: 'Claustrophobic supernatural suspense',
-      budgetCeiling: 900,
+      genreTone: 'Claustrophobic supernatural suspense',
+      generationBudget: { ceiling: 900 },
+      productionConstraints: { budgetCeiling: 25_000 },
       targetDurationSeconds: 42,
     });
     expect(Object.values(result.cinema.agentRuns)[0]).toMatchObject({

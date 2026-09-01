@@ -299,8 +299,32 @@ for (const shot of shots) {
     tags: ['video prompt', `${shot.dependencies.length} dependencies`],
     promptIds: [`prompt-${shot.id}-storyboard`, `prompt-${shot.id}-video`],
     sourceIds: ['source-cinema', 'source-suspense'],
-    cost: { currency: 'PHP', minimum: shot.minimum, expected: shot.expected, highRisk: shot.highRisk, isIllustrative: true },
+    cost: {
+      pricingMode: 'currency', currency: 'PHP', minimum: shot.minimum,
+      expected: shot.expected, highRisk: shot.highRisk, isIllustrative: true,
+    },
   };
+}
+
+function sampleSource(
+  id: string,
+  title: string,
+  finding: string,
+  status: 'supported' | 'needs-verification',
+) {
+  return {
+    id,
+    title,
+    publisher: 'Sample research result',
+    finding,
+    status,
+    creatorPinned: false,
+    isMock: true,
+    url: null,
+    queryPurpose: 'Local deterministic demonstration fixture',
+    retrievedAt: '2026-09-01T00:00:00.000Z',
+    usageCount: 0,
+  } as const;
 }
 
 export const REEL_KNOWS_TOMORROW = validateMockCinemaProject({
@@ -312,14 +336,17 @@ export const REEL_KNOWS_TOMORROW = validateMockCinemaProject({
   nodes,
   prompts,
   sources: {
-    'source-cinema': { id: 'source-cinema', title: 'Historic Manila cinema interiors', publisher: 'Sample research result', finding: 'Single-screen auditorium geography and worn seat rows provide clear spatial anchors.', status: 'pinned', isMock: true },
-    'source-period': { id: 'source-period', title: 'Late-1980s Philippine material culture', publisher: 'Sample research result', finding: 'Wardrobe, flashlight, and interior details should avoid contemporary visual cues.', status: 'pinned', isMock: true },
-    'source-projector': { id: 'source-projector', title: '35mm projector component reference', publisher: 'Sample research result', finding: 'Exposed reels, lamp housing, and mechanical sound make the prop readable in close-up.', status: 'suggested', isMock: true },
-    'source-suspense': { id: 'source-suspense', title: 'Negative space in suspense cinematography', publisher: 'Sample research result', finding: 'Empty vertical space behind the subject can carry threat without revealing a second performer.', status: 'pinned', isMock: true },
-    'source-vertical': { id: 'source-vertical', title: 'Vertical dramatic composition', publisher: 'Sample research result', finding: 'Cinema aisles and projection beams create strong depth cues inside a 9:16 frame.', status: 'suggested', isMock: true },
+    'source-cinema': sampleSource('source-cinema', 'Historic Manila cinema interiors', 'Single-screen auditorium geography and worn seat rows provide clear spatial anchors.', 'supported'),
+    'source-period': sampleSource('source-period', 'Late-1980s Philippine material culture', 'Wardrobe, flashlight, and interior details should avoid contemporary visual cues.', 'supported'),
+    'source-projector': sampleSource('source-projector', '35mm projector component reference', 'Exposed reels, lamp housing, and mechanical sound make the prop readable in close-up.', 'needs-verification'),
+    'source-suspense': sampleSource('source-suspense', 'Negative space in suspense cinematography', 'Empty vertical space behind the subject can carry threat without revealing a second performer.', 'supported'),
+    'source-vertical': sampleSource('source-vertical', 'Vertical dramatic composition', 'Cinema aisles and projection beams create strong depth cues inside a 9:16 frame.', 'needs-verification'),
   },
   cost: {
-    currency: 'PHP', minimum: 430, expected: 820, highRisk: 1140, ceiling: 1200, isIllustrative: true,
+    pricingMode: 'currency', currency: 'PHP', minimum: 430, expected: 820, highRisk: 1140,
+    ceiling: 1200, isIllustrative: true, assumptionProfileVersion: 1,
+    provider: 'sample-cost-profile', model: 'sample-v1', resolution: '9:16',
+    outputCount: 6, retryAllowance: 1, pricingSnapshotDate: null,
     assumptions: ['Six planned video shots', 'Two attempts for normal shots', 'Three to four attempts for projection shots', 'Storyboard reference generation included'],
   },
 });
@@ -409,6 +436,7 @@ const persistedSources = Object.fromEntries(Object.values(REEL_KNOWS_TOMORROW.so
   finding: source.finding,
   queryPurpose: 'Local deterministic demonstration fixture',
   status: source.status,
+  creatorPinned: source.creatorPinned,
   isMock: true,
   retrievedAt: mockRetrievedAt,
 }]));
@@ -428,13 +456,24 @@ const mockCinemaProjectData: CinemaProjectDataV1 = {
       status: 'draft',
       continuityNotes: 'Keep the auditorium geography, projector position, wardrobe, and projection-only shadow consistent.',
       brief: {
-        tone: 'Restrained supernatural suspense',
+        version: 2,
+        creationMode: 'ai-generated',
+        aspectRatio: '9:16',
+        targetPlatform: 'short-form',
+        genreTone: 'Restrained supernatural suspense',
         locationPeriod: 'Manila single-screen cinema · late 1980s',
-        budgetBand: 'micro',
-        currency: 'PHP',
-        budgetCeiling: 1_200,
+        dialogueAudioIntent: 'sound-design-led',
         targetDurationSeconds: 36,
-        availableEquipment: ['Phone or compact cinema camera', 'Tripod', 'One practical flashlight'],
+        requiredBeats: ['Projector awakens', 'Mara sees her immediate future', 'The figure moves closer'],
+        mustInclude: ['Vintage projector', 'Metal flashlight'],
+        mustAvoid: ['Gore', 'Modern equipment'],
+        generationBudget: { pricingMode: 'currency', currency: 'PHP', ceiling: 1_200, maxAttempts: 2 },
+        productionConstraints: {
+          budgetBand: 'micro',
+          currency: 'PHP',
+          budgetCeiling: null,
+          availableEquipment: ['Phone or compact cinema camera', 'Tripod', 'One practical flashlight'],
+        },
       },
       shotIds: shots.map((shot) => shot.id),
     },
@@ -514,12 +553,20 @@ const mockCinemaProjectData: CinemaProjectDataV1 = {
   costs: {
     'cost-scene-01': {
       id: 'cost-scene-01', runId: mockRunId, sceneId: 'scene-01',
+      pricingMode: REEL_KNOWS_TOMORROW.cost.pricingMode,
       currency: REEL_KNOWS_TOMORROW.cost.currency,
       minimum: REEL_KNOWS_TOMORROW.cost.minimum,
       expected: REEL_KNOWS_TOMORROW.cost.expected,
       highRisk: REEL_KNOWS_TOMORROW.cost.highRisk,
       ceiling: REEL_KNOWS_TOMORROW.cost.ceiling,
       isIllustrative: true,
+      assumptionProfileVersion: 1,
+      provider: REEL_KNOWS_TOMORROW.cost.provider,
+      model: REEL_KNOWS_TOMORROW.cost.model,
+      resolution: REEL_KNOWS_TOMORROW.cost.resolution,
+      outputCount: REEL_KNOWS_TOMORROW.cost.outputCount,
+      retryAllowance: REEL_KNOWS_TOMORROW.cost.retryAllowance,
+      pricingSnapshotDate: REEL_KNOWS_TOMORROW.cost.pricingSnapshotDate,
       assumptions: [...REEL_KNOWS_TOMORROW.cost.assumptions],
     },
   },

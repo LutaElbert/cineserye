@@ -9,16 +9,24 @@ import type { ResearchProviderResult, ShotPlannerProviderRequest } from './provi
 import { VertexAdkShotPlannerProvider } from './vertex-adk-shot-planner';
 
 const sceneBrief: ScenePlanningBrief = {
-  version: 1,
+  version: 2,
   sceneNodeId: 'scene-01',
   sceneText: 'A courier discovers a voice note recorded by her future self inside a rain-soaked jeepney.',
-  tone: 'Intimate speculative suspense',
+  creationMode: 'hybrid',
+  aspectRatio: '9:16',
+  targetPlatform: 'short-form',
+  genreTone: 'Intimate speculative suspense',
   locationPeriod: 'Contemporary Manila jeepney at night',
-  budgetBand: 'micro',
-  currency: 'PHP',
-  budgetCeiling: 300,
+  dialogueAudioIntent: 'dialogue-led',
   targetDurationSeconds: 42,
-  availableEquipment: ['Phone camera', 'Small LED light'],
+  requiredBeats: ['Future voice note plays'],
+  mustInclude: ['Cracked phone'],
+  mustAvoid: ['Visible brands'],
+  generationBudget: { pricingMode: 'currency', currency: 'PHP', ceiling: 300, maxAttempts: 2 },
+  productionConstraints: {
+    budgetBand: 'micro', currency: 'PHP', budgetCeiling: 10_000,
+    availableEquipment: ['Phone camera', 'Small LED light'],
+  },
 };
 
 function research(): ResearchProviderResult {
@@ -32,7 +40,8 @@ function research(): ResearchProviderResult {
       url: 'https://example.com/jeepney',
       finding: 'Chrome details and narrow bench seating provide repeatable spatial anchors.',
       queryPurpose: 'Location reference',
-      status: 'pinned',
+      status: 'supported',
+      creatorPinned: false,
       isMock: false,
       retrievedAt: '2026-09-01T00:00:00.000Z',
     }],
@@ -131,6 +140,8 @@ describe('ParallelResearchProvider', () => {
       'https://example.com/a',
       'https://reference.test/b',
     ]);
+    expect(result.sources.every((source) => source.status === 'needs-verification')).toBe(true);
+    expect(result.sources.every((source) => source.creatorPinned === false)).toBe(true);
     const [, init] = vi.mocked(fetchMock).mock.calls[0];
     expect(new Headers(init?.headers).get('x-api-key')).toBe('server-secret');
     const body = JSON.parse(String(init?.body));
@@ -191,5 +202,21 @@ describe('VertexAdkShotPlannerProvider', () => {
       'cineserye', 'global', 'gemini-3.7-flash', async () => invalid,
     );
     await expect(provider.plan(request)).rejects.toMatchObject({ code: 'UNEXPECTED_RESPONSE' });
+  });
+
+  it('drops missing source ids instead of assigning fallback citations', async () => {
+    const invalidCitations = generatedPlan();
+    invalidCitations.scene.sourceIds = ['invented-source'];
+    invalidCitations.characters[0].sourceIds = ['invented-source'];
+    invalidCitations.assets[0].sourceIds = [];
+    invalidCitations.shots[0].sourceIds = ['invented-source'];
+    const provider = new VertexAdkShotPlannerProvider(
+      'cineserye', 'global', 'gemini-3.7-flash', async () => invalidCitations,
+    );
+    const result = await provider.plan(request);
+    expect(result.cinema.prompts['prompt-scene-direction'].researchSourceIds).toEqual([]);
+    expect(result.cinema.prompts['prompt-cine-character-01-reference'].researchSourceIds).toEqual([]);
+    expect(result.cinema.prompts['prompt-cine-asset-01-reference'].researchSourceIds).toEqual([]);
+    expect(result.cinema.prompts['prompt-cine-shot-01-storyboard'].researchSourceIds).toEqual([]);
   });
 });

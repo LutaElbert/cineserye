@@ -148,40 +148,54 @@ function checkedIndexes(indexes: readonly number[], count: number, label: string
 function linkedSourceIds(
   requested: readonly string[],
   available: ReadonlySet<string>,
-  fallback: readonly string[],
 ) {
-  const resolved = [...new Set(requested.filter((sourceId) => available.has(sourceId)))];
-  return resolved.length ? resolved : [...fallback];
+  return [...new Set(requested.filter((sourceId) => available.has(sourceId)))];
 }
 
 function calculateCost(
   request: ShotPlannerProviderRequest,
   shots: readonly CinemaShotRecord[],
   assumptions: readonly string[],
+  provider: string,
+  model: string,
 ): CinemaCostEstimateRecord {
-  const rates = request.brief.currency === 'PHP'
-    ? { minimum: 12, expected: 22, highRisk: 34 }
-    : { minimum: 0.22, expected: 0.4, highRisk: 0.62 };
+  const budget = request.brief.generationBudget;
   const weightedSeconds = shots.reduce((total, shot) => {
     const multiplier = shot.risk === 'high' ? 1.25 : shot.risk === 'medium' ? 1.08 : 0.9;
     return total + shot.durationSeconds * multiplier;
   }, 0);
-  const rounded = (value: number) => request.brief.currency === 'PHP'
+  const currencyRates = budget.currency === 'PHP'
+    ? { minimum: 12, expected: 22, highRisk: 34 }
+    : { minimum: 0.22, expected: 0.4, highRisk: 0.62 };
+  const creditRates = { minimum: 0.6, expected: 1, highRisk: 1.5 };
+  const rates = budget.pricingMode === 'credits' ? creditRates : currencyRates;
+  const rounded = (value: number) => budget.currency === 'PHP'
     ? Math.round(value / 10) * 10
     : Math.round(value * 100) / 100;
+  const priced = budget.pricingMode !== 'unpriced';
   return {
     id: `cost-${request.brief.sceneNodeId}`,
     runId: request.runId,
     sceneId: request.brief.sceneNodeId,
-    currency: request.brief.currency,
-    minimum: rounded(weightedSeconds * rates.minimum),
-    expected: rounded(weightedSeconds * rates.expected),
-    highRisk: rounded(weightedSeconds * rates.highRisk),
-    ceiling: request.brief.budgetCeiling,
+    pricingMode: budget.pricingMode,
+    currency: budget.currency,
+    minimum: priced ? rounded(weightedSeconds * rates.minimum) : null,
+    expected: priced ? rounded(weightedSeconds * rates.expected) : null,
+    highRisk: priced ? rounded(weightedSeconds * rates.highRisk) : null,
+    ceiling: budget.ceiling,
     isIllustrative: true,
+    assumptionProfileVersion: 1,
+    provider,
+    model,
+    resolution: request.brief.aspectRatio,
+    outputCount: shots.length,
+    retryAllowance: Math.max(0, budget.maxAttempts - 1),
+    pricingSnapshotDate: null,
     assumptions: [
       ...assumptions,
-      'Derived from planned duration and generation-risk retries; not a vendor quote.',
+      priced
+        ? 'Derived from planned duration and generation-risk retries; not a vendor quote.'
+        : `Provider pricing is unavailable; guidance is limited to ${budget.maxAttempts} bounded attempts.`,
     ],
   };
 }
@@ -202,7 +216,6 @@ export function compileGeneratedScenePlan(
   const sceneId = request.brief.sceneNodeId;
   const runNodeId = 'cine-agent-plan';
   const availableSourceIds = new Set(request.research.sources.map((source) => source.id));
-  const fallbackSourceIds = request.research.sources.slice(0, 3).map((source) => source.id);
   const characters: Record<string, CinemaCharacterRecord> = {};
   const assets: Record<string, CinemaAssetRecord> = {};
   const prompts: Record<string, CinemaPromptArtifactRecord> = {};
@@ -232,7 +245,7 @@ export function compileGeneratedScenePlan(
       generatedText: character.referencePrompt,
       negativeConstraints: [...character.negativeConstraints],
       continuityNodeIds: [],
-      researchSourceIds: linkedSourceIds(character.sourceIds, availableSourceIds, fallbackSourceIds),
+      researchSourceIds: linkedSourceIds(character.sourceIds, availableSourceIds),
       version: 1,
       status: 'draft',
     });
@@ -240,7 +253,7 @@ export function compileGeneratedScenePlan(
   });
   const assetNodeIds = output.assets.map((asset, index) => {
     const nodeId = `cine-asset-${padded(index)}`;
-    const linkedSources = linkedSourceIds(asset.sourceIds, availableSourceIds, fallbackSourceIds);
+    const linkedSources = linkedSourceIds(asset.sourceIds, availableSourceIds);
     assets[nodeId] = {
       id: nodeId,
       nodeId,
@@ -282,7 +295,7 @@ export function compileGeneratedScenePlan(
     generatedText: output.scene.directionPrompt,
     negativeConstraints: [...output.scene.negativeConstraints],
     continuityNodeIds: [],
-    researchSourceIds: linkedSourceIds(output.scene.sourceIds, availableSourceIds, fallbackSourceIds),
+    researchSourceIds: linkedSourceIds(output.scene.sourceIds, availableSourceIds),
     version: 1,
     status: 'draft',
   });
@@ -300,7 +313,7 @@ export function compileGeneratedScenePlan(
       ...checkedIndexes(shot.assetIndexes, assetNodeIds.length, `Shot ${index + 1}`)
         .map((dependencyIndex) => assetNodeIds[dependencyIndex]),
     ];
-    const linkedSources = linkedSourceIds(shot.sourceIds, availableSourceIds, fallbackSourceIds);
+    const linkedSources = linkedSourceIds(shot.sourceIds, availableSourceIds);
     shots[nodeId] = {
       id: nodeId,
       nodeId,
@@ -348,12 +361,12 @@ export function compileGeneratedScenePlan(
     });
     return nodeId;
   });
-  const cost = calculateCost(request, Object.values(shots), output.costAssumptions);
+  const cost = calculateCost(request, Object.values(shots), output.costAssumptions, provider, model);
   const warnings = [...new Set([
     ...request.research.warnings,
     ...output.warnings,
     ...(request.research.sources.length ? [] : ['The proposal has limited research and no external citations.']),
-    ...(cost.ceiling !== null && cost.expected > cost.ceiling
+    ...(cost.ceiling !== null && cost.expected !== null && cost.expected > cost.ceiling
       ? ['The expected generation estimate exceeds the confirmed ceiling.']
       : []),
   ])];
@@ -374,13 +387,19 @@ export function compileGeneratedScenePlan(
         status: 'draft',
         continuityNotes: output.scene.continuityNotes,
         brief: {
-          tone: request.brief.tone,
+          version: 2,
+          creationMode: request.brief.creationMode,
+          aspectRatio: request.brief.aspectRatio,
+          targetPlatform: request.brief.targetPlatform,
+          genreTone: request.brief.genreTone,
           locationPeriod: request.brief.locationPeriod,
-          budgetBand: request.brief.budgetBand,
-          currency: request.brief.currency,
-          budgetCeiling: request.brief.budgetCeiling,
+          dialogueAudioIntent: request.brief.dialogueAudioIntent,
           targetDurationSeconds: request.brief.targetDurationSeconds,
-          availableEquipment: [...request.brief.availableEquipment],
+          requiredBeats: [...request.brief.requiredBeats],
+          mustInclude: [...request.brief.mustInclude],
+          mustAvoid: [...request.brief.mustAvoid],
+          generationBudget: structuredClone(request.brief.generationBudget),
+          productionConstraints: structuredClone(request.brief.productionConstraints),
         },
         shotIds,
       },

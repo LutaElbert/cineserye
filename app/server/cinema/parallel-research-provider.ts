@@ -63,7 +63,8 @@ function normalizeSources(payload: unknown, runId: string): CinemaResearchSource
       url: url.href,
       finding,
       queryPurpose: 'Location, production-design, cinematography, prop, and format reference',
-      status: index < 4 ? 'pinned' as const : 'suggested' as const,
+      status: 'needs-verification' as const,
+      creatorPinned: false,
       isMock: false,
       retrievedAt,
     }];
@@ -74,8 +75,8 @@ function searchQueries(request: ResearchProviderRequest) {
   const { brief } = request;
   return [
     `${brief.locationPeriod} production design props material culture visual reference`,
-    `${brief.tone} cinematography lighting camera coverage visual storytelling reference`,
-    `vertical 9:16 microdrama staging composition short scene ${brief.locationPeriod}`,
+    `${brief.genreTone} cinematography lighting camera coverage visual storytelling reference`,
+    `${brief.aspectRatio} ${brief.targetPlatform} staging composition short scene ${brief.locationPeriod}`,
     `${brief.sceneText.slice(0, 500)} practical filmmaking reference`,
   ];
 }
@@ -98,7 +99,7 @@ export class ParallelResearchProvider implements ResearchProvider {
           'x-api-key': this.apiKey,
         },
         body: JSON.stringify({
-          objective: `Find concise, credible references that help plan one ${request.brief.targetDurationSeconds}-second scene while respecting its tone, setting, production budget, and available equipment.`,
+          objective: `Find concise, credible references that help plan one ${request.brief.targetDurationSeconds}-second ${request.brief.creationMode} scene while respecting its tone, setting, physical-production constraints, and available equipment.`,
           search_queries: searchQueries(request),
           max_results: MAX_SOURCES,
         }),

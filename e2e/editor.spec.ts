@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createDiagramPng } from './helpers';
+import { createDiagramPng, openEditor } from './helpers';
 
 test('imports, persists, backs up, and exports locally with vectorization disabled', async ({ page, baseURL }) => {
   const externalRequests: string[] = [];
@@ -9,9 +9,8 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
     if (url.origin !== appOrigin) externalRequests.push(request.url());
   });
 
-  await page.goto('/');
+  await openEditor(page);
   await expect(page.getByRole('heading', { name: 'Layers' })).toBeVisible();
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
 
   const imageInput = page.getByLabel('Choose images to add to the canvas');
   await expect(imageInput).toBeEnabled();
@@ -57,8 +56,7 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
 });
 
 test('edits, hides, locks, duplicates, deletes, undoes, and redoes layers', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
 
   await page.getByRole('button', { name: 'Add concept layer' }).click();
   const inspector = page.locator('.inspector-panel');
@@ -102,8 +100,7 @@ test('edits, hides, locks, duplicates, deletes, undoes, and redoes layers', asyn
 });
 
 test('rejects mislabeled and corrupt image files', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
   await page.getByLabel('Choose images to add to the canvas').setInputFiles({
     name: 'not-really-an-image.png',
     mimeType: 'image/png',
@@ -114,8 +111,7 @@ test('rejects mislabeled and corrupt image files', async ({ page }) => {
 });
 
 test('accepts images dropped or pasted directly onto the canvas', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
   const bytes = Array.from(await createDiagramPng(page));
   await page.evaluate<void, number[]>((pngBytes) => {
     const dataTransfer = new DataTransfer();
@@ -146,8 +142,7 @@ test('accepts images dropped or pasted directly onto the canvas', async ({ page 
 
 test('keeps layers and properties usable on a phone viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
 
   await page.getByRole('button', { name: 'Open layers panel' }).click();
   await expect(page.locator('.layers-panel')).toHaveClass(/panel-open/);
@@ -164,8 +159,7 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
   page.on('console', (message) => {
     if (message.type() === 'error') runtimeErrors.push(message.text());
   });
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
 
   const researchNode = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).first();
   await researchNode.locator('.concept-node').dblclick();
@@ -212,8 +206,7 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
 });
 
 test('renames layers, searches content, adds and collapses branches, and saves checkpoints', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
 
   const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
   await researchLayer.dblclick();
@@ -261,8 +254,7 @@ test('renames layers, searches content, adds and collapses branches, and saves c
 });
 
 test('bulk-arranges selected layers and edits connector labels and styles', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await openEditor(page);
 
   await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await page.getByRole('button', { name: 'Scene 01', exact: true }).click({ modifiers: ['Meta'] });

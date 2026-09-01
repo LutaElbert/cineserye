@@ -42,7 +42,7 @@ describe('buildCinemaOutline', () => {
     ]);
     expect(outline.shotCount).toBe(6);
     expect(outline.targetDurationSeconds).toBe(36);
-    expect(outline.expectedCost).toBe(820);
+    expect(outline.expectedCostLabel).toBe('₱820');
     expect(outline.totalItemCount).toBe(14);
   });
 

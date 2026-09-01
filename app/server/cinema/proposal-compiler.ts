@@ -59,8 +59,11 @@ function assetEyebrow(asset: CinemaAssetRecord) {
 function ceilingLabel(project: CinemaProjectDataV1, sceneId: string) {
   const scene = project.scenes[sceneId];
   const cost = Object.values(project.costs).find((item) => item.sceneId === sceneId);
-  if (!cost || cost.ceiling === null) return `${scene.brief?.budgetBand ?? 'custom'} budget`;
-  return `${cost.currency} ${cost.ceiling.toLocaleString('en-US')} ceiling`;
+  if (!cost || cost.ceiling === null) {
+    return `${scene.brief?.productionConstraints.budgetBand ?? 'custom'} production · ${cost?.pricingMode ?? 'unpriced'} generation`;
+  }
+  const unit = cost.pricingMode === 'credits' ? 'credits' : cost.currency;
+  return `${unit} ${cost.ceiling.toLocaleString('en-US')} generation ceiling`;
 }
 
 export function compileCinemaCanvasProposal(
@@ -157,7 +160,7 @@ export function compileCinemaCanvasProposal(
             label: scene.title,
             title: conceptTitleFromPlainText(scene.title),
             body: richTextFromPlainText(
-              `${scene.brief?.locationPeriod ?? ''} · ${scene.brief?.tone ?? ''} · ${scene.brief?.targetDurationSeconds ?? 0}s · ${ceilingLabel(cinema, sceneId)}`,
+              `${scene.brief?.locationPeriod ?? ''} · ${scene.brief?.genreTone ?? ''} · ${scene.brief?.targetDurationSeconds ?? 0}s · ${ceilingLabel(cinema, sceneId)}`,
             ),
             eyebrow: 'Scene',
             tone: 'ink',

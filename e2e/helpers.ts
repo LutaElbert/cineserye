@@ -3,6 +3,11 @@ import { expect, type Locator, type Page } from '@playwright/test';
 export async function openEditor(page: Page) {
   await page.goto('/');
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  const chooser = page.getByRole('dialog', { name: /Start with your scene/ });
+  if (await chooser.count()) {
+    await chooser.getByRole('button', { name: /Start a scene/ }).click();
+    await expect(chooser).toHaveCount(0);
+  }
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
 }

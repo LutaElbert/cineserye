@@ -7,6 +7,16 @@ import type {
   ResearchSource,
 } from './prompt-artifacts';
 
+function costAmountLabel(
+  amount: number | null,
+  pricingMode: 'unpriced' | 'credits' | 'currency',
+  currency: 'PHP' | 'USD' | null,
+) {
+  if (amount === null || pricingMode === 'unpriced') return 'Unpriced';
+  if (pricingMode === 'credits') return `${amount.toLocaleString('en-US')} credits`;
+  return `${currency ?? ''} ${amount.toLocaleString('en-US')}`.trim();
+}
+
 function unique(values: readonly string[]) {
   return [...new Set(values)];
 }
@@ -91,18 +101,32 @@ export function cinemaProjectPresentation(
       publisher: source.publisher,
       finding: source.finding,
       status: source.status,
+      creatorPinned: source.creatorPinned,
       isMock: source.isMock,
       url: source.url,
+      queryPurpose: source.queryPurpose,
+      retrievedAt: source.retrievedAt,
+      usageCount: Object.values(project.prompts)
+        .filter((prompt) => prompt.researchSourceIds.includes(source.id))
+        .length,
     } satisfies ResearchSource,
   ]));
   if (cost) {
     presentation.cost = {
+      pricingMode: cost.pricingMode,
       currency: cost.currency,
       minimum: cost.minimum,
       expected: cost.expected,
       highRisk: cost.highRisk,
       ceiling: cost.ceiling,
       isIllustrative: true,
+      assumptionProfileVersion: cost.assumptionProfileVersion,
+      provider: cost.provider,
+      model: cost.model,
+      resolution: cost.resolution,
+      outputCount: cost.outputCount,
+      retryAllowance: cost.retryAllowance,
+      pricingSnapshotDate: cost.pricingSnapshotDate,
       assumptions: [...cost.assumptions],
     };
   }
@@ -113,16 +137,18 @@ export function cinemaProjectPresentation(
     nodeId: scene.nodeId,
     title: scene.title,
     summary: scene.synopsis,
-    statusLabel: scene.status === 'locked' ? 'Locked' : activeRun ? 'Plan ready' : 'Ready to plan',
+    statusLabel: scene.status === 'locked' ? 'Locked' : activeRun ? 'Review shot plan' : 'Ready to plan',
     metricLabel: `${presentation.targetDurationSeconds}s${cost?.ceiling === null || cost?.ceiling === undefined
       ? ''
-      : ` · ${cost.currency} ${cost.ceiling.toLocaleString('en-US')} ceiling`}`,
+      : ` · ${costAmountLabel(cost.ceiling, cost.pricingMode, cost.currency)} ceiling`}`,
     fields: [
-      { label: 'Tone', value: brief?.tone ?? 'Not set' },
+      { label: 'Creation mode', value: brief?.creationMode ?? 'Not set' },
+      { label: 'Genre / tone', value: brief?.genreTone ?? 'Not set' },
       { label: 'Location / period', value: brief?.locationPeriod ?? 'Not set' },
-      { label: 'Format', value: '9:16 vertical' },
-      { label: 'Budget band', value: brief?.budgetBand ?? 'Not set' },
-      { label: 'Available equipment', value: brief?.availableEquipment.join(' · ') || 'Not specified' },
+      { label: 'Format', value: `${brief?.aspectRatio ?? 'Not set'} · ${brief?.targetPlatform ?? 'Not set'}` },
+      { label: 'Audio intent', value: brief?.dialogueAudioIntent ?? 'Not set' },
+      { label: 'Production budget band', value: brief?.productionConstraints.budgetBand ?? 'Not set' },
+      { label: 'Available equipment', value: brief?.productionConstraints.availableEquipment.join(' · ') || 'Not specified' },
     ],
     promptIds: scenePromptIds,
     sourceIds: sourceIdsForPrompts(project, scenePromptIds),
@@ -214,7 +240,11 @@ export function cinemaProjectPresentation(
       ],
       promptIds,
       sourceIds: sourceIdsForPrompts(project, promptIds),
-      cost: fallback?.cost ? { ...fallback.cost, currency: cost?.currency ?? fallback.cost.currency } : undefined,
+      cost: fallback?.cost ? {
+        ...fallback.cost,
+        pricingMode: cost?.pricingMode ?? fallback.cost.pricingMode,
+        currency: cost ? cost.currency : fallback.cost.currency,
+      } : undefined,
     };
   }
 

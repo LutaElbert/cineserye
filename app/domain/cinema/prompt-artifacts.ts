@@ -19,18 +19,30 @@ export type ResearchSource = {
   title: string;
   publisher: string;
   finding: string;
-  status: 'pinned' | 'suggested';
+  status: 'supported' | 'needs-verification' | 'irrelevant';
+  creatorPinned: boolean;
   isMock: boolean;
   url?: string | null;
+  queryPurpose: string;
+  retrievedAt: string;
+  usageCount: number;
 };
 
 export type CostEstimate = {
-  currency: 'PHP' | 'USD';
-  minimum: number;
-  expected: number;
-  highRisk: number;
+  pricingMode: 'unpriced' | 'credits' | 'currency';
+  currency: 'PHP' | 'USD' | null;
+  minimum: number | null;
+  expected: number | null;
+  highRisk: number | null;
   ceiling: number | null;
   isIllustrative: true;
+  assumptionProfileVersion: 1;
+  provider: string;
+  model: string;
+  resolution: string;
+  outputCount: number;
+  retryAllowance: number;
+  pricingSnapshotDate: string | null;
   assumptions: string[];
 };
 
@@ -54,7 +66,7 @@ export type CinemaNodePresentation = {
   tags: readonly string[];
   promptIds: readonly string[];
   sourceIds: readonly string[];
-  cost?: Omit<CostEstimate, 'ceiling' | 'assumptions'>;
+  cost?: Pick<CostEstimate, 'pricingMode' | 'currency' | 'minimum' | 'expected' | 'highRisk' | 'isIllustrative'>;
 };
 
 export type MockCinemaProject = {
@@ -107,7 +119,12 @@ export function validateMockCinemaProject(project: MockCinemaProject): MockCinem
     }
   }
 
-  if (project.cost.minimum > project.cost.expected || project.cost.expected > project.cost.highRisk) {
+  if (
+    project.cost.minimum !== null
+    && project.cost.expected !== null
+    && project.cost.highRisk !== null
+    && (project.cost.minimum > project.cost.expected || project.cost.expected > project.cost.highRisk)
+  ) {
     throw new Error('Mock cost ranges are out of order.');
   }
   return project;
