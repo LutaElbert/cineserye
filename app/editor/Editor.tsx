@@ -135,13 +135,11 @@ import type {
   VectorPathLayer,
 } from './types';
 import { vectorizeDataUrl } from './vectorize';
-import {
-  MOCK_CINEMA_PROJECT_DATA,
-  MOCK_SHOT_PLAN_PROPOSAL,
-  REEL_KNOWS_TOMORROW,
-} from '../domain/cinema/mock/reel-knows-tomorrow';
+import { REEL_KNOWS_TOMORROW } from '../domain/cinema/mock/reel-knows-tomorrow';
+import { cinemaProjectPresentation } from '../domain/cinema/project-presentation';
 import type { CinemaProjectDataV1 } from '../domain/cinema/project-data';
 import { removeCinemaRecordsForNodes } from '../domain/cinema/project-data';
+import type { CinemaProjectPresentation } from '../domain/cinema/prompt-artifacts';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
 import { buildCinemaOutline } from '../features/project-outline/outline-model';
 import { CinemaInspector } from '../features/scene-planner/CinemaInspector';
@@ -150,6 +148,7 @@ import {
   type SceneBriefDefaults,
 } from '../features/scene-planner/SceneBriefDialog';
 import type { ScenePlanningBrief } from '../domain/cinema/scene-brief';
+import type { PlanSceneResponse } from '../features/scene-planner/plan-scene-api';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
@@ -237,7 +236,7 @@ type NodeActionContextValue = {
 const NodeActionContext = createContext<NodeActionContextValue | null>(null);
 const SelectedNodeCountContext = createContext(0);
 const ProposedNodeIdsContext = createContext<ReadonlySet<string>>(new Set());
-const CinemaNodeIdsContext = createContext<ReadonlySet<string>>(new Set());
+const CinemaProjectContext = createContext<CinemaProjectPresentation | null>(null);
 
 function useNodeActions() {
   const value = useContext(NodeActionContext);
@@ -260,11 +259,11 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
   const actions = useNodeActions();
   const selectedNodeCount = useContext(SelectedNodeCountContext);
   const proposedNodeIds = useContext(ProposedNodeIdsContext);
-  const cinemaNodeIds = useContext(CinemaNodeIdsContext);
+  const cinemaProject = useContext(CinemaProjectContext);
   if (data.kind !== 'concept') return null;
   const editing = actions.editingConceptId === id;
   const singleSelection = selected && selectedNodeCount === 1;
-  const cinemaDetail = cinemaNodeIds.has(id) ? REEL_KNOWS_TOMORROW.nodes[id] : undefined;
+  const cinemaDetail = cinemaProject?.nodes[id];
   const proposed = proposedNodeIds.has(id);
   return (
     <>
@@ -589,6 +588,7 @@ function EditorInner() {
   const [autosaveRevision, setAutosaveRevision] = useState(0);
   const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
   const [mockProposalPreview, setMockProposalPreview] = useState<AppliedCanvasCommandProposal | null>(null);
+  const [proposalCinema, setProposalCinema] = useState<CinemaProjectDataV1 | null>(null);
   const [sceneBriefDefaults, setSceneBriefDefaults] = useState<SceneBriefDefaults | null>(null);
   const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
   const [expandedOutlineBranches, setExpandedOutlineBranches] = useState<Set<OutlineBranchId>>(
@@ -616,8 +616,7 @@ function EditorInner() {
   const saveQueueRef = useRef(Promise.resolve());
   const saveTicketRef = useRef(0);
   const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges, cinema });
-  const mockPlanningTimerRef = useRef<number | null>(null);
-  const confirmedSceneBriefRef = useRef<ScenePlanningBrief | null>(null);
+  const planningControllerRef = useRef<AbortController | null>(null);
   const {
     screenToFlowPosition,
     fitView,
@@ -641,7 +640,7 @@ function EditorInner() {
   }, []);
 
   useEffect(() => () => {
-    if (mockPlanningTimerRef.current !== null) window.clearTimeout(mockPlanningTimerRef.current);
+    planningControllerRef.current?.abort('editor-unmounted');
   }, []);
 
   useLayoutEffect(() => {
@@ -733,7 +732,7 @@ function EditorInner() {
     updatedAt: Date.now(),
   }), []);
 
-  const runMockScene = useCallback((brief: ScenePlanningBrief) => {
+  const runMockScene = useCallback(async (brief: ScenePlanningBrief) => {
     if (mockProposalStage !== 'idle' || mockProposalPreview) return;
     if (!nodesRef.current.some((node) => node.id === REEL_KNOWS_TOMORROW.sceneNodeId)) {
       announce('The demo scene is not available in this document.', 'error');
@@ -744,24 +743,39 @@ function EditorInner() {
       return;
     }
     setMockProposalStage('planning');
-    confirmedSceneBriefRef.current = brief;
     setMobilePanel('inspector');
-    announce('Building a local mock prompt package. No network request is running.');
+    announce('Running the local fixture workflow. No external provider request will run.');
     const sourceDocument = getCurrentDocument();
-    mockPlanningTimerRef.current = window.setTimeout(() => {
-      mockPlanningTimerRef.current = null;
-      try {
-        const preview = applyCanvasCommandProposal(sourceDocument, MOCK_SHOT_PLAN_PROPOSAL);
-        setMockProposalPreview(preview);
-        setPreviewSelectedNodeId('cine-shot-03');
-        setMockProposalStage('ready');
-        window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
-        announce('Mock proposal ready: six shots, reusable elements, prompts, sources, and cost ranges.', 'success');
-      } catch (error) {
-        setMockProposalStage('idle');
-        announce(error instanceof Error ? error.message : 'The mock proposal could not be prepared.', 'error');
+    const controller = new AbortController();
+    planningControllerRef.current = controller;
+    try {
+      const response = await fetch('/api/cinema/plan-scene', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(brief),
+        signal: controller.signal,
+      });
+      const payload = await response.json() as PlanSceneResponse;
+      if (!payload.ok) throw new Error(payload.error.message);
+      const preview = applyCanvasCommandProposal(sourceDocument, payload.proposal);
+      setProposalCinema(payload.cinema);
+      setMockProposalPreview(preview);
+      setPreviewSelectedNodeId('cine-shot-03');
+      setMockProposalStage('ready');
+      window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
+      announce(
+        `Fixture proposal ready: six shots, reusable elements, ${payload.sourceCount} sources, and cost ranges.`,
+        'success',
+      );
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        announce(error instanceof Error ? error.message : 'The fixture proposal could not be prepared.', 'error');
       }
-    }, 520);
+      setProposalCinema(null);
+      setMockProposalStage('idle');
+    } finally {
+      if (planningControllerRef.current === controller) planningControllerRef.current = null;
+    }
   }, [announce, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage]);
 
   const planMockScene = useCallback(() => {
@@ -807,7 +821,7 @@ function EditorInner() {
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
-    confirmedSceneBriefRef.current = null;
+    setProposalCinema(null);
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === REEL_KNOWS_TOMORROW.sceneNodeId })));
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
@@ -815,46 +829,29 @@ function EditorInner() {
   }, [announce, fitView]);
 
   const acceptMockProposal = useCallback(() => {
-    if (!mockProposalPreview) return;
+    if (!mockProposalPreview || !proposalCinema) return;
     recordHistory();
     setNodes(mockProposalPreview.document.nodes.map((node) => ({
       ...node,
       selected: node.id === 'cine-shot-03',
     })));
     setEdges(mockProposalPreview.document.edges.map((edge) => ({ ...edge, selected: false })));
-    const nextCinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
-    const confirmedBrief = confirmedSceneBriefRef.current;
-    if (confirmedBrief) {
-      nextCinema.scenes[confirmedBrief.sceneNodeId].synopsis = confirmedBrief.sceneText;
-      nextCinema.scenes[confirmedBrief.sceneNodeId].brief = {
-        tone: confirmedBrief.tone,
-        locationPeriod: confirmedBrief.locationPeriod,
-        budgetBand: confirmedBrief.budgetBand,
-        currency: confirmedBrief.currency,
-        budgetCeiling: confirmedBrief.budgetCeiling,
-        targetDurationSeconds: confirmedBrief.targetDurationSeconds,
-        availableEquipment: [...confirmedBrief.availableEquipment],
-      };
-      nextCinema.costs['cost-scene-01'].currency = confirmedBrief.currency;
-      nextCinema.costs['cost-scene-01'].ceiling = confirmedBrief.budgetCeiling;
-      if (
-        confirmedBrief.budgetCeiling !== null
-        && nextCinema.costs['cost-scene-01'].expected > confirmedBrief.budgetCeiling
-      ) {
-        nextCinema.agentRuns['cine-agent-plan'].warnings.push(
-          'The expected generation estimate exceeds the confirmed ceiling.',
-        );
-      }
+    const nextCinema = structuredClone(proposalCinema);
+    const acceptedRun = Object.values(nextCinema.agentRuns)
+      .find((run) => run.nodeId === 'cine-agent-plan');
+    if (acceptedRun) {
+      acceptedRun.status = 'accepted';
+      acceptedRun.completedAt = new Date().toISOString();
     }
     setCinema(nextCinema);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
-    confirmedSceneBriefRef.current = null;
+    setProposalCinema(null);
     setSelectedPath(null);
     window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
     announce('Prompt package accepted as one undoable canvas change.', 'success');
-  }, [announce, fitView, mockProposalPreview, recordHistory]);
+  }, [announce, fitView, mockProposalPreview, proposalCinema, recordHistory]);
 
   const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
     const ticket = pendingTicket ?? ++saveTicketRef.current;
@@ -1411,11 +1408,18 @@ function EditorInner() {
   const presentedEdges = mockProposalPreview?.document.edges ?? edges;
   const mockPlanAccepted = nodes.some((node) => node.id === 'cine-agent-plan');
   const cinemaOutlineActive = Boolean(mockProposalPreview || mockPlanAccepted);
+  const activeCinemaData = mockProposalPreview ? proposalCinema : cinema;
+  const activeCinemaProject = useMemo(
+    () => activeCinemaData
+      ? cinemaProjectPresentation(activeCinemaData)
+      : REEL_KNOWS_TOMORROW,
+    [activeCinemaData],
+  );
   const cinemaNodeIds = useMemo(
     () => mockProposalPreview || mockPlanAccepted
-      ? new Set(Object.keys(REEL_KNOWS_TOMORROW.nodes))
+      ? new Set(Object.keys(activeCinemaProject.nodes))
       : new Set<string>(),
-    [mockPlanAccepted, mockProposalPreview],
+    [activeCinemaProject.nodes, mockPlanAccepted, mockProposalPreview],
   );
   const selectedNodes = presentedNodes.filter((node) => node.selected);
   const selectedNode = selectedNodes[0] ?? null;
@@ -1427,7 +1431,7 @@ function EditorInner() {
     mockProposalPreview
     || mockPlanAccepted
     || selectedNode.id === REEL_KNOWS_TOMORROW.sceneNodeId
-  ) ? REEL_KNOWS_TOMORROW.nodes[selectedNode.id] ?? null : null;
+  ) ? activeCinemaProject.nodes[selectedNode.id] ?? null : null;
   const planningSceneSelected = selectedNodes.length === 1
     && selectedNode?.id === REEL_KNOWS_TOMORROW.sceneNodeId;
   const selectedVectorPath = useMemo(() => {
@@ -1923,7 +1927,7 @@ function EditorInner() {
     if (!window.confirm('Start a new local document? This clears the current canvas on this device.')) return;
     try {
       conversionControllerRef.current?.abort();
-      if (mockPlanningTimerRef.current !== null) window.clearTimeout(mockPlanningTimerRef.current);
+      planningControllerRef.current?.abort('new-document');
       await clearLocalDocument();
       pastRef.current = [];
       futureRef.current = [];
@@ -1936,7 +1940,7 @@ function EditorInner() {
       setMockProposalStage('idle');
       setPreviewSelectedNodeId(null);
       setSceneBriefDefaults(null);
-      confirmedSceneBriefRef.current = null;
+      setProposalCinema(null);
       refreshHistoryState();
       announce('New local document created.', 'success');
     } catch {
@@ -1981,7 +1985,7 @@ function EditorInner() {
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
     setSceneBriefDefaults(null);
-    confirmedSceneBriefRef.current = null;
+    setProposalCinema(null);
     await queueDocumentSave(restored);
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
@@ -2015,7 +2019,7 @@ function EditorInner() {
       setMockProposalStage('idle');
       setPreviewSelectedNodeId(null);
       setSceneBriefDefaults(null);
-      confirmedSceneBriefRef.current = null;
+      setProposalCinema(null);
       setExpandedVectors(new Set());
       refreshHistoryState();
       await queueDocumentSave(restored);
@@ -2128,9 +2132,9 @@ function EditorInner() {
   });
   const cinemaOutlineModel = useMemo(
     () => cinemaOutlineActive
-      ? buildCinemaOutline(presentedNodes, REEL_KNOWS_TOMORROW, previewNodeIds, searchQuery)
+      ? buildCinemaOutline(presentedNodes, activeCinemaProject, previewNodeIds, searchQuery)
       : null,
-    [cinemaOutlineActive, presentedNodes, previewNodeIds, searchQuery],
+    [activeCinemaProject, cinemaOutlineActive, presentedNodes, previewNodeIds, searchQuery],
   );
   const handleLayerSelection = useCallback((event: ReactMouseEvent<HTMLButtonElement>, id: string) => {
     if (mockProposalPreview) {
@@ -2238,7 +2242,7 @@ function EditorInner() {
 
   return (
     <SelectedNodeCountContext.Provider value={selectedNodeCount}>
-      <CinemaNodeIdsContext.Provider value={cinemaNodeIds}>
+      <CinemaProjectContext.Provider value={cinemaOutlineActive ? activeCinemaProject : null}>
         <ProposedNodeIdsContext.Provider value={previewNodeIds}>
           <NodeActionContext.Provider value={nodeActionValue}>
         <main
@@ -2397,7 +2401,7 @@ function EditorInner() {
           ) : <ul className="layer-list" aria-label="Canvas layers" aria-describedby="layer-list-instructions">
             {layerNodes.map((node) => {
               const expanded = expandedVectors.has(node.id);
-              const cinemaDetail = cinemaNodeIds.has(node.id) ? REEL_KNOWS_TOMORROW.nodes[node.id] : undefined;
+              const cinemaDetail = cinemaNodeIds.has(node.id) ? activeCinemaProject.nodes[node.id] : undefined;
               return (
                 <li key={node.id}>
                   <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''}`}>
@@ -2820,7 +2824,7 @@ function EditorInner() {
             <CinemaInspector
               key={selectedCinemaDetail.nodeId}
               detail={selectedCinemaDetail}
-              project={REEL_KNOWS_TOMORROW}
+              project={activeCinemaProject}
               proposed={previewNodeIds.has(selectedNode.id)}
               planning={mockProposalStage === 'planning'}
               accepted={mockPlanAccepted}
@@ -2960,7 +2964,7 @@ function EditorInner() {
         </main>
           </NodeActionContext.Provider>
         </ProposedNodeIdsContext.Provider>
-      </CinemaNodeIdsContext.Provider>
+      </CinemaProjectContext.Provider>
     </SelectedNodeCountContext.Provider>
   );
 }

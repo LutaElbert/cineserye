@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "check:client-boundary": "node scripts/check-client-boundary.mjs",
     "start": "vinext start",
     "check": "vinext check",
     "typecheck": "tsc --noEmit",

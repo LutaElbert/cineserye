@@ -30,20 +30,24 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
   await brief.getByRole('button', { name: 'Research and draft shots' }).click();
   await expect(brief.getByRole('alert')).toContainText('Tone is required');
   await brief.getByLabel('Tone', { exact: true }).fill('Claustrophobic suspense');
-  await brief.getByLabel('Optional ceiling (PHP)').fill('900');
+  await brief.getByLabel('Target duration (seconds)', { exact: true }).fill('42');
+  await brief.getByLabel('Optional ceiling (PHP)').fill('700');
   await brief.getByRole('button', { name: 'Research and draft shots' }).click();
 
   const review = page.getByRole('region', { name: 'Mock shot proposal review' });
   await expect(review).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
   const outline = page.getByRole('navigation', { name: 'Project outline' });
-  await expect(outline).toContainText('6 shots · 36s');
+  await expect(outline).toContainText('6 shots · 42s');
   await expect(outline).toContainText('₱820');
   await expect(outline.getByRole('button', { name: 'Planning 1', exact: true })).toBeVisible();
   await expect(outline.getByRole('button', { name: 'Characters 1', exact: true })).toBeVisible();
   await expect(outline.getByRole('button', { name: 'Locations 1', exact: true })).toBeVisible();
   await expect(outline.getByRole('button', { name: 'Props 2', exact: true })).toBeVisible();
   await expect(outline.getByRole('button', { name: 'Visual Elements 1', exact: true })).toBeVisible();
+  await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await page.getByRole('tab', { name: 'Cost' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Cost' })).toContainText('above the ₱700 ceiling');
   const shotNames = await outline.locator('[aria-label="Shots nodes"] .outline-item-main').evaluateAll((buttons) =>
     buttons.map((button) => button.getAttribute('aria-label')),
   );
@@ -90,6 +94,7 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
     shotCount: number;
     tone: string;
     budgetCeiling: number;
+    targetDurationSeconds: number;
   }>((resolve, reject) => {
     const request = indexedDB.open('cineserye-local');
     request.onerror = () => reject(request.error);
@@ -103,6 +108,7 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
           shotCount: Object.keys(stored.result.cinema.shots).length,
           tone: stored.result.cinema.scenes['scene-01'].brief.tone,
           budgetCeiling: stored.result.cinema.scenes['scene-01'].brief.budgetCeiling,
+          targetDurationSeconds: stored.result.cinema.scenes['scene-01'].brief.targetDurationSeconds,
         });
         database.close();
       };
@@ -112,7 +118,8 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
     schemaVersion: 1,
     shotCount: 6,
     tone: 'Claustrophobic suspense',
-    budgetCeiling: 900,
+    budgetCeiling: 700,
+    targetDurationSeconds: 42,
   });
 
   await page.reload();

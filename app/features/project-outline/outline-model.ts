@@ -34,6 +34,7 @@ export type CinemaOutlineModel = {
   shotCount: number;
   targetDurationSeconds: number;
   expectedCost: number;
+  currency: 'PHP' | 'USD';
   visibleItemCount: number;
   totalItemCount: number;
 };
@@ -147,6 +148,7 @@ export function buildCinemaOutline(
     shotCount: project.shotNodeIds.filter((nodeId) => available.has(nodeId)).length,
     targetDurationSeconds: project.targetDurationSeconds,
     expectedCost: project.cost.expected,
+    currency: project.cost.currency,
     visibleItemCount: query
       ? rootMatches + groups.reduce((total, group) => total + group.items.length, 0)
       : totalItemCount,

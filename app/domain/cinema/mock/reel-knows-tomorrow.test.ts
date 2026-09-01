@@ -7,8 +7,8 @@ describe('The Reel That Knows Tomorrow mock project', () => {
   it('contains a resolved 36-second prompt package within the illustrative ceiling', () => {
     expect(REEL_KNOWS_TOMORROW.shotNodeIds).toHaveLength(6);
     expect(REEL_KNOWS_TOMORROW.targetDurationSeconds).toBe(36);
-    expect(REEL_KNOWS_TOMORROW.cost.expected).toBeLessThan(REEL_KNOWS_TOMORROW.cost.ceiling);
-    expect(REEL_KNOWS_TOMORROW.cost.highRisk).toBeLessThanOrEqual(REEL_KNOWS_TOMORROW.cost.ceiling);
+    expect(REEL_KNOWS_TOMORROW.cost.expected).toBeLessThan(REEL_KNOWS_TOMORROW.cost.ceiling!);
+    expect(REEL_KNOWS_TOMORROW.cost.highRisk).toBeLessThanOrEqual(REEL_KNOWS_TOMORROW.cost.ceiling!);
     expect(Object.values(REEL_KNOWS_TOMORROW.prompts).filter((prompt) => prompt.purpose === 'video')).toHaveLength(6);
   });
 

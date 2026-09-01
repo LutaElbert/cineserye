@@ -55,7 +55,7 @@ describe('scene planning brief', () => {
 
     const invalidDuration = validBrief();
     invalidDuration.targetDurationSeconds = 181;
-    expect(() => validateScenePlanningBrief(invalidDuration)).toThrow('between 5 and 180 seconds');
+    expect(() => validateScenePlanningBrief(invalidDuration)).toThrow('between 6 and 180 seconds');
   });
 
   it('keeps scene instructions as inert text for downstream validation', () => {

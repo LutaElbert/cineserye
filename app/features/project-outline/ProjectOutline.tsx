@@ -30,10 +30,10 @@ type ProjectOutlineProps = {
   onToggleLock: (id: string) => void;
 };
 
-function currency(value: number) {
+function currency(value: number, currencyCode: 'PHP' | 'USD') {
   return new Intl.NumberFormat('en-PH', {
     style: 'currency',
-    currency: 'PHP',
+    currency: currencyCode,
     maximumFractionDigits: 0,
   }).format(value);
 }
@@ -173,7 +173,7 @@ export function ProjectOutline({
             </button>
             <button type="button" className="outline-scene-metrics" aria-label="Focus scene nodes" onClick={() => onFocusNodes(sceneNodeIds)}>
               <span>{model.shotCount} shots · {model.targetDurationSeconds}s</span>
-              <span>{currency(model.expectedCost)}</span>
+              <span>{currency(model.expectedCost, model.currency)}</span>
             </button>
           </div>
 

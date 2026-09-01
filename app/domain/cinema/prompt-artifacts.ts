@@ -20,15 +20,16 @@ export type ResearchSource = {
   publisher: string;
   finding: string;
   status: 'pinned' | 'suggested';
-  isMock: true;
+  isMock: boolean;
+  url?: string | null;
 };
 
 export type CostEstimate = {
-  currency: 'PHP';
+  currency: 'PHP' | 'USD';
   minimum: number;
   expected: number;
   highRisk: number;
-  ceiling: number;
+  ceiling: number | null;
   isIllustrative: true;
   assumptions: string[];
 };
@@ -61,12 +62,14 @@ export type MockCinemaProject = {
   title: string;
   sceneNodeId: string;
   targetDurationSeconds: number;
-  shotNodeIds: readonly string[];
-  nodes: Readonly<Record<string, CinemaNodePresentation>>;
-  prompts: Readonly<Record<string, PromptArtifact>>;
-  sources: Readonly<Record<string, ResearchSource>>;
+  shotNodeIds: string[];
+  nodes: Record<string, CinemaNodePresentation>;
+  prompts: Record<string, PromptArtifact>;
+  sources: Record<string, ResearchSource>;
   cost: CostEstimate;
 };
+
+export type CinemaProjectPresentation = MockCinemaProject;
 
 export function validateMockCinemaProject(project: MockCinemaProject): MockCinemaProject {
   if (!project.nodes[project.sceneNodeId]) throw new Error('The mock scene node is missing.');
@@ -106,9 +109,6 @@ export function validateMockCinemaProject(project: MockCinemaProject): MockCinem
 
   if (project.cost.minimum > project.cost.expected || project.cost.expected > project.cost.highRisk) {
     throw new Error('Mock cost ranges are out of order.');
-  }
-  if (project.cost.highRisk > project.cost.ceiling) {
-    throw new Error('The mock high-risk estimate exceeds the budget ceiling.');
   }
   return project;
 }

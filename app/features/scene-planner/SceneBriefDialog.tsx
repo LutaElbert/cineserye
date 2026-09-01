@@ -162,7 +162,7 @@ export function SceneBriefDialog({
               id="scene-brief-targetDurationSeconds"
               aria-label="Target duration (seconds)"
               type="number"
-              min="5"
+              min="6"
               max="180"
               step="1"
               value={targetDurationSeconds}

@@ -63,12 +63,12 @@ export function validateScenePlanningBrief(value: ScenePlanningBrief): ScenePlan
   }
   if (
     !Number.isFinite(value.targetDurationSeconds)
-    || value.targetDurationSeconds < 5
+    || value.targetDurationSeconds < 6
     || value.targetDurationSeconds > 180
   ) {
     throw new SceneBriefValidationError(
       'targetDurationSeconds',
-      'Target duration must be between 5 and 180 seconds.',
+      'Target duration must be between 6 and 180 seconds.',
     );
   }
   if (!Array.isArray(value.availableEquipment) || value.availableEquipment.length > 50) {

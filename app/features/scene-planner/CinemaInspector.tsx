@@ -13,7 +13,7 @@ import {
 import { useMemo, useState } from 'react';
 import type {
   CinemaNodePresentation,
-  MockCinemaProject,
+  CinemaProjectPresentation,
   PromptArtifact,
 } from '../../domain/cinema/prompt-artifacts';
 
@@ -26,10 +26,10 @@ const TAB_LABELS: ReadonlyArray<{ id: InspectorTab; label: string }> = [
   { id: 'cost', label: 'Cost' },
 ];
 
-function money(value: number) {
+function money(value: number, currency: 'PHP' | 'USD') {
   return new Intl.NumberFormat('en-PH', {
     style: 'currency',
-    currency: 'PHP',
+    currency,
     maximumFractionDigits: 0,
   }).format(value);
 }
@@ -40,7 +40,7 @@ function PromptCard({
   onNotice,
 }: {
   prompt: PromptArtifact;
-  project: MockCinemaProject;
+  project: CinemaProjectPresentation;
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
 }) {
   const copy = async () => {
@@ -96,7 +96,7 @@ export function CinemaInspector({
   onNotice,
 }: {
   detail: CinemaNodePresentation;
-  project: MockCinemaProject;
+  project: CinemaProjectPresentation;
   proposed: boolean;
   planning: boolean;
   accepted: boolean;
@@ -116,6 +116,7 @@ export function CinemaInspector({
   const projectCost = detail.kind === 'scene' || detail.kind === 'agent-run' ? project.cost : null;
   const cost = detail.cost ?? projectCost;
   const riskLabel = detail.risk === 'none' ? 'No direct risk' : `${detail.risk} risk`;
+  const fixtureOnly = Object.values(project.sources).every((source) => source.isMock);
 
   return (
     <div className="cinema-inspector">
@@ -132,7 +133,9 @@ export function CinemaInspector({
 
       <div className="demo-data-note" role="note">
         <Sparkles size={12} aria-hidden="true" />
-        <span>Demo data — research and prices are illustrative.</span>
+        <span>{fixtureOnly
+          ? 'Fixture research and generation prices are illustrative.'
+          : 'Research sources are linked; generation prices remain illustrative.'}</span>
       </div>
 
       <div className="inspector-tabs" role="tablist" aria-label={`${detail.title} properties`}>
@@ -189,9 +192,9 @@ export function CinemaInspector({
                   onClick={onPlan}
                 >
                   {planning ? <LoaderCircle className="spin" size={14} /> : accepted ? <Check size={14} /> : <Sparkles size={14} />}
-                  {planning ? 'Planning mock scene…' : accepted ? 'Plan accepted' : proposed ? 'Review proposal' : 'Draft shot prompts'}
+                  {planning ? 'Planning scene…' : accepted ? 'Plan accepted' : proposed ? 'Review proposal' : 'Draft shot prompts'}
                 </button>
-                <p>{accepted ? 'The prompt package is on the canvas and remains one undoable change.' : 'Uses fixed local mock data. No provider or network request will run.'}</p>
+                <p>{accepted ? 'The prompt package is on the canvas and remains one undoable change.' : 'Uses local fixture providers. No external provider request will run.'}</p>
               </div>
             ) : null}
           </>
@@ -220,9 +223,11 @@ export function CinemaInspector({
                 <article key={source.id} className="source-card">
                   <header>
                     <span>{source.status}</span>
-                    <span>Mock source</span>
+                    <span>{source.isMock ? 'Fixture source' : 'Research source'}</span>
                   </header>
-                  <strong>{source.title}</strong>
+                  {source.url ? (
+                    <a href={source.url} target="_blank" rel="noreferrer"><strong>{source.title}</strong></a>
+                  ) : <strong>{source.title}</strong>}
                   <small>{source.publisher}</small>
                   <p>{source.finding}</p>
                 </article>
@@ -238,19 +243,28 @@ export function CinemaInspector({
             <div className="cost-panel">
               <div className="cost-heading">
                 <CircleDollarSign size={18} />
-                <div><strong>{money(cost.expected)}</strong><span>Expected generation cost</span></div>
+                <div><strong>{money(cost.expected, cost.currency)}</strong><span>Expected generation cost</span></div>
               </div>
               <div className="cost-range" aria-label="Illustrative generation cost range">
-                <div><span>Minimum</span><strong>{money(cost.minimum)}</strong></div>
-                <div><span>Expected</span><strong>{money(cost.expected)}</strong></div>
-                <div><span>High risk</span><strong>{money(cost.highRisk)}</strong></div>
+                <div><span>Minimum</span><strong>{money(cost.minimum, cost.currency)}</strong></div>
+                <div><span>Expected</span><strong>{money(cost.expected, cost.currency)}</strong></div>
+                <div><span>High risk</span><strong>{money(cost.highRisk, cost.currency)}</strong></div>
               </div>
-              {projectCost ? (
+              {projectCost?.ceiling !== null && projectCost?.ceiling !== undefined ? (
                 <>
                   <div className="budget-meter">
-                    <div style={{ inlineSize: `${Math.min(100, (projectCost.expected / projectCost.ceiling) * 100)}%` }} />
+                    <div style={{ inlineSize: `${projectCost.ceiling > 0 ? Math.min(100, (projectCost.expected / projectCost.ceiling) * 100) : 100}%` }} />
                   </div>
-                  <p className="budget-caption">{money(projectCost.ceiling - projectCost.expected)} expected headroom below the {money(projectCost.ceiling)} ceiling.</p>
+                  <p className="budget-caption">{projectCost.expected <= projectCost.ceiling
+                    ? `${money(projectCost.ceiling - projectCost.expected, projectCost.currency)} expected headroom below the ${money(projectCost.ceiling, projectCost.currency)} ceiling.`
+                    : `${money(projectCost.expected - projectCost.ceiling, projectCost.currency)} above the ${money(projectCost.ceiling, projectCost.currency)} ceiling; revise before accepting.`}</p>
+                  <ul className="cost-assumptions">
+                    {projectCost.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}
+                  </ul>
+                </>
+              ) : projectCost ? (
+                <>
+                  <p className="budget-caption">No exact ceiling was set for this production band.</p>
                   <ul className="cost-assumptions">
                     {projectCost.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}
                   </ul>
