@@ -9,16 +9,18 @@ import {
 
 export type SceneBriefDefaults = ScenePlanningBrief;
 
-type FieldErrors = Partial<Record<SceneBriefValidationError['field'], string>>;
+type FieldErrors = Partial<Record<SceneBriefValidationError['field'] | 'liveProviderConsent', string>>;
 
 export function SceneBriefDialog({
   defaults,
+  providerMode,
   onCancel,
   onSubmit,
 }: {
   defaults: SceneBriefDefaults;
+  providerMode: 'fixture' | 'live';
   onCancel: () => void;
-  onSubmit: (brief: ScenePlanningBrief) => void;
+  onSubmit: (brief: ScenePlanningBrief, liveProviderConsent: boolean) => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const toneRef = useRef<HTMLInputElement>(null);
@@ -30,6 +32,7 @@ export function SceneBriefDialog({
   );
   const [targetDurationSeconds, setTargetDurationSeconds] = useState(String(defaults.targetDurationSeconds));
   const [availableEquipment, setAvailableEquipment] = useState(defaults.availableEquipment.join('\n'));
+  const [liveProviderConsent, setLiveProviderConsent] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
 
   useEffect(() => {
@@ -49,6 +52,11 @@ export function SceneBriefDialog({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     try {
+      if (providerMode === 'live' && !liveProviderConsent) {
+        setErrors({ liveProviderConsent: 'Confirm the live provider content transfer to continue.' });
+        window.requestAnimationFrame(() => document.getElementById('scene-brief-liveProviderConsent')?.focus());
+        return;
+      }
       const brief = validateScenePlanningBrief({
         ...defaults,
         tone,
@@ -59,7 +67,7 @@ export function SceneBriefDialog({
         availableEquipment: availableEquipment.split('\n'),
       });
       setErrors({});
-      onSubmit(brief);
+      onSubmit(brief, liveProviderConsent);
     } catch (error) {
       if (error instanceof SceneBriefValidationError) {
         setErrors({ [error.field]: error.message });
@@ -185,6 +193,25 @@ export function SceneBriefDialog({
             <small>One item per line. This can reduce risky or impractical shot choices.</small>
           </label>
         </div>
+
+        {providerMode === 'live' ? (
+          <div className="scene-brief-live-consent scene-brief-wide" role="note">
+            <strong>Live research and planning</strong>
+            <label>
+              <input
+                id="scene-brief-liveProviderConsent"
+                type="checkbox"
+                checked={liveProviderConsent}
+                onChange={(event) => setLiveProviderConsent(event.target.checked)}
+                aria-invalid={Boolean(errors.liveProviderConsent)}
+                aria-describedby={errors.liveProviderConsent ? 'scene-brief-live-consent-error' : 'scene-brief-live-consent-help'}
+              />
+              <span>Send this scene brief and constraints to Parallel and Google Vertex AI.</span>
+            </label>
+            <small id="scene-brief-live-consent-help">Cineserye sends only the selected scene brief, normalized research, and planning constraints. It never sends API keys or the full project file.</small>
+            {errors.liveProviderConsent ? <span id="scene-brief-live-consent-error" role="alert">{errors.liveProviderConsent}</span> : null}
+          </div>
+        ) : null}
 
         <footer>
           <p>Costs will remain illustrative generation estimates—not guaranteed production quotes.</p>

@@ -1,10 +1,19 @@
 import 'server-only';
 
-import type { ScenePlanningBrief } from '../../../domain/cinema/scene-brief';
-import type { PlanSceneFailure } from '../../../features/scene-planner/plan-scene-api';
-import { readCinemaProviderConfig } from '../../../server/cinema/provider-config';
+import type {
+  PlanSceneFailure,
+  PlanSceneRequest,
+} from '../../../features/scene-planner/plan-scene-api';
+import {
+  applyCinemaTelemetryPrivacyBaseline,
+  assertLiveProviderConsent,
+  readCinemaProviderConfig,
+} from '../../../server/cinema/provider-config';
 import { ProviderError, publicProviderError } from '../../../server/cinema/provider-errors';
-import { fixtureWorkflowDependencies, runCinemaPlanningWorkflow } from '../../../server/cinema/workflow';
+import {
+  fixtureWorkflowDependencies,
+  runCinemaPlanningWorkflow,
+} from '../../../server/cinema/workflow';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 
@@ -14,17 +23,22 @@ export async function POST(request: Request): Promise<Response> {
     if (source.length > MAX_REQUEST_BYTES) {
       throw new ProviderError('INVALID_REQUEST', 'The scene brief is too large.');
     }
-    let brief: ScenePlanningBrief;
+    let payload: PlanSceneRequest;
     try {
-      brief = JSON.parse(source) as ScenePlanningBrief;
+      payload = JSON.parse(source) as PlanSceneRequest;
     } catch {
       throw new ProviderError('INVALID_REQUEST', 'The scene brief is not valid JSON.');
     }
-    const config = readCinemaProviderConfig();
-    if (config.mode !== 'fixture') {
-      throw new ProviderError('PROVIDER_UNAVAILABLE', 'Live providers are not enabled in this local build.', true);
+    if (payload.version !== 1 || typeof payload.brief !== 'object' || payload.brief === null) {
+      throw new ProviderError('INVALID_REQUEST', 'The scene planning request is malformed.');
     }
-    const result = await runCinemaPlanningWorkflow(brief, fixtureWorkflowDependencies(), request.signal);
+    const config = readCinemaProviderConfig();
+    applyCinemaTelemetryPrivacyBaseline(config);
+    assertLiveProviderConsent(config, payload.liveProviderConsent);
+    const dependencies = config.mode === 'live'
+      ? (await import('../../../server/cinema/live-workflow')).liveWorkflowDependencies(config)
+      : fixtureWorkflowDependencies();
+    const result = await runCinemaPlanningWorkflow(payload.brief, dependencies, request.signal);
     return Response.json(result, { status: 200 });
   } catch (error) {
     const safeError = publicProviderError(error);

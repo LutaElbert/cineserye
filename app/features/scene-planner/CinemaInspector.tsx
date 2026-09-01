@@ -194,7 +194,7 @@ export function CinemaInspector({
                   {planning ? <LoaderCircle className="spin" size={14} /> : accepted ? <Check size={14} /> : <Sparkles size={14} />}
                   {planning ? 'Planning scene…' : accepted ? 'Plan accepted' : proposed ? 'Review proposal' : 'Draft shot prompts'}
                 </button>
-                <p>{accepted ? 'The prompt package is on the canvas and remains one undoable change.' : 'Uses local fixture providers. No external provider request will run.'}</p>
+                <p>{accepted ? 'The prompt package is on the canvas and remains one undoable change.' : 'Uses the configured server-side providers; the canvas changes only after explicit acceptance.'}</p>
               </div>
             ) : null}
           </>

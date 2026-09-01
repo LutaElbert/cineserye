@@ -16,6 +16,7 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
   await page.getByRole('button', { name: 'Plan scene' }).click();
 
   let brief = page.getByRole('dialog', { name: 'Plan this scene' });
+  await expect(brief.getByLabel(/Send this scene brief/)).toHaveCount(0);
   await expect(brief.getByLabel('Selected scene text')).toHaveValue('Scene 01');
   await expect(brief.getByLabel('Tone', { exact: true })).toHaveValue('Restrained supernatural suspense');
   await expect(brief.getByLabel('Location and period', { exact: true })).toHaveValue('Manila single-screen cinema · late 1980s');
@@ -29,12 +30,17 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
   await brief.getByLabel('Tone', { exact: true }).fill('');
   await brief.getByRole('button', { name: 'Research and draft shots' }).click();
   await expect(brief.getByRole('alert')).toContainText('Tone is required');
-  await brief.getByLabel('Tone', { exact: true }).fill('Claustrophobic suspense');
-  await brief.getByLabel('Target duration (seconds)', { exact: true }).fill('42');
+  const tone = brief.getByLabel('Tone', { exact: true });
+  const duration = brief.getByLabel('Target duration (seconds)', { exact: true });
+  await tone.fill('Claustrophobic suspense');
+  await expect(tone).toHaveValue('Claustrophobic suspense');
+  await duration.fill('42');
+  await expect(duration).toHaveValue('42');
+  await expect(tone).toHaveValue('Claustrophobic suspense');
   await brief.getByLabel('Optional ceiling (PHP)').fill('700');
   await brief.getByRole('button', { name: 'Research and draft shots' }).click();
 
-  const review = page.getByRole('region', { name: 'Mock shot proposal review' });
+  const review = page.getByRole('region', { name: 'Shot proposal review' });
   await expect(review).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
   const outline = page.getByRole('navigation', { name: 'Project outline' });
@@ -168,4 +174,30 @@ test('keeps the one-scene brief keyboard-accessible on a mobile viewport', async
   await expect(planButton).toBeFocused();
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+});
+
+test('requires explicit consent before a live provider content transfer', async ({ page }) => {
+  let planningRequests = 0;
+  await page.route('**/api/cinema/provider-status', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ mode: 'live', requiresContentTransferConsent: true }),
+    });
+  });
+  page.on('request', (request) => {
+    if (request.url().includes('/api/cinema/plan-scene')) planningRequests += 1;
+  });
+
+  await page.goto('/');
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Scene 01', exact: true }).click();
+  await page.getByRole('button', { name: 'Plan scene' }).click();
+  const brief = page.getByRole('dialog', { name: 'Plan this scene' });
+  const consent = brief.getByLabel(/Send this scene brief and constraints/);
+  await expect(consent).toBeVisible();
+  await brief.getByRole('button', { name: 'Research and draft shots' }).click();
+  await expect(brief.getByRole('alert')).toContainText('Confirm the live provider content transfer');
+  await expect(consent).toBeFocused();
+  expect(planningRequests).toBe(0);
 });

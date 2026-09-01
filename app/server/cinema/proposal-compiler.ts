@@ -1,49 +1,173 @@
-import { MOCK_SHOT_PLAN_PROPOSAL } from '../../domain/cinema/mock/reel-knows-tomorrow';
-import type { CinemaProjectDataV1 } from '../../domain/cinema/project-data';
-import { richTextFromPlainText } from '../../editor/rich-text';
+import { MarkerType } from '@xyflow/react';
+import type { CinemaAssetRecord, CinemaProjectDataV1 } from '../../domain/cinema/project-data';
 import type { CanvasCommandProposal } from '../../editor/canvas-commands';
+import { conceptTitleFromPlainText, richTextFromPlainText } from '../../editor/rich-text';
+import type { EditorEdge, EditorNode } from '../../editor/types';
 
-export function compileFixtureCanvasProposal(
+function conceptNode(
+  id: string,
+  title: string,
+  eyebrow: string,
+  body: string,
+  tone: 'ink' | 'indigo' | 'mint',
+  position: { x: number; y: number },
+): EditorNode {
+  return {
+    id,
+    type: 'concept',
+    position,
+    style: { width: 250, height: 88 },
+    draggable: true,
+    deletable: true,
+    data: {
+      kind: 'concept',
+      name: title,
+      label: title,
+      title: conceptTitleFromPlainText(title),
+      body: richTextFromPlainText(body),
+      eyebrow,
+      tone,
+      collapsed: false,
+      horizontalAlign: 'left',
+      verticalAlign: 'top',
+      opacity: 1,
+      locked: false,
+    },
+  };
+}
+
+function edge(id: string, source: string, target: string): EditorEdge {
+  return {
+    id,
+    source,
+    target,
+    type: 'smoothstep',
+    animated: false,
+    style: { stroke: '#a9adb7', strokeWidth: 1.5 },
+    markerEnd: { type: MarkerType.ArrowClosed },
+    data: { label: '', kind: 'default' },
+  };
+}
+
+function assetEyebrow(asset: CinemaAssetRecord) {
+  if (asset.category === 'location') return 'Location';
+  if (asset.category === 'prop') return 'Prop';
+  if (asset.category === 'visual-element') return 'Visual element';
+  return 'Asset';
+}
+
+function ceilingLabel(project: CinemaProjectDataV1, sceneId: string) {
+  const scene = project.scenes[sceneId];
+  const cost = Object.values(project.costs).find((item) => item.sceneId === sceneId);
+  if (!cost || cost.ceiling === null) return `${scene.brief?.budgetBand ?? 'custom'} budget`;
+  return `${cost.currency} ${cost.ceiling.toLocaleString('en-US')} ceiling`;
+}
+
+export function compileCinemaCanvasProposal(
   runId: string,
   cinema: CinemaProjectDataV1,
 ): CanvasCommandProposal {
-  const proposal = structuredClone(MOCK_SHOT_PLAN_PROPOSAL);
-  proposal.proposalId = `${runId}-canvas-proposal`;
-  proposal.summary = 'Create a validated, fixture-backed six-shot prompt package.';
-  const scene = cinema.scenes['scene-01'];
-  const cost = cinema.costs['cost-scene-01'];
+  const sceneId = cinema.activeSceneId;
+  if (!sceneId) throw new Error('A canvas proposal requires an active scene.');
+  const scene = cinema.scenes[sceneId];
+  const run = cinema.agentRuns[runId];
+  if (!scene || !run) throw new Error('A canvas proposal requires a scene and agent run.');
 
-  for (const command of proposal.commands) {
-    if (command.type === 'update-node' && command.id === 'story-premise') {
-      command.patch.data = {
-        ...command.patch.data,
-        body: richTextFromPlainText(scene.synopsis),
-      };
-    }
-    if (command.type === 'update-node' && command.id === 'scene-01') {
-      const ceiling = cost.ceiling === null
-        ? `${scene.brief?.budgetBand ?? 'custom'} budget`
-        : `${cost.currency} ${cost.ceiling.toLocaleString('en-US')} ceiling`;
-      command.patch.data = {
-        ...command.patch.data,
-        body: richTextFromPlainText(
-          `${scene.brief?.locationPeriod ?? ''} · ${scene.brief?.tone ?? ''} · ${scene.brief?.targetDurationSeconds ?? 36}s · ${ceiling}`,
-        ),
-      };
-    }
-    if (command.type === 'create-node') {
-      const shot = cinema.shots[command.node.id];
-      if (shot && command.node.data.kind === 'concept') {
-        command.node.data.body = richTextFromPlainText(
-          `${shot.durationSeconds}s · ${shot.framing} · ${shot.risk} risk`,
-        );
-      }
-      if (command.node.id === 'cine-agent-plan' && command.node.data.kind === 'concept') {
-        command.node.data.body = richTextFromPlainText(
-          `Fixture ready · ${scene.shotIds.length} shots · ${Object.keys(cinema.sources).length} sources`,
-        );
-      }
-    }
-  }
-  return proposal;
+  const characters = Object.values(cinema.characters)
+    .filter((character) => character.sceneIds.includes(sceneId));
+  const assets = Object.values(cinema.assets)
+    .filter((asset) => asset.sceneIds.includes(sceneId));
+  const shots = scene.shotIds.map((shotId) => cinema.shots[shotId]);
+  const planningNodes: EditorNode[] = [
+    conceptNode(
+      run.nodeId,
+      'Research + Shot Planning',
+      'Agent run',
+      `${run.status === 'ready' ? 'Ready' : run.status} · ${shots.length} shots · ${run.sourceIds.length} sources`,
+      'indigo',
+      { x: 740, y: 20 },
+    ),
+    ...characters.map((character, index) => conceptNode(
+      character.nodeId,
+      character.title,
+      'Character',
+      character.summary,
+      'mint',
+      { x: 740, y: 140 + index * 120 },
+    )),
+    ...assets.map((asset, index) => conceptNode(
+      asset.nodeId,
+      asset.title,
+      assetEyebrow(asset),
+      asset.summary,
+      asset.category === 'visual-element' ? 'indigo' : 'ink',
+      { x: 740, y: 140 + (characters.length + index) * 120 },
+    )),
+  ];
+  const shotNodes = shots.map((shot, index) => conceptNode(
+    shot.nodeId,
+    `${String(index + 1).padStart(2, '0')} · ${shot.title}`,
+    'Shot',
+    `${shot.durationSeconds}s · ${shot.framing} · ${shot.risk} risk`,
+    shot.risk === 'high' ? 'indigo' : 'mint',
+    { x: 1_090, y: 20 + index * 120 },
+  ));
+  const createdNodes = [...planningNodes, ...shotNodes];
+  const createdEdges = [
+    edge('scene-agent-plan', scene.nodeId, run.nodeId),
+    ...characters.map((character, index) => edge(
+      `scene-character-${index + 1}`,
+      scene.nodeId,
+      character.nodeId,
+    )),
+    ...assets.map((asset, index) => edge(
+      `scene-asset-${index + 1}`,
+      scene.nodeId,
+      asset.nodeId,
+    )),
+    ...(shots[0] ? [edge('agent-shot-01', run.nodeId, shots[0].nodeId)] : []),
+    ...shots.slice(1).map((shot, index) => edge(
+      `shot-${index + 1}-shot-${index + 2}`,
+      shots[index].nodeId,
+      shot.nodeId,
+    )),
+  ];
+
+  return {
+    version: 1,
+    proposalId: `${runId}-canvas-proposal`,
+    summary: `Create a validated ${shots.length}-shot prompt package with reusable continuity references.`,
+    commands: [
+      { type: 'delete-nodes', ids: ['shot-01'] },
+      {
+        type: 'update-node',
+        id: 'story-premise',
+        patch: {
+          position: { x: 80, y: 330 },
+          data: { body: richTextFromPlainText(scene.synopsis), eyebrow: 'Story premise', tone: 'indigo' },
+        },
+      },
+      {
+        type: 'update-node',
+        id: scene.nodeId,
+        patch: {
+          position: { x: 400, y: 330 },
+          data: {
+            name: scene.title,
+            label: scene.title,
+            title: conceptTitleFromPlainText(scene.title),
+            body: richTextFromPlainText(
+              `${scene.brief?.locationPeriod ?? ''} · ${scene.brief?.tone ?? ''} · ${scene.brief?.targetDurationSeconds ?? 0}s · ${ceilingLabel(cinema, sceneId)}`,
+            ),
+            eyebrow: 'Scene',
+            tone: 'ink',
+          },
+        },
+      },
+      ...createdNodes.map((node) => ({ type: 'create-node' as const, node })),
+      ...createdEdges.map((createdEdge) => ({ type: 'connect-nodes' as const, edge: createdEdge })),
+    ],
+  };
 }
+
+export const compileFixtureCanvasProposal = compileCinemaCanvasProposal;

@@ -7,6 +7,8 @@ const forbiddenMarkers = [
   'PARALLEL_API_KEY',
   'GOOGLE_CLOUD_PROJECT',
   'CINESERYE_VERTEX_MODEL',
+  'CINESERYE_ENABLE_CLOUD_TELEMETRY',
+  'OTEL_INSTRUMENTATION_GENAI_COMPLETION_HOOK',
   'fixture-research',
   'fixture-shot-planner',
   'cineserye.copilot',

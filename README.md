@@ -2,7 +2,7 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-This baseline deliberately stops before a real copilot. It includes a local, typed mock scene planner for validating the prompt-first experience, but contains no AI provider, API keys, authentication, cloud data store, or media-generation integration, and it has not been deployed.
+The first copilot vertical slice is now implemented: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until the creator accepts it. Deterministic fixture mode is the default. Optional live mode uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK. Cineserye still contains no authentication, cloud project store, image/video generation, or deployment.
 
 ## Foundation
 
@@ -12,8 +12,9 @@ This baseline deliberately stops before a real copilot. It includes a local, typ
 - Keyboard workflows, reduced-motion support, responsive panels, accessible labels, and automated accessibility checks.
 - Unit, browser, compatibility, type, lint, build, and dependency-audit gates.
 - Security headers and a privacy baseline designed for an on-device application.
-- A prompt-first mock scene planner with character, location, prop, shot, source, continuity, and illustrative generation-cost views.
+- A prompt-first scene planner with character, location, prop, shot, cited source, continuity, and illustrative generation-cost views.
 - An automatic Project Outline that derives production groups, chronological shots, duration, and expected cost from the active cinema canvas without storing a second hierarchy.
+- Server-only provider contracts, bounded retry/timeout/cancellation, runtime output validation, and content-free structured telemetry.
 - Ghost proposal review with atomic acceptance, rejection without mutation, and one-step undo.
 
 The initial story canvas is a linear fixture:
@@ -24,20 +25,21 @@ Story Premise → Scene 01 → Shot 01
 
 ## Architecture boundaries
 
-The reusable editor remains in `app/editor`. Cinema-specific models, prompt artifacts, mock data, and the planned extension registry live in `app/domain/cinema`. The planned node vocabulary is `scene`, `shot`, `character`, `asset`, and `agent-run`; none is activated in the persistent editor schema yet. The mock experience deliberately uses existing concept nodes as visual hosts and keeps full cinema details in a typed sidecar until the UI is approved.
+The reusable editor remains in `app/editor`. Cinema-specific records, prompt artifacts, fixtures, and presentation projection live in `app/domain/cinema`. The cinema sidecar is a versioned, runtime-validated part of the persistent editor document and portable backup. Existing concept nodes remain generic visual hosts for the `scene`, `shot`, `character`, `asset`, and `agent-run` records.
 
-Future copilot output must enter through `app/editor/canvas-commands.ts`. That boundary accepts an untrusted command proposal, applies it only to a clone, enforces lock and graph rules, validates the complete result, and returns one atomic document. The mock planner now uses that result for a non-persistent ghost preview and a single undoable commit. It does not call a provider or mutate the saved document before approval.
+All copilot output enters through `app/editor/canvas-commands.ts`. That boundary accepts an untrusted command proposal, applies it only to a clone, enforces lock and graph rules, validates the complete result, and returns one atomic document. Neither fixture nor live providers can write directly to React state, IndexedDB, backups, or exports.
 
-## Mock scene-planner walkthrough
+## Scene-planner walkthrough
 
 1. Select `Scene 01` or choose **Plan scene** in the top bar.
-2. Wait for the local mock proposal for *The Reel That Knows Tomorrow*.
-3. Browse the generated Planning, Characters, Locations, Props, Visual Elements, and Shots groups in the Project Outline.
-4. Select any outline item to focus its corresponding ghost node.
-5. Review **Details**, **Prompt**, **Sources**, and **Cost** in the inspector.
-6. Reject the proposal to leave the canvas unchanged, or accept it as one undoable operation.
+2. Confirm tone, location/period, production band, optional generation-cost ceiling, target duration, and available equipment.
+3. In live mode only, explicitly consent to sending that selected brief to Parallel and Vertex AI.
+4. Browse the generated Planning, Characters, Locations, Props, Visual Elements, and Shots groups in the Project Outline.
+5. Select any outline item to focus its corresponding ghost node.
+6. Review **Details**, **Prompt**, **Sources**, and **Cost** in the inspector.
+7. Reject the proposal to leave the canvas unchanged, or accept it as one undoable operation.
 
-The mock uses no external requests. Research cards and prices are visibly marked illustrative.
+Fixture mode uses no external requests. Live research cards link to their normalized sources. Generation prices remain visibly illustrative in both modes.
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
 
@@ -56,6 +58,24 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+### Optional live providers
+
+Authenticate local Vertex access with Application Default Credentials, then start Cineserye with server-only environment variables:
+
+```sh
+gcloud auth application-default login
+gcloud config set project cineserye
+
+export CINESERYE_PROVIDER_MODE=live
+export PARALLEL_API_KEY='set-this-outside-git'
+export GOOGLE_CLOUD_PROJECT=cineserye
+export GOOGLE_CLOUD_LOCATION=global
+export CINESERYE_VERTEX_MODEL=gemini-3.7-flash
+npm run dev
+```
+
+Do not prefix provider variables with `NEXT_PUBLIC_`. Cloud telemetry and full prompt/response logging remain off unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately set after a content-retention review.
+
 ## Verification
 
 ```sh
@@ -64,9 +84,16 @@ npm run typecheck
 npm run lint
 npm test
 npm run build
+npm run check:client-boundary
 npm audit --audit-level=high
 npx playwright install chromium firefox webkit
 npm run test:e2e
+```
+
+The opt-in local Vertex/ADK contract smoke uses credits and never calls Parallel:
+
+```sh
+CINESERYE_RUN_VERTEX_SMOKE=1 npx vitest run app/server/cinema/vertex-adk-live.test.ts --config vitest.config.ts
 ```
 
 CI builds the application and runs Playwright against the local production Cloudflare Worker in Chromium, Firefox, and WebKit. Verification does not deploy the Worker.
@@ -83,4 +110,4 @@ The browser owns the working copy. Download a `.cineserye` backup before clearin
 
 ## Deployment
 
-Cloudflare configuration is retained for future preview and production workflows, but this baseline is not deployed. No D1, R2, or application user-data binding is configured. A later deployment must be an explicit, separately reviewed action.
+Cloudflare configuration is retained for future preview and production workflows, but this application has not been deployed. No D1, R2, or application user-data binding is configured. A later deployment must be an explicit, separately reviewed action.

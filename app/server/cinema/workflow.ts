@@ -5,8 +5,10 @@ import { FixtureResearchProvider, FixtureShotPlannerProvider } from './fixture-p
 import type { ResearchProvider, ShotPlannerProvider } from './provider-contracts';
 import { ProviderError } from './provider-errors';
 import { runProviderOperation } from './provider-resilience';
-import { compileFixtureCanvasProposal } from './proposal-compiler';
+import { compileCinemaCanvasProposal } from './proposal-compiler';
 import {
+  CINEMA_AGENT_VERSION,
+  CINEMA_TELEMETRY_POLICY,
   consoleCinemaTraceSink,
   traceCinemaPhase,
   type CinemaTraceSink,
@@ -37,7 +39,11 @@ export async function runCinemaPlanningWorkflow(
   const runId = crypto.randomUUID();
   const sink = dependencies.traceSink ?? consoleCinemaTraceSink;
   const startedAt = performance.now();
-  sink({ event: 'run-started', runId, status: 'ok' });
+  sink({
+    event: 'run-started', runId, status: 'ok',
+    agentVersion: CINEMA_AGENT_VERSION,
+    telemetryPolicy: CINEMA_TELEMETRY_POLICY,
+  });
   try {
     const research = await traceCinemaPhase(
       sink,
@@ -62,23 +68,29 @@ export async function runCinemaPlanningWorkflow(
       ),
       (result) => ({ provider: result.provider, model: result.model, resultCount: Object.keys(result.cinema.shots).length }),
     );
-    const proposal = compileFixtureCanvasProposal(runId, planning.cinema);
-    const hostNodeIds = new Set([
-      'story-premise',
-      'scene-01',
-      ...proposal.commands.flatMap((command) => command.type === 'create-node' ? [command.node.id] : []),
-    ]);
+    const proposal = compileCinemaCanvasProposal(runId, planning.cinema);
+    const hostNodeIds = new Set(
+      proposal.commands.flatMap((command) => command.type === 'create-node' ? [command.node.id] : []),
+    );
+    if (planning.cinema.projectNodeId) hostNodeIds.add(planning.cinema.projectNodeId);
+    for (const scene of Object.values(planning.cinema.scenes)) hostNodeIds.add(scene.nodeId);
     const cinema = validateCinemaProjectData(planning.cinema, hostNodeIds);
     sink({
       event: 'phase-completed', runId, phase: 'validation', status: 'ok',
+      agentVersion: CINEMA_AGENT_VERSION,
+      telemetryPolicy: CINEMA_TELEMETRY_POLICY,
       resultCount: Object.keys(cinema.shots).length,
     });
     sink({
       event: 'phase-completed', runId, phase: 'proposal', status: 'ok',
+      agentVersion: CINEMA_AGENT_VERSION,
+      telemetryPolicy: CINEMA_TELEMETRY_POLICY,
       resultCount: proposal.commands.length,
     });
     sink({
       event: 'run-completed', runId, status: 'ok',
+      agentVersion: CINEMA_AGENT_VERSION,
+      telemetryPolicy: CINEMA_TELEMETRY_POLICY,
       durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
       resultCount: Object.keys(cinema.shots).length,
     });
@@ -95,6 +107,8 @@ export async function runCinemaPlanningWorkflow(
   } catch (error) {
     sink({
       event: 'run-failed', runId, status: 'error',
+      agentVersion: CINEMA_AGENT_VERSION,
+      telemetryPolicy: CINEMA_TELEMETRY_POLICY,
       durationMs: Math.max(0, Math.round(performance.now() - startedAt)),
       errorCode: error instanceof ProviderError ? error.code : 'UNEXPECTED',
     });

@@ -9,12 +9,22 @@ export type CinemaTraceEvent = {
   retryCount?: number;
   status?: 'ok' | 'error';
   errorCode?: string;
+  agentVersion?: string;
+  telemetryPolicy?: 'no-content-v1';
 };
+
+export const CINEMA_AGENT_VERSION = 'scene-planner-v1';
+export const CINEMA_TELEMETRY_POLICY = 'no-content-v1' as const;
 
 export type CinemaTraceSink = (event: CinemaTraceEvent) => void;
 
 export const consoleCinemaTraceSink: CinemaTraceSink = (event) => {
-  console.info(JSON.stringify({ scope: 'cineserye.copilot', ...event }));
+  console.info(JSON.stringify({
+    scope: 'cineserye.copilot',
+    agentVersion: CINEMA_AGENT_VERSION,
+    telemetryPolicy: CINEMA_TELEMETRY_POLICY,
+    ...event,
+  }));
 };
 
 export async function traceCinemaPhase<T>(
@@ -27,6 +37,8 @@ export async function traceCinemaPhase<T>(
   const result = await operation();
   sink({
     event: 'phase-completed',
+    agentVersion: CINEMA_AGENT_VERSION,
+    telemetryPolicy: CINEMA_TELEMETRY_POLICY,
     ...event,
     ...describe(result),
     durationMs: Math.max(0, Math.round(performance.now() - startedAt)),

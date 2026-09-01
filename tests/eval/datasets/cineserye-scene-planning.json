@@ -1,0 +1,94 @@
+{
+  "dataset_version": "cineserye-scene-planning-v1",
+  "agent_version": "scene-planner-v1",
+  "scoring_policy": "contract-and-production-usefulness-v1",
+  "eval_cases": [
+    {
+      "eval_case_id": "period_suspense_one_location",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Plan one 36-second scene: Mara enters an abandoned late-1980s Manila cinema and sees a projector screening her immediate future. Tone: restrained supernatural suspense. Micro production band, PHP 1200 ceiling, phone camera, tripod, one flashlight. Return only the Cineserye structured scene-plan schema."
+          }
+        ]
+      },
+      "rubric_groups": {
+        "production_rubrics": {
+          "rubrics": [
+            {
+              "rubric_id": "one_location_reuse",
+              "content": { "property": { "description": "The plan keeps one primary cinema location and reuses character, projector, flashlight, and spatial continuity references." } }
+            },
+            {
+              "rubric_id": "period_and_budget",
+              "content": { "property": { "description": "The prompts avoid modern production details and make practical choices for the micro band and PHP 1200 ceiling." } }
+            },
+            {
+              "rubric_id": "prompt_first_output",
+              "content": { "property": { "description": "Every chronological shot contains both a storyboard prompt and a video prompt with resolved continuity dependencies." } }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "dialogue_contemporary_phone_kit",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Plan one 45-second intimate contemporary apartment scene between two siblings who avoid discussing a sold family home. Lean production band, PHP 1800 ceiling, phone camera, tripod, one practical lamp, and two lavalier microphones. Return only the Cineserye structured scene-plan schema."
+          }
+        ]
+      },
+      "rubric_groups": {
+        "production_rubrics": {
+          "rubrics": [
+            {
+              "rubric_id": "dialogue_coverage",
+              "content": { "property": { "description": "Coverage is efficient for two performers and preserves eyelines, screen direction, wardrobe, props, and audio continuity." } }
+            },
+            {
+              "rubric_id": "equipment_fit",
+              "content": { "property": { "description": "The plan is achievable with the listed phone, tripod, practical lamp, and lavalier microphones without inventing unavailable equipment." } }
+            },
+            {
+              "rubric_id": "duration_fit",
+              "content": { "property": { "description": "The shot durations can be deterministically reconciled to the 45-second target while preserving the dramatic exchange." } }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eval_case_id": "hopeful_magical_realism_genre_contrast",
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Plan one 24-second scene: before dawn in a contemporary Quezon City bakery, a young owner finds one warm loaf labeled with tomorrow's date. Tone: hopeful magical realism, not horror. Micro production band, PHP 1000 ceiling, phone camera, tripod, one warm practical light. Return only the Cineserye structured scene-plan schema."
+          }
+        ]
+      },
+      "rubric_groups": {
+        "production_rubrics": {
+          "rubrics": [
+            {
+              "rubric_id": "intent_over_default_genre",
+              "content": { "property": { "description": "The visual language remains hopeful magical realism and does not drift into the suspense fixture's horror grammar." } }
+            },
+            {
+              "rubric_id": "simple_magic",
+              "content": { "property": { "description": "The magical reveal is achieved through a reusable loaf, paper label, warm light, and performance rather than an expensive visual effect." } }
+            },
+            {
+              "rubric_id": "citation_honesty",
+              "content": { "property": { "description": "The plan uses only supplied source ids and clearly warns when research is limited." } }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

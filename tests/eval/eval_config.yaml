@@ -1,0 +1,42 @@
+metrics_to_run:
+  - scene_plan_contract
+  - production_usefulness
+
+custom_metrics:
+  - name: scene_plan_contract
+    custom_function: |
+      import json
+
+      def evaluate(instance):
+          response = instance.get("response") or {}
+          parts = response.get("parts") or []
+          text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+          try:
+              plan = json.loads(text)
+          except Exception:
+              return {"score": 0, "explanation": "The final response is not valid JSON."}
+
+          shots = plan.get("shots") if isinstance(plan, dict) else None
+          if not isinstance(shots, list) or not 3 <= len(shots) <= 8:
+              return {"score": 0, "explanation": "The plan must contain three to eight shots."}
+          required = {
+              "title", "description", "purpose", "framing", "cameraMovement",
+              "durationSeconds", "audio", "risk", "characterIndexes", "assetIndexes",
+              "storyboardPrompt", "videoPrompt", "negativeConstraints", "sourceIds"
+          }
+          if any(not isinstance(shot, dict) or not required.issubset(shot) for shot in shots):
+              return {"score": 0, "explanation": "At least one shot is missing required production or prompt fields."}
+          if not isinstance(plan.get("scene"), dict) or not isinstance(plan.get("assets"), list):
+              return {"score": 0, "explanation": "The scene or reusable asset layer is missing."}
+          return {"score": 1, "explanation": "The response satisfies the structural scene-plan contract."}
+
+  - name: production_usefulness
+    prompt_template: |
+      Score this Cineserye one-scene shot proposal from 1 to 5 for professional usefulness to an independent creator without a full pre-production crew.
+
+      Evaluate: chronological clarity; continuity reuse; budget and equipment practicality; storyboard/video prompt quality; source-id honesty; and fidelity to the creator's requested tone rather than the fixture genre.
+
+      Creator request: {prompt}
+      Proposed structured plan: {response}
+
+      Return JSON only: {"score": <1|2|3|4|5>, "explanation": "<concise evidence-based reason>"}

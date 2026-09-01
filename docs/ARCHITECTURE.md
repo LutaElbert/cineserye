@@ -1,61 +1,82 @@
 # Cineserye architecture and extension guide
 
-Cineserye keeps the canvas engine generic, cinema meaning in a domain layer, and any future agent behind a validated proposal boundary.
+Cineserye keeps its canvas engine generic, cinema meaning in a versioned domain sidecar, and every agent behind a validated proposal boundary.
 
 ```text
-mock scene-planner UI        future provider adapter
-          |                            |
-          +---- cinema domain workflows
-                         |
-              validated command proposals
-                         |
-          editor history, graph rules, and persistence
+selected scene + creator constraints
+                |
+        server-only coordinator
+          /                 \
+ Parallel Search       Vertex Gemini via ADK
+          \                 /
+        validated cinema sidecar
+                |
+ deterministic CanvasCommandProposal compiler
+                |
+ locked ghost preview → accept or reject
+                |
+ editor history, graph rules, IndexedDB, backup/export
 ```
 
 ## Generic editor foundation
 
 `app/editor` owns selection, viewport behavior, drag, resize, connections, ordering, undo/redo, graph integrity, IndexedDB persistence, checkpoints, backup/restore, SVG export, keyboard support, responsive panels, accessibility, and security limits.
 
-Do not add provider prompts, credentials, generated-media URLs, or cinema business rules to this layer. Generic fixes should remain portable independently of Cineserye's product decisions.
+Provider prompts, credentials, model SDKs, research logic, and cinema business rules do not belong in this layer. Generic canvas fixes should remain reusable independently of Cineserye's product decisions.
 
-## Cinema domain layer
+`app/editor/canvas-commands.ts` is the only agent mutation route. It treats commands as untrusted, limits the batch, applies them to a clone, respects locks and connection rules, validates the complete graph after every command, and returns affected IDs without mutating editor state.
 
-`app/domain/cinema` owns the planned cinema vocabulary and payload models. Its registry reserves these extension points without activating renderers or changing the current document schema:
+## Cinema domain and presentation
 
-- `scene`: synopsis, dramatic purpose, status, estimated duration, and continuity notes;
-- `shot`: parent scene, framing, movement, lens, duration, and generation status;
-- `character`: story summary plus appearance, voice, and wardrobe references;
-- `asset`: image, video, audio, or script reference with source and provenance;
-- `agent-run`: proposal lifecycle, summary, command count, and timestamps.
+`app/domain/cinema/project-data.ts` defines the persisted version-1 cinema sidecar. It contains relational records for:
 
-Each descriptor has a versioned runtime validator and is currently marked `planned`. Activating a kind later requires a focused editor renderer, inspector controls, document parsing/migration, import/export behavior, accessibility coverage, and tests. Activation should happen one node kind at a time.
+- `scene`: brief, synopsis, purpose, continuity notes, and chronological shot IDs;
+- `shot`: scene, order, duration, framing, movement, audio, risk, and continuity node IDs;
+- `character`: appearance, voice, and wardrobe references;
+- `asset`: location, prop, visual element, reference, or other reusable item with provenance;
+- `agent-run`: lifecycle, providers/model, warnings, prompts, sources, and timestamps;
+- prompt, research-source, and illustrative cost records.
 
-The current UI prototype does not activate those persistent types. `app/domain/cinema/prompt-artifacts.ts` defines typed prompt, source, presentation, and illustrative cost artifacts. `app/domain/cinema/mock/reel-knows-tomorrow.ts` supplies a validated sidecar project and a normal canvas-command proposal. Existing concept nodes act only as visual hosts, allowing the experience to be tested without prematurely changing the portable project schema.
+Runtime validation resolves every scene, shot, character, asset, prompt, source, cost, run, and host canvas node relationship. The sidecar participates in document migrations, IndexedDB autosave, checkpoints, `.cineserye` backup/restore, and undo/redo.
 
-## Validated command boundary
+`app/domain/cinema/project-presentation.ts` projects those persistent records into the read-only view consumed by canvas cards, the inspector, and the automatic Project Outline. The outline stores only local collapse state; node existence, selection, visibility, locking, proposal status, duration, and costs derive from the active preview or saved document.
 
-`app/editor/canvas-commands.ts` is the only prepared mutation route for a future copilot. Version 1 supports creating nodes, updating a restricted node patch, connecting nodes, and deleting nodes.
+## Provider and agent boundary
 
-The boundary:
+`app/server/cinema` is server-only:
 
-- treats the proposal as untrusted input;
-- limits batch size and validates proposal metadata;
-- applies commands sequentially to a cloned document;
-- respects locked nodes and current connection rules;
-- rejects unsupported commands and invalid node-kind changes;
-- validates the graph and document after every command;
-- returns affected IDs and one complete result without mutating editor state.
+- `provider-contracts.ts` separates research from shot planning.
+- `parallel-research-provider.ts` submits four bounded queries, accepts only HTTP(S) URLs, deduplicates results, caps response size/count, and normalizes citations.
+- `vertex-adk-shot-planner.ts` runs an official TypeScript ADK `LlmAgent` against Vertex AI using ADC and a lean response schema.
+- `planner-output.ts` applies the strict Zod boundary, resolves zero-based continuity indexes, reconciles durations exactly, computes illustrative costs deterministically, and produces versioned domain records.
+- `provider-resilience.ts` owns cancellation, timeouts, and at most one retry.
+- `telemetry.ts` emits content-free phase events with `scene-planner-v1` and `no-content-v1` identifiers.
+- `proposal-compiler.ts` deterministically compiles the validated sidecar into generic canvas commands. The model never authors editor commands.
 
-The mock UI previews the returned document and affected IDs as locked ghost nodes. Acceptance records the current snapshot once and commits the returned nodes and edges once, making the proposal one undoable operation. Rejection discards the result without modifying the saved canvas.
+Fixture providers remain the default for deterministic UI and pull-request tests. Live mode is enabled only by server environment configuration and requires explicit per-request content-transfer consent in both the UI and API boundary.
 
-When cinema metadata is active, `app/features/project-outline/outline-model.ts` projects the current preview or saved canvas into an automatic production hierarchy. It classifies sidecar entries into Planning, Characters, Locations, Props, Visual Elements, and Shots, and orders shots using the validated project shot sequence. The outline stores only local collapse state; selection, visibility, locking, node existence, and proposal status continue to come from the canvas document. Generic documents retain the original Layers view.
+## Review and persistence sequence
+
+1. The browser sends one validated scene brief.
+2. Research runs before planning; neither provider can access editor mutation or storage functions.
+3. Strict validation and deterministic compilation complete on the server.
+4. The browser applies the command proposal to a cloned document through the generic boundary.
+5. The creator inspects locked ghost nodes, prompts, linked sources, continuity, and costs.
+6. Reject discards the preview byte-for-byte. Accept records one history snapshot and commits nodes, edges, and cinema sidecar once.
+7. One undo reverses the entire accepted proposal; redo and reload restore it.
+
+## Evaluation and observability
+
+`tests/eval` contains a versioned, Agents CLI–compatible three-case dataset and scoring configuration. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, and telemetry privacy. `vertex-adk-live.test.ts` is opt-in and proves the real Vertex/ADK contract with local ADC while using a local research fixture.
+
+Cloud trace or completion export is not configured. Prompt/response capture and completion upload are disabled unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately supplied after a retention review.
 
 ## Deliberately absent
 
-This foundation has no real provider adapter, model invocation, API key, authentication, cloud persistence, persistent cinema payloads, real `agent-run`, or media generation. Its prompt, research, and cost interfaces are driven only by visibly labeled local mock data. Cloudflare configuration is buildable but no environment has been deployed.
+- authentication, accounts, collaboration, or cloud project storage;
+- image, storyboard-frame, audio, or video generation;
+- API-key entry in the browser;
+- automatic proposal acceptance or background autonomy;
+- A2A exposure, deployment, or provisioned observability infrastructure.
 
-## Implemented mock slice
-
-The UI now supports one local workflow: select a scene, request a structured prompt-first shot proposal, inspect character and asset continuity, prompts, sources, and cost, preview affected nodes and connectors, accept them as one command batch, reject without mutation, and undo the accepted batch once.
-
-The next architectural slice should promote the approved sidecar fields into a versioned persistent cinema payload with backup migration and restore validation. Parallel and Gemini/Vertex adapters should remain separate later steps.
+The next media-facing phase should begin only after a creator approves text prompts: generate one storyboard reference frame for one accepted shot, preserve provenance, and keep a separate approval boundary before any video generation.

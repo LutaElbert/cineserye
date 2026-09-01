@@ -1,5 +1,6 @@
 import type { CinemaProjectDataV1 } from '../../domain/cinema/project-data';
 import type { CanvasCommandProposal } from '../../editor/canvas-commands';
+import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 
 export type ProviderErrorCode =
   | 'CANCELLED'
@@ -10,6 +11,17 @@ export type ProviderErrorCode =
   | 'TIMEOUT'
   | 'UNAUTHORIZED'
   | 'UNEXPECTED_RESPONSE';
+
+export type PlanSceneRequest = {
+  version: 1;
+  brief: ScenePlanningBrief;
+  liveProviderConsent: boolean;
+};
+
+export type CinemaProviderStatus = {
+  mode: 'fixture' | 'live';
+  requiresContentTransferConsent: boolean;
+};
 
 export type PlanSceneSuccess = {
   ok: true;

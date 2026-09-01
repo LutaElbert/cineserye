@@ -148,7 +148,11 @@ import {
   type SceneBriefDefaults,
 } from '../features/scene-planner/SceneBriefDialog';
 import type { ScenePlanningBrief } from '../domain/cinema/scene-brief';
-import type { PlanSceneResponse } from '../features/scene-planner/plan-scene-api';
+import type {
+  CinemaProviderStatus,
+  PlanSceneRequest,
+  PlanSceneResponse,
+} from '../features/scene-planner/plan-scene-api';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
@@ -521,6 +525,14 @@ function safeFileBase(fileName: string) {
   );
 }
 
+function formatCinemaMoney(value: number, currency: 'PHP' | 'USD') {
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: currency === 'PHP' ? 0 : 2,
+  }).format(value);
+}
+
 function estimateSnapshotBytes(snapshot: EditorSnapshot) {
   let characters = snapshot.edges.length * 280
     + snapshot.nodes.length * 360
@@ -589,6 +601,8 @@ function EditorInner() {
   const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
   const [mockProposalPreview, setMockProposalPreview] = useState<AppliedCanvasCommandProposal | null>(null);
   const [proposalCinema, setProposalCinema] = useState<CinemaProjectDataV1 | null>(null);
+  const [proposalMode, setProposalMode] = useState<'fixture' | 'live' | null>(null);
+  const [configuredProviderMode, setConfiguredProviderMode] = useState<'loading' | 'fixture' | 'live'>('loading');
   const [sceneBriefDefaults, setSceneBriefDefaults] = useState<SceneBriefDefaults | null>(null);
   const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
   const [expandedOutlineBranches, setExpandedOutlineBranches] = useState<Set<OutlineBranchId>>(
@@ -641,6 +655,20 @@ function EditorInner() {
 
   useEffect(() => () => {
     planningControllerRef.current?.abort('editor-unmounted');
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch('/api/cinema/provider-status', { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Provider status is unavailable.');
+        return response.json() as Promise<CinemaProviderStatus>;
+      })
+      .then((status) => setConfiguredProviderMode(status.mode))
+      .catch(() => {
+        if (!controller.signal.aborted) setConfiguredProviderMode('loading');
+      });
+    return () => controller.abort();
   }, []);
 
   useLayoutEffect(() => {
@@ -732,19 +760,22 @@ function EditorInner() {
     updatedAt: Date.now(),
   }), []);
 
-  const runMockScene = useCallback(async (brief: ScenePlanningBrief) => {
+  const runMockScene = useCallback(async (
+    brief: ScenePlanningBrief,
+    liveProviderConsent: boolean,
+  ) => {
     if (mockProposalStage !== 'idle' || mockProposalPreview) return;
     if (!nodesRef.current.some((node) => node.id === REEL_KNOWS_TOMORROW.sceneNodeId)) {
       announce('The demo scene is not available in this document.', 'error');
       return;
     }
     if (nodesRef.current.some((node) => node.id === 'cine-agent-plan')) {
-      announce('The mock shot plan is already on the canvas.');
+      announce('The shot plan is already on the canvas.');
       return;
     }
     setMockProposalStage('planning');
     setMobilePanel('inspector');
-    announce('Running the local fixture workflow. No external provider request will run.');
+    announce('Running the configured research and shot-planning workflow.');
     const sourceDocument = getCurrentDocument();
     const controller = new AbortController();
     planningControllerRef.current = controller;
@@ -752,26 +783,32 @@ function EditorInner() {
       const response = await fetch('/api/cinema/plan-scene', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(brief),
+        body: JSON.stringify({
+          version: 1,
+          brief,
+          liveProviderConsent,
+        } satisfies PlanSceneRequest),
         signal: controller.signal,
       });
       const payload = await response.json() as PlanSceneResponse;
       if (!payload.ok) throw new Error(payload.error.message);
       const preview = applyCanvasCommandProposal(sourceDocument, payload.proposal);
       setProposalCinema(payload.cinema);
+      setProposalMode(payload.mode);
       setMockProposalPreview(preview);
       setPreviewSelectedNodeId('cine-shot-03');
       setMockProposalStage('ready');
       window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
       announce(
-        `Fixture proposal ready: six shots, reusable elements, ${payload.sourceCount} sources, and cost ranges.`,
+        `${payload.mode === 'live' ? 'Live cited' : 'Fixture'} proposal ready: ${Object.keys(payload.cinema.shots).length} shots, reusable elements, ${payload.sourceCount} sources, and cost ranges.`,
         'success',
       );
     } catch (error) {
       if (!controller.signal.aborted) {
-        announce(error instanceof Error ? error.message : 'The fixture proposal could not be prepared.', 'error');
+        announce(error instanceof Error ? error.message : 'The proposal could not be prepared.', 'error');
       }
       setProposalCinema(null);
+      setProposalMode(null);
       setMockProposalStage('idle');
     } finally {
       if (planningControllerRef.current === controller) planningControllerRef.current = null;
@@ -780,6 +817,10 @@ function EditorInner() {
 
   const planMockScene = useCallback(() => {
     if (mockProposalStage !== 'idle' || mockProposalPreview || sceneBriefDefaults) return;
+    if (configuredProviderMode === 'loading') {
+      announce('Provider configuration is still loading. Try again in a moment.');
+      return;
+    }
     const selected = nodesRef.current.filter((node) => node.selected);
     const sceneNode = selected.length === 1 ? selected[0] : null;
     if (
@@ -808,7 +849,7 @@ function EditorInner() {
         'One practical flashlight',
       ],
     });
-  }, [announce, mockProposalPreview, mockProposalStage, sceneBriefDefaults]);
+  }, [announce, configuredProviderMode, mockProposalPreview, mockProposalStage, sceneBriefDefaults]);
 
   const closeSceneBrief = useCallback(() => {
     setSceneBriefDefaults(null);
@@ -822,10 +863,11 @@ function EditorInner() {
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
     setProposalCinema(null);
+    setProposalMode(null);
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === REEL_KNOWS_TOMORROW.sceneNodeId })));
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
-    announce('Mock proposal rejected. The saved canvas was not changed.');
+    announce('Proposal rejected. The saved canvas was not changed.');
   }, [announce, fitView]);
 
   const acceptMockProposal = useCallback(() => {
@@ -848,6 +890,7 @@ function EditorInner() {
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
     setProposalCinema(null);
+    setProposalMode(null);
     setSelectedPath(null);
     window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
     announce('Prompt package accepted as one undoable canvas change.', 'success');
@@ -1941,6 +1984,7 @@ function EditorInner() {
       setPreviewSelectedNodeId(null);
       setSceneBriefDefaults(null);
       setProposalCinema(null);
+      setProposalMode(null);
       refreshHistoryState();
       announce('New local document created.', 'success');
     } catch {
@@ -1986,6 +2030,7 @@ function EditorInner() {
     setPreviewSelectedNodeId(null);
     setSceneBriefDefaults(null);
     setProposalCinema(null);
+    setProposalMode(null);
     await queueDocumentSave(restored);
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
@@ -2020,6 +2065,7 @@ function EditorInner() {
       setPreviewSelectedNodeId(null);
       setSceneBriefDefaults(null);
       setProposalCinema(null);
+      setProposalMode(null);
       setExpandedVectors(new Set());
       refreshHistoryState();
       await queueDocumentSave(restored);
@@ -2722,21 +2768,21 @@ function EditorInner() {
               <span className="mock-planning-icon"><LoaderCircle className="spin" size={18} /></span>
               <div>
                 <strong>Drafting the prompt package</strong>
-                <span>Local mock · scene → elements → six shots → cost range</span>
+                <span>Research → continuity elements → shots → validated cost range</span>
               </div>
             </div>
           ) : null}
           {mockProposalPreview ? (
-            <section className="proposal-review-bar" aria-label="Mock shot proposal review">
+            <section className="proposal-review-bar" aria-label="Shot proposal review">
               <div className="proposal-review-icon" aria-hidden="true"><Sparkles size={16} /></div>
               <div className="proposal-review-copy">
-                <span>Mock proposal ready</span>
-                <strong>6 shots · 36 sec · ₱820 expected</strong>
+                <span>{proposalMode === 'live' ? 'Live cited proposal ready' : 'Fixture proposal ready'}</span>
+                <strong>{activeCinemaProject.shotNodeIds.length} shots · {activeCinemaProject.targetDurationSeconds} sec · {formatCinemaMoney(activeCinemaProject.cost.expected, activeCinemaProject.cost.currency)} expected</strong>
                 <small>Inspect every ghost node before committing one undoable change.</small>
               </div>
               <div className="proposal-cost-range" aria-label="Illustrative cost range">
-                <span><small>Minimum</small>₱430</span>
-                <span><small>High risk</small>₱1,140</span>
+                <span><small>Minimum</small>{formatCinemaMoney(activeCinemaProject.cost.minimum, activeCinemaProject.cost.currency)}</span>
+                <span><small>High risk</small>{formatCinemaMoney(activeCinemaProject.cost.highRisk, activeCinemaProject.cost.currency)}</span>
               </div>
               <div className="proposal-review-actions">
                 <button type="button" className="secondary-button" onClick={rejectMockProposal}>Reject</button>
@@ -2861,10 +2907,11 @@ function EditorInner() {
         {sceneBriefDefaults ? (
           <SceneBriefDialog
             defaults={sceneBriefDefaults}
+            providerMode={configuredProviderMode === 'live' ? 'live' : 'fixture'}
             onCancel={closeSceneBrief}
-            onSubmit={(brief) => {
+            onSubmit={(brief, liveProviderConsent) => {
               setSceneBriefDefaults(null);
-              runMockScene(brief);
+              runMockScene(brief, liveProviderConsent);
             }}
           />
         ) : null}

@@ -1353,6 +1353,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .scene-brief-field small { color: var(--muted); font-size: 8px; line-height: 1.45; }
 .scene-brief-field strong[role="alert"] { color: var(--danger); font-size: 8px; font-weight: 650; }
 .scene-brief-wide { grid-column: 1 / -1; }
+.scene-brief-live-consent { display: grid; gap: 7px; padding: 11px 12px; border: 1px solid #d9d7ff; border-radius: 9px; background: #f7f6ff; color: #50535d; }
+.scene-brief-live-consent > strong { color: #3f3a8f; font-size: 10px; }
+.scene-brief-live-consent label { display: flex; align-items: flex-start; gap: 8px; font-size: 9px; line-height: 1.45; }
+.scene-brief-live-consent input { margin-block-start: 1px; accent-color: var(--indigo); }
+.scene-brief-live-consent small { color: var(--muted); font-size: 8px; line-height: 1.45; }
+.scene-brief-live-consent [role="alert"] { color: var(--danger); font-size: 8px; font-weight: 650; }
 .scene-brief-dialog footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding-block-start: 14px; border-block-start: 1px solid var(--line); }
 .scene-brief-dialog footer p { max-inline-size: 330px; }
 .scene-brief-dialog footer > div { display: flex; flex: 0 0 auto; gap: 7px; }

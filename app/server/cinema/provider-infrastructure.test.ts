@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readCinemaProviderConfig } from './provider-config';
+import {
+  applyCinemaTelemetryPrivacyBaseline,
+  assertLiveProviderConsent,
+  readCinemaProviderConfig,
+} from './provider-config';
 import { ProviderError, publicProviderError } from './provider-errors';
 import { runProviderOperation } from './provider-resilience';
 import { traceCinemaPhase, type CinemaTraceEvent } from './telemetry';
@@ -12,7 +16,24 @@ describe('cinema provider infrastructure', () => {
       googleCloudProject: 'cineserye',
       googleCloudLocation: 'global',
       vertexModel: 'gemini-3.7-flash',
+      cloudTelemetryEnabled: false,
     });
+  });
+
+  it('disables content capture and completion upload unless cloud telemetry is explicitly enabled', () => {
+    const environment: Record<string, string | undefined> = {
+      OTEL_INSTRUMENTATION_GENAI_COMPLETION_HOOK: 'upload',
+    };
+    applyCinemaTelemetryPrivacyBaseline(readCinemaProviderConfig(environment), environment);
+    expect(environment).toMatchObject({
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: 'NO_CONTENT',
+      ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS: 'false',
+    });
+    expect(environment.OTEL_INSTRUMENTATION_GENAI_COMPLETION_HOOK).toBeUndefined();
+
+    const optedIn = { CINESERYE_ENABLE_CLOUD_TELEMETRY: 'true', OTEL_INSTRUMENTATION_GENAI_COMPLETION_HOOK: 'upload' };
+    applyCinemaTelemetryPrivacyBaseline(readCinemaProviderConfig(optedIn), optedIn);
+    expect(optedIn.OTEL_INSTRUMENTATION_GENAI_COMPLETION_HOOK).toBe('upload');
   });
 
   it('returns safe configuration errors without secret values', () => {
@@ -24,6 +45,16 @@ describe('cinema provider infrastructure', () => {
       message: 'The planning service could not complete this request.',
       retryable: true,
     });
+  });
+
+  it('requires explicit content-transfer consent only in live mode', () => {
+    expect(() => assertLiveProviderConsent(readCinemaProviderConfig({}), false)).not.toThrow();
+    const liveConfig = readCinemaProviderConfig({
+      CINESERYE_PROVIDER_MODE: 'live',
+      PARALLEL_API_KEY: 'configured-for-test',
+    });
+    expect(() => assertLiveProviderConsent(liveConfig, false)).toThrow('Confirm the live provider');
+    expect(() => assertLiveProviderConsent(liveConfig, true)).not.toThrow();
   });
 
   it('retries one retryable failure and then succeeds', async () => {
