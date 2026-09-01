@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createDiagramPng, openEditor } from './helpers';
+import { addCinemaDraft, createDiagramPng, openEditor } from './helpers';
 
 test('imports, persists, backs up, and exports locally with vectorization disabled', async ({ page, baseURL }) => {
   const externalRequests: string[] = [];
@@ -58,11 +58,11 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
 test('edits, hides, locks, duplicates, deletes, undoes, and redoes layers', async ({ page }) => {
   await openEditor(page);
 
-  await page.getByRole('button', { name: 'Add concept layer' }).click();
+  await addCinemaDraft(page, 'Note', true);
   const inspector = page.locator('.inspector-panel');
   const edgeCount = await page.locator('.react-flow__edge').count();
   const sourceHandle = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).locator('.react-flow__handle.source').first();
-  const targetHandle = page.locator('.react-flow__node').filter({ hasText: 'New concept' }).locator('.react-flow__handle.target').first();
+  const targetHandle = page.locator('.react-flow__node').filter({ hasText: 'Note 01' }).locator('.react-flow__handle.target').first();
   const sourceBox = await sourceHandle.boundingBox();
   const targetBox = await targetHandle.boundingBox();
   expect(sourceBox).toBeTruthy();
@@ -216,7 +216,7 @@ test('renames layers, searches content, adds and collapses branches, and saves c
   await expect(page.getByRole('button', { name: 'Discovery layer', exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Discovery layer', exact: true }).click();
-  await page.getByRole('button', { name: 'Add child', exact: true }).click();
+  await page.getByRole('button', { name: 'Add scene', exact: true }).click();
   await page.getByLabel('Concept title').fill('Evidence review');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
   await expect(page.locator('.react-flow__node').filter({ hasText: 'Evidence review' })).toBeVisible();

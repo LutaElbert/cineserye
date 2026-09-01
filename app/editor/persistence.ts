@@ -6,6 +6,7 @@ const DATABASE_NAME = APP_CONFIG.storage.databaseName;
 const STORE_NAME = 'documents';
 const CHECKPOINT_STORE_NAME = 'checkpoints';
 const DOCUMENT_ID = 'current';
+const RECOVERY_DOCUMENT_ID = 'last-non-empty';
 const DATABASE_VERSION = 3;
 const MAX_CHECKPOINTS = 20;
 
@@ -77,6 +78,56 @@ export async function clearLocalDocument(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(STORE_NAME, 'readwrite');
       transaction.objectStore(STORE_NAME).delete(DOCUMENT_ID);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function saveLocalRecoveryDocument(document: EditorDocument): Promise<void> {
+  if (document.nodes.length === 0) throw new Error('A recovery document must not be empty.');
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      const stored: StoredDocument = {
+        ...validateEditorDocument(document),
+        id: RECOVERY_DOCUMENT_ID,
+      };
+      transaction.objectStore(STORE_NAME).put(stored);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function loadLocalRecoveryDocument(): Promise<EditorDocument | null> {
+  const database = await openDatabase();
+  try {
+    const stored = await new Promise<StoredDocument | undefined>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readonly');
+      const request = transaction.objectStore(STORE_NAME).get(RECOVERY_DOCUMENT_ID);
+      request.onsuccess = () => resolve(request.result as StoredDocument | undefined);
+      request.onerror = () => reject(request.error);
+    });
+    return stored ? validateEditorDocument(stored) : null;
+  } finally {
+    database.close();
+  }
+}
+
+export async function clearLocalRecoveryDocument(): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE_NAME, 'readwrite');
+      transaction.objectStore(STORE_NAME).delete(RECOVERY_DOCUMENT_ID);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);

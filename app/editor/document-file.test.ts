@@ -78,6 +78,27 @@ describe('Cineserye project backups', () => {
     expect(restoredConcept?.data.kind === 'concept' && restoredConcept.data.verticalAlign).toBe('bottom');
   });
 
+  it('round-trips a bounded product domain type without coupling it to the canvas engine', () => {
+    const document = structuredClone(initialDocument);
+    const concept = document.nodes.find((node) => node.data.kind === 'concept');
+    if (!concept || concept.data.kind !== 'concept') throw new Error('Missing concept fixture.');
+    concept.data.domainType = 'cinema.character';
+
+    const restored = parseProjectBackup(serializeProjectBackup(document));
+    const restoredConcept = restored.nodes.find((node) => node.id === concept.id);
+
+    expect(restoredConcept?.data.kind === 'concept' && restoredConcept.data.domainType).toBe('cinema.character');
+  });
+
+  it('rejects oversized product domain types', () => {
+    const invalid = structuredClone(initialDocument);
+    const concept = invalid.nodes.find((node) => node.data.kind === 'concept');
+    if (!concept || concept.data.kind !== 'concept') throw new Error('Missing concept fixture.');
+    concept.data.domainType = `cinema.${'x'.repeat(200)}`;
+
+    expect(() => validateEditorDocument(invalid)).toThrow('Concept domain type is invalid or too long');
+  });
+
   it('round-trips a complete versioned cinema sidecar', () => {
     const planned = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
     planned.cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);

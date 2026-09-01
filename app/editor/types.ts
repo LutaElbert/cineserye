@@ -46,6 +46,8 @@ type BaseNodeData = Record<string, unknown> & {
 
 export type ConceptNodeData = BaseNodeData & {
   kind: 'concept';
+  /** Product-owned semantic type. The generic canvas validates but does not interpret it. */
+  domainType?: string;
   label: string;
   title: RichTextDocument;
   body: RichTextDocument;

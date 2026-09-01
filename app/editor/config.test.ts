@@ -30,5 +30,10 @@ describe('Cineserye extraction contract', () => {
       ['story-premise', 'scene-01'],
       ['scene-01', 'shot-01'],
     ]);
+    expect(initialDocument.nodes.map((node) => node.data.kind === 'concept' ? node.data.domainType : null)).toEqual([
+      'cinema.story',
+      'cinema.scene',
+      'cinema.shot',
+    ]);
   });
 });

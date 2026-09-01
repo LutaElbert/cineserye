@@ -22,6 +22,7 @@ import {
   type EdgeChange,
   type NodeChange,
   type NodeProps,
+  type OnBeforeDelete,
   type ResizeParams,
 } from '@xyflow/react';
 import {
@@ -85,6 +86,7 @@ import {
 import {
   applyCanvasCommandProposal,
   type AppliedCanvasCommandProposal,
+  type CanvasCommandProposal,
 } from './canvas-commands';
 import { APP_CONFIG } from './config';
 import { buildSvgDocument, downloadSvg } from './export-svg';
@@ -95,7 +97,6 @@ import {
   collapsedDescendantIds,
   connectionIssue,
   connectionIssueMessage,
-  removeNodesAndConnections,
   tidyGraphPositions,
 } from './graph-rules';
 import { initialDocument } from './initial-document';
@@ -109,11 +110,14 @@ import {
   relativeConceptLayout,
 } from './node-layout';
 import {
+  clearLocalRecoveryDocument,
   clearLocalDocument,
   createLocalCheckpoint,
   deleteLocalCheckpoint,
   listLocalCheckpoints,
   loadLocalDocument,
+  loadLocalRecoveryDocument,
+  saveLocalRecoveryDocument,
   saveLocalDocument,
   type LocalCheckpoint,
 } from './persistence';
@@ -164,6 +168,17 @@ import type {
 import { planningLabel, type PlanningUiState } from '../features/scene-planner/planning-labels';
 import { FirstRunChooser } from '../features/onboarding/FirstRunChooser';
 import { ProjectActionsMenu } from '../features/project-actions/ProjectActionsMenu';
+import {
+  CINEMA_DRAFT_DESCRIPTORS,
+  cinemaDraftDescriptor,
+  cinemaDraftRole,
+  cinemaRelativeLabel,
+  cinemaRelativeRole,
+  nextCinemaDraftName,
+  type CinemaDraftRole,
+} from '../domain/cinema/manual-creation';
+import { CinemaCreationPalette } from '../features/manual-creation/CinemaCreationPalette';
+import { EmptyCanvasRecovery } from '../features/manual-creation/EmptyCanvasRecovery';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
@@ -202,32 +217,6 @@ function installFrameScheduledResizeObserver() {
 }
 
 installFrameScheduledResizeObserver();
-const CONCEPT_TEMPLATES = {
-  idea: {
-    name: 'New idea',
-    eyebrow: 'Idea',
-    tone: 'indigo' as const,
-    body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Describe the idea…' }] }] } as RichTextDocument,
-  },
-  task: {
-    name: 'Action items',
-    eyebrow: 'Task',
-    tone: 'mint' as const,
-    body: { type: 'doc', content: [{ type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'First action' }] }] }] }] } as RichTextDocument,
-  },
-  decision: {
-    name: 'Decision',
-    eyebrow: 'Decision',
-    tone: 'ink' as const,
-    body: { type: 'doc', content: [{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Option' }] }] }] }] } as RichTextDocument,
-  },
-  question: {
-    name: 'Open question',
-    eyebrow: 'Question',
-    tone: 'indigo' as const,
-    body: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'What do we need to learn?' }] }] } as RichTextDocument,
-  },
-};
 
 type NodeActionContextValue = {
   convertingId: string | null;
@@ -280,13 +269,14 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
   const singleSelection = selected && selectedNodeCount === 1;
   const cinemaDetail = cinemaProject?.nodes[id];
   const proposed = proposedNodeIds.has(id);
+  const draftRole = cinemaDraftRole(data.domainType, data.eyebrow);
   return (
     <>
       <NodeToolbar isVisible={singleSelection && !editing && !data.locked} position={Position.Top} offset={14}>
         <div className="node-actionbar nodrag nowheel" aria-label="Concept actions">
           <button type="button" onClick={() => actions.beginConceptEdit(id)}><TypeIcon size={14} /> Edit text</button>
-          <button type="button" onClick={() => actions.addConceptRelative(id, 'child')}><Plus size={14} /> Add child</button>
-          <button type="button" onClick={() => actions.addConceptRelative(id, 'sibling')}><Plus size={14} /> Add sibling</button>
+          <button type="button" onClick={() => actions.addConceptRelative(id, 'child')}><Plus size={14} /> {cinemaRelativeLabel(draftRole, 'child')}</button>
+          <button type="button" onClick={() => actions.addConceptRelative(id, 'sibling')}><Plus size={14} /> {cinemaRelativeLabel(draftRole, 'sibling')}</button>
         </div>
       </NodeToolbar>
       <NodeResizer
@@ -300,6 +290,7 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
       <article
         className={`concept-node tone-${data.tone} content-align-${data.horizontalAlign} content-valign-${data.verticalAlign} ${cinemaDetail ? `cinema-node cinema-${cinemaDetail.kind}` : ''} ${proposed ? 'is-proposed' : ''} ${editing ? 'is-editing nodrag nowheel' : ''}`}
         data-cinema-kind={cinemaDetail?.kind}
+        data-domain-type={data.domainType}
         style={{ opacity: data.opacity }}
         onDoubleClick={(event) => {
           event.stopPropagation();
@@ -307,6 +298,7 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
         }}
       >
         <span>{data.eyebrow}</span>
+        {!cinemaDetail && draftRole ? <span className="cinema-draft-status">Draft</span> : null}
         {cinemaDetail ? (
           <span className={`cinema-node-status risk-${cinemaDetail.risk}`}>
             {proposed ? 'Proposed' : cinemaDetail.statusLabel}
@@ -617,7 +609,8 @@ function EditorInner() {
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [conceptTemplate, setConceptTemplate] = useState<keyof typeof CONCEPT_TEMPLATES>('idea');
+  const [creationPaletteOpen, setCreationPaletteOpen] = useState(false);
+  const [recoveryDocument, setRecoveryDocument] = useState<EditorDocument | null>(null);
   const [checkpoints, setCheckpoints] = useState<LocalCheckpoint[]>([]);
   const [autosaveRevision, setAutosaveRevision] = useState(0);
   const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
@@ -660,6 +653,7 @@ function EditorInner() {
     setCenter,
     zoomIn,
     zoomOut,
+    deleteElements,
   } = useReactFlow<EditorNode, EditorEdge>();
 
   useEffect(() => {
@@ -966,10 +960,11 @@ function EditorInner() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([loadLocalDocument(), listLocalCheckpoints()])
-      .then(([document, storedCheckpoints]) => {
+    Promise.all([loadLocalDocument(), listLocalCheckpoints(), loadLocalRecoveryDocument()])
+      .then(([document, storedCheckpoints, storedRecovery]) => {
         if (!active) return;
         setCheckpoints(storedCheckpoints);
+        setRecoveryDocument(storedRecovery);
         if (!document) {
           setFirstRunOpen(true);
           return;
@@ -1020,6 +1015,26 @@ function EditorInner() {
     if (backupOpen && !backupDialogRef.current?.open) backupDialogRef.current?.showModal();
     if (!backupOpen && backupDialogRef.current?.open) backupDialogRef.current.close();
   }, [backupOpen]);
+
+  const handleBeforeDelete = useCallback<OnBeforeDelete<EditorNode, EditorEdge>>(async ({ nodes: deletingNodes, edges: deletingEdges }) => {
+    if (deletingNodes.length === 0) return { nodes: deletingNodes, edges: deletingEdges };
+    const deletingIds = new Set(deletingNodes.map((node) => node.id));
+    const leavesCanvasEmpty = nodesRef.current.every((node) => deletingIds.has(node.id));
+    if (!leavesCanvasEmpty) return { nodes: deletingNodes, edges: deletingEdges };
+    const confirmed = window.confirm(
+      `Delete the entire canvas? This removes ${deletingNodes.length} ${deletingNodes.length === 1 ? 'layer' : 'layers'} and their connected cinema data. You can undo or recover the last non-empty canvas.`,
+    );
+    if (!confirmed) return false;
+    const recovery = getCurrentDocument();
+    try {
+      await saveLocalRecoveryDocument(recovery);
+      setRecoveryDocument(recovery);
+      announce('Recovery copy saved before the canvas was emptied.', 'success');
+    } catch {
+      announce('The recovery copy could not be saved. Undo remains available in this session.', 'error');
+    }
+    return { nodes: deletingNodes, edges: deletingEdges };
+  }, [announce, getCurrentDocument]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<EditorNode>[]) => {
@@ -1415,79 +1430,6 @@ function EditorInner() {
     conversionControllerRef.current?.abort();
   }, []);
 
-  const addConceptAt = useCallback((screenPoint: { x: number; y: number }, editAfterCreate = false) => {
-    const center = screenToFlowPosition(screenPoint);
-    const id = crypto.randomUUID();
-    recordHistory();
-    setNodes((current) => [
-      ...current.map((node) => ({ ...node, selected: false })),
-      {
-        id,
-        type: 'concept',
-        position: { x: center.x - 94, y: center.y - 39 },
-        style: { width: CONCEPT_DEFAULT_WIDTH, height: CONCEPT_MIN_HEIGHT },
-        draggable: true,
-        deletable: true,
-        data: {
-          kind: 'concept',
-          name: 'New concept',
-          label: 'New concept',
-          title: conceptTitleFromPlainText('New concept'),
-          body: emptyRichText(),
-          eyebrow: 'Concept',
-          tone: 'ink',
-          collapsed: false,
-          horizontalAlign: 'left',
-          verticalAlign: 'top',
-          opacity: 1,
-          locked: false,
-        },
-        selected: true,
-      },
-    ]);
-    setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
-    setSelectedPath(null);
-    layerSelectionAnchorRef.current = id;
-    if (editAfterCreate) {
-      window.requestAnimationFrame(() => setEditingConceptId(id));
-    }
-  }, [recordHistory, screenToFlowPosition]);
-
-  const addConceptNode = useCallback(() => {
-    addConceptAt({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-  }, [addConceptAt]);
-
-  const addConceptFromTemplate = useCallback(() => {
-    const template = CONCEPT_TEMPLATES[conceptTemplate];
-    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    const id = crypto.randomUUID();
-    recordHistory();
-    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), {
-      id,
-      type: 'concept',
-      position: { x: center.x - 110, y: center.y - 56 },
-      style: { width: CONCEPT_DEFAULT_WIDTH, height: CONCEPT_MIN_HEIGHT },
-      draggable: true,
-      deletable: true,
-      selected: true,
-      data: {
-        kind: 'concept',
-        name: template.name,
-        label: template.name,
-        title: conceptTitleFromPlainText(template.name),
-        body: structuredClone(template.body),
-        eyebrow: template.eyebrow,
-        tone: template.tone,
-        collapsed: false,
-        horizontalAlign: 'left',
-        verticalAlign: 'top',
-        opacity: 1,
-        locked: false,
-      },
-    }]);
-    announce(`${template.eyebrow} template added.`, 'success');
-  }, [announce, conceptTemplate, recordHistory, screenToFlowPosition]);
-
   const previewNodeIds = useMemo(
     () => new Set(mockProposalPreview?.affectedNodeIds ?? []),
     [mockProposalPreview],
@@ -1531,15 +1473,13 @@ function EditorInner() {
   const selectedNodeCount = selectedNodes.length;
   const selectedUnlockedCount = selectedNodes.filter((node) => !node.data.locked).length;
   const selectedEdge = mockProposalPreview ? null : edges.find((edge) => edge.selected) ?? null;
-  const selectedCinemaDetail = selectedNode && (
-    mockProposalPreview
-    || mockPlanAccepted
-    || selectedNode.id === REEL_KNOWS_TOMORROW.sceneNodeId
-  ) ? activeCinemaProject.nodes[selectedNode.id] ?? null : null;
+  const selectedCinemaDetail = selectedNode && activeCinemaData
+    ? activeCinemaProject.nodes[selectedNode.id] ?? null
+    : null;
   const planningSceneSelected = selectedNodes.length === 1
     && selectedNode?.data.kind === 'concept'
     && (
-      selectedNode.data.eyebrow.trim().toLocaleLowerCase() === 'scene'
+      cinemaDraftRole(selectedNode.data.domainType, selectedNode.data.eyebrow) === 'scene'
       || Object.values(cinema?.scenes ?? {}).some((scene) => scene.nodeId === selectedNode.id)
     );
   const selectedVectorPath = useMemo(() => {
@@ -1650,14 +1590,10 @@ function EditorInner() {
   }, [recordHistory]);
 
   const deleteSelectedNodes = useCallback(() => {
-    const ids = new Set(nodesRef.current.filter((node) => node.selected && !node.data.locked).map((node) => node.id));
-    if (!ids.size) return;
-    recordHistory();
-    removeCinemaForNodeIds(ids);
-    const next = removeNodesAndConnections(nodesRef.current, edgesRef.current, ids);
-    setNodes(next.nodes);
-    setEdges(next.edges);
-  }, [recordHistory, removeCinemaForNodeIds]);
+    const selected = nodesRef.current.filter((node) => node.selected && !node.data.locked);
+    if (!selected.length) return;
+    void deleteElements({ nodes: selected });
+  }, [deleteElements]);
 
   const tidyDiagram = useCallback(() => {
     const positions = tidyGraphPositions(nodesRef.current, edgesRef.current);
@@ -1690,13 +1626,55 @@ function EditorInner() {
     selectNode(id);
   }, [editingConceptId, recordHistory, selectNode]);
 
-  const addConceptRelative = useCallback((id: string, relation: 'child' | 'sibling') => {
-    const source = nodesRef.current.find((node) => node.id === id);
-    if (!source || source.data.locked) return;
+  const applyManualCreation = useCallback((
+    proposal: CanvasCommandProposal,
+    selectedId: string,
+    editAfterCreate = true,
+  ) => {
+    try {
+      const applied = applyCanvasCommandProposal(getCurrentDocument(), proposal);
+      recordHistory();
+      setNodes(applied.document.nodes.map((node) => ({ ...node, selected: node.id === selectedId })));
+      setEdges(applied.document.edges.map((edge) => ({ ...edge, selected: false })));
+      setCinema(applied.document.cinema);
+      setSelectedPath(null);
+      layerSelectionAnchorRef.current = selectedId;
+      window.setTimeout(() => {
+        fitView({ nodes: [{ id: selectedId }], duration: 220, padding: 0.65, maxZoom: 1.4 });
+        if (editAfterCreate) beginConceptEdit(selectedId);
+      }, 60);
+      return true;
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The filmmaking layer could not be added.', 'error');
+      return false;
+    }
+  }, [announce, beginConceptEdit, fitView, getCurrentDocument, recordHistory]);
+
+  const createCinemaDraft = useCallback((
+    role: CinemaDraftRole,
+    options: {
+      sourceId?: string;
+      relation?: 'child' | 'sibling';
+      screenPoint?: { x: number; y: number };
+      editAfterCreate?: boolean;
+    } = {},
+  ) => {
+    const descriptor = cinemaDraftDescriptor(role);
+    const existingNames = nodesRef.current.map((node) => node.data.name);
+    const name = nextCinemaDraftName(role, existingNames);
     const newId = crypto.randomUUID();
-    const layout = relativeConceptLayout(nodesRef.current, edgesRef.current, id, relation, newId);
-    const position = layout.positions.get(newId);
-    if (!position) return;
+    const source = options.sourceId
+      ? nodesRef.current.find((node) => node.id === options.sourceId)
+      : undefined;
+    if (source?.data.locked) return false;
+    const relation = options.relation ?? 'child';
+    const layout = source
+      ? relativeConceptLayout(nodesRef.current, edgesRef.current, source.id, relation, newId)
+      : null;
+    const center = options.screenPoint
+      ? screenToFlowPosition(options.screenPoint)
+      : screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    const position = layout?.positions.get(newId) ?? { x: center.x - 110, y: center.y - 46 };
     const nextNode: EditorNode = {
       id: newId,
       type: 'concept',
@@ -1704,15 +1682,16 @@ function EditorInner() {
       style: { width: CONCEPT_DEFAULT_WIDTH, height: CONCEPT_MIN_HEIGHT },
       draggable: true,
       deletable: true,
-      selected: true,
+      selected: false,
       data: {
         kind: 'concept',
-        name: 'New concept',
-        label: 'New concept',
-        title: conceptTitleFromPlainText('New concept'),
+        domainType: descriptor.domainType,
+        name,
+        label: name,
+        title: conceptTitleFromPlainText(name),
         body: emptyRichText(),
-        eyebrow: relation === 'child' ? 'Child idea' : 'Related idea',
-        tone: 'ink',
+        eyebrow: descriptor.eyebrow,
+        tone: descriptor.tone,
         collapsed: false,
         horizontalAlign: 'left',
         verticalAlign: 'top',
@@ -1720,39 +1699,111 @@ function EditorInner() {
         locked: false,
       },
     };
-    recordHistory();
-    setNodes((current) => [
-      ...current.map((node) => ({
-        ...node,
-        position: layout.positions.get(node.id) ?? node.position,
-        selected: false,
-      })),
-      nextNode,
-    ]);
-    if (layout.parentId) {
-      const parentId = layout.parentId;
-      setEdges((current) => [...current.map((edge) => edge.source === parentId ? {
-        ...edge,
-        sourceHandle: 'bottom',
-        targetHandle: 'top',
-      } : edge), {
-        id: crypto.randomUUID(),
-        source: parentId,
-        target: newId,
-        sourceHandle: 'bottom',
-        targetHandle: 'top',
-        type: 'smoothstep',
-        animated: false,
-        markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: '#a9adb7', strokeWidth: 1.5 },
-        data: { label: '', kind: 'default' },
-      }]);
+    const commands: CanvasCommandProposal['commands'] = [];
+    for (const node of nodesRef.current) {
+      const moved = layout?.positions.get(node.id);
+      if (moved && (moved.x !== node.position.x || moved.y !== node.position.y)) {
+        commands.push({ type: 'update-node', id: node.id, patch: { position: moved } });
+      }
     }
-    window.setTimeout(() => {
-      fitView({ nodes: [{ id: newId }], duration: 220, padding: 0.65, maxZoom: 1.4 });
-      beginConceptEdit(newId);
-    }, 60);
-  }, [beginConceptEdit, fitView, recordHistory]);
+    commands.push({ type: 'create-node', node: nextNode });
+    if (layout?.parentId) {
+      commands.push({
+        type: 'connect-nodes',
+        edge: {
+          id: crypto.randomUUID(),
+          source: layout.parentId,
+          target: newId,
+          sourceHandle: 'bottom',
+          targetHandle: 'top',
+          type: 'smoothstep',
+          animated: false,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: '#a9adb7', strokeWidth: 1.5 },
+          data: { label: '', kind: 'default' },
+        },
+      });
+    }
+    const created = applyManualCreation({
+      version: 1,
+      proposalId: `manual-${newId}`,
+      summary: `Add ${descriptor.label.toLocaleLowerCase()}`,
+      commands,
+    }, newId, options.editAfterCreate ?? true);
+    if (created) announce(`${descriptor.label} draft added.`, 'success');
+    return created;
+  }, [announce, applyManualCreation, screenToFlowPosition]);
+
+  const addConceptAt = useCallback((screenPoint: { x: number; y: number }, editAfterCreate = false) => {
+    createCinemaDraft('note', { screenPoint, editAfterCreate });
+  }, [createCinemaDraft]);
+
+  const addConceptNode = useCallback(() => setCreationPaletteOpen(true), []);
+
+  const addConceptRelative = useCallback((id: string, relation: 'child' | 'sibling') => {
+    const source = nodesRef.current.find((node) => node.id === id);
+    if (!source || source.data.locked) return;
+    const sourceRole = source.data.kind === 'concept'
+      ? cinemaDraftRole(source.data.domainType, source.data.eyebrow)
+      : null;
+    const role = cinemaRelativeRole(sourceRole, relation) ?? 'note';
+    createCinemaDraft(role, { sourceId: id, relation });
+  }, [createCinemaDraft]);
+
+  const createFromPalette = useCallback((role: CinemaDraftRole) => {
+    const selectedConcept = nodesRef.current.find((node) => node.selected && node.data.kind === 'concept');
+    const selectedRole = selectedConcept?.data.kind === 'concept'
+      ? cinemaDraftRole(selectedConcept.data.domainType, selectedConcept.data.eyebrow)
+      : null;
+    const story = nodesRef.current.find((node) => node.data.kind === 'concept'
+      && cinemaDraftRole(node.data.domainType, node.data.eyebrow) === 'story');
+    const scene = selectedRole === 'scene'
+      ? selectedConcept
+      : nodesRef.current.find((node) => node.data.kind === 'concept'
+        && cinemaDraftRole(node.data.domainType, node.data.eyebrow) === 'scene');
+    let created = false;
+    if (role === 'shot') {
+      if (!scene) {
+        announce('Add a scene before adding a shot.', 'error');
+        return;
+      }
+      created = createCinemaDraft(role, { sourceId: scene.id, relation: 'child' });
+    } else if (role === 'scene' && selectedRole === 'scene' && selectedConcept) {
+      created = createCinemaDraft(role, { sourceId: selectedConcept.id, relation: 'sibling' });
+    } else if (role === 'scene' && story) {
+      created = createCinemaDraft(role, { sourceId: story.id, relation: 'child' });
+    } else if (role !== 'story' && selectedRole === 'scene' && selectedConcept) {
+      created = createCinemaDraft(role, { sourceId: selectedConcept.id, relation: 'child' });
+    } else if (role === 'note' && selectedConcept) {
+      created = createCinemaDraft(role, { sourceId: selectedConcept.id, relation: 'child' });
+    } else {
+      created = createCinemaDraft(role);
+    }
+    if (created) setCreationPaletteOpen(false);
+  }, [announce, createCinemaDraft]);
+
+  const convertConceptRole = useCallback((nodeId: string, role: CinemaDraftRole) => {
+    const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+    if (!node || node.data.kind !== 'concept' || node.data.locked) return;
+    const descriptor = cinemaDraftDescriptor(role);
+    const converted = applyManualCreation({
+      version: 1,
+      proposalId: `manual-convert-${nodeId}-${Date.now()}`,
+      summary: `Convert layer to ${descriptor.label.toLocaleLowerCase()}`,
+      commands: [{
+        type: 'update-node',
+        id: nodeId,
+        patch: {
+          data: {
+            domainType: descriptor.domainType,
+            eyebrow: descriptor.eyebrow,
+            tone: descriptor.tone,
+          },
+        },
+      }],
+    }, nodeId, false);
+    if (converted) announce(`Converted to ${descriptor.label.toLocaleLowerCase()}.`, 'success');
+  }, [announce, applyManualCreation]);
 
   const updateConceptTitle = useCallback((id: string, title: RichTextDocument) => {
     const label = richTextToPlainText(title).slice(0, 500);
@@ -2009,13 +2060,7 @@ function EditorInner() {
   const deleteSelected = () => {
     const selected = nodesRef.current.find((node) => node.id === selectedNodeId);
     if (!selected || selected.data.locked) return;
-    recordHistory();
-    removeCinemaForNodeIds(new Set([selected.id]));
-    setNodes((current) => current.filter((node) => node.id !== selected.id));
-    setEdges((current) =>
-      current.filter((edge) => edge.source !== selected.id && edge.target !== selected.id),
-    );
-    setSelectedPath(null);
+    void deleteElements({ nodes: [selected] });
   };
 
   const moveLayer = useCallback((id: string, direction: -1 | 1) => {
@@ -2059,6 +2104,7 @@ function EditorInner() {
   }, [announce, fitView, refreshHistoryState]);
 
   const chooseStartScene = useCallback(() => {
+    if (!firstRunOpen) recordHistory();
     setNodes(structuredClone(initialDocument.nodes).map((node) => ({
       ...node,
       selected: false,
@@ -2069,9 +2115,10 @@ function EditorInner() {
     setFirstRunOpen(false);
     window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
     announce('Clean scene workspace ready. Edit Scene 01, then generate a shot plan.', 'success');
-  }, [announce, fitView]);
+  }, [announce, firstRunOpen, fitView, recordHistory]);
 
   const chooseSampleProject = useCallback(() => {
+    if (!firstRunOpen) recordHistory();
     const sample = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
     setNodes(sample.nodes.map((node) => ({ ...node, selected: node.id === 'cine-shot-03' })));
     setEdges(sample.edges.map((edge) => ({ ...edge, selected: false })));
@@ -2080,7 +2127,27 @@ function EditorInner() {
     setFirstRunOpen(false);
     window.setTimeout(() => fitView({ duration: 320, padding: 0.14 }), 0);
     announce('Sample opened locally with fixture sources. No external request was made.', 'success');
-  }, [announce, fitView]);
+  }, [announce, firstRunOpen, fitView, recordHistory]);
+
+  const recoverLastNonEmptyCanvas = useCallback(async () => {
+    if (!recoveryDocument) return;
+    try {
+      recordHistory();
+      const restored = structuredClone(recoveryDocument);
+      setNodes(restored.nodes.map((node) => ({ ...node, selected: false })));
+      setEdges(restored.edges.map((edge) => ({ ...edge, selected: false })));
+      setTitle(restored.title);
+      setCinema(restored.cinema);
+      setSelectedPath(null);
+      await queueDocumentSave(restored);
+      await clearLocalRecoveryDocument();
+      setRecoveryDocument(null);
+      window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
+      announce('Last non-empty canvas recovered.', 'success');
+    } catch {
+      announce('The recovery copy could not be restored. Try a checkpoint or project backup.', 'error');
+    }
+  }, [announce, fitView, queueDocumentSave, recordHistory, recoveryDocument]);
 
   const openExport = useCallback(() => setExportOpen(true), []);
   const openBackup = useCallback(() => setBackupOpen(true), []);
@@ -2503,7 +2570,7 @@ function EditorInner() {
               <h1 id="layers-title">{cinemaOutlineActive ? 'Project Outline' : 'Layers'}</h1>
             </div>
             <div className="panel-heading-actions">
-              {!cinemaOutlineActive ? <button type="button" className="icon-button" aria-label="Add concept layer" onClick={addConceptNode}><Plus size={16} /></button> : null}
+              {!cinemaOutlineActive ? <button type="button" className="icon-button" aria-label="Add filmmaking layer" onClick={addConceptNode}><Plus size={16} /></button> : null}
               <button type="button" className="icon-button panel-close-button" aria-label="Close layers panel" onClick={() => setMobilePanel(null)}><X size={16} /></button>
             </div>
           </div>
@@ -2527,15 +2594,9 @@ function EditorInner() {
             />
             {normalizedSearch ? <span aria-live="polite">{cinemaOutlineModel?.visibleItemCount ?? layerNodes.length}</span> : null}
           </div>
-          {!cinemaOutlineActive ? <div className="template-picker">
-            <label htmlFor="concept-template">Quick template</label>
-            <select id="concept-template" value={conceptTemplate} onChange={(event) => setConceptTemplate(event.target.value as keyof typeof CONCEPT_TEMPLATES)}>
-              <option value="idea">Idea</option>
-              <option value="task">Task checklist</option>
-              <option value="decision">Decision</option>
-              <option value="question">Open question</option>
-            </select>
-            <button type="button" onClick={addConceptFromTemplate}><Plus size={12} /> Add</button>
+          {!cinemaOutlineActive ? <div className="cinema-add-entry">
+            <span><strong>Build your project</strong><small>Add a typed scene, shot, character, asset, or note.</small></span>
+            <button type="button" onClick={addConceptNode}><Plus size={12} /> Add</button>
           </div> : null}
           <p id="layer-list-instructions" className="visually-hidden">
             {cinemaOutlineActive
@@ -2559,6 +2620,10 @@ function EditorInner() {
             {layerNodes.map((node) => {
               const expanded = expandedVectors.has(node.id);
               const cinemaDetail = cinemaNodeIds.has(node.id) ? activeCinemaProject.nodes[node.id] : undefined;
+              const draftRole = node.data.kind === 'concept'
+                ? cinemaDraftRole(node.data.domainType, node.data.eyebrow)
+                : null;
+              const draftDescriptor = draftRole ? cinemaDraftDescriptor(draftRole) : null;
               return (
                 <li key={node.id}>
                   <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''}`}>
@@ -2580,6 +2645,8 @@ function EditorInner() {
                         <span className="layer-icon" aria-hidden="true">
                           {cinemaDetail
                             ? <span className={`cinema-layer-glyph kind-${cinemaDetail.kind}`} data-glyph={cinemaDetail.kind === 'agent-run' ? 'AI' : cinemaDetail.kind.slice(0, 1).toUpperCase()} />
+                            : draftDescriptor
+                              ? <span className={`cinema-layer-glyph role-${draftDescriptor.role}`} data-glyph={draftDescriptor.label.slice(0, 1)} />
                             : node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
                         </span>
                         <input
@@ -2633,6 +2700,8 @@ function EditorInner() {
                         <span className="layer-icon" aria-hidden="true">
                           {cinemaDetail
                             ? <span className={`cinema-layer-glyph kind-${cinemaDetail.kind}`} data-glyph={cinemaDetail.kind === 'agent-run' ? 'AI' : cinemaDetail.kind.slice(0, 1).toUpperCase()} />
+                            : draftDescriptor
+                              ? <span className={`cinema-layer-glyph role-${draftDescriptor.role}`} data-glyph={draftDescriptor.label.slice(0, 1)} />
                             : node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
                         </span>
                         <span className="layer-name">{node.data.name}</span>
@@ -2725,6 +2794,7 @@ function EditorInner() {
             onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
             onReconnect={handleReconnect}
+            onBeforeDelete={handleBeforeDelete}
             isValidConnection={isValidConnection}
             onNodeDragStart={() => {
               if (mockProposalPreview) return;
@@ -2846,7 +2916,7 @@ function EditorInner() {
               <button type="button" className={`tool ${toolMode === 'select' && !temporaryPanActive ? 'active' : ''}`} aria-label="Select tool, V" aria-pressed={toolMode === 'select' && !temporaryPanActive} title="Select layers (V) · Drag empty canvas to select" onClick={() => setToolMode('select')}><MousePointer2 size={16} /></button>
               <button type="button" className={`tool ${toolMode === 'hand' || temporaryPanActive ? 'active' : ''}`} aria-label="Hand tool, H" aria-pressed={toolMode === 'hand' || temporaryPanActive} title="Pan canvas (H) · Hold Space from Select" onClick={() => setToolMode('hand')}><Hand size={16} /></button>
               <span className="toolbar-divider" />
-              <button type="button" className="tool" aria-label="Add concept" disabled={Boolean(mockProposalPreview)} onClick={addConceptNode}><TypeIcon size={16} /></button>
+              <button type="button" className="tool" aria-label="Add filmmaking layer" disabled={Boolean(mockProposalPreview)} onClick={addConceptNode}><TypeIcon size={16} /></button>
               <button type="button" className="tool" aria-label="Connect nodes by dragging their handles" disabled={Boolean(mockProposalPreview)} onClick={() => announce('Drag from a node handle to another node to create a connector.')}><Waypoints size={16} /></button>
               <button type="button" className="tool" aria-label="Tidy diagram layout" disabled={Boolean(mockProposalPreview)} onClick={tidyDiagram}><Sparkles size={16} /></button>
               <button type="button" className="tool" aria-label="Import image" disabled={Boolean(mockProposalPreview)} onClick={() => fileInputRef.current?.click()}><Upload size={16} /></button>
@@ -2868,12 +2938,24 @@ function EditorInner() {
                 }}
               >{Math.round(viewportZoom * 100)}%</button>
             </Panel>
-            {!mockProposalPreview && mockProposalStage !== 'planning' ? <Panel position="bottom-center" className="drop-prompt">
+            {!mockProposalPreview && mockProposalStage !== 'planning' && nodes.length > 0 ? <Panel position="bottom-center" className="drop-prompt">
               <span className="upload-symbol" aria-hidden="true"><Upload size={16} /></span>
               <div><strong>Drop an image anywhere</strong><span>or paste with ⌘V</span></div>
               <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>Browse files</button>
             </Panel> : null}
           </ReactFlow>
+          {nodes.length === 0 && !mockProposalPreview && mockProposalStage !== 'planning' ? (
+            <EmptyCanvasRecovery
+              canUndo={historyState.canUndo}
+              hasRecovery={Boolean(recoveryDocument)}
+              onUndo={undo}
+              onRecover={() => void recoverLastNonEmptyCanvas()}
+              onStartScene={chooseStartScene}
+              onAdd={() => setCreationPaletteOpen(true)}
+              onRestore={openBackup}
+              onExploreSample={chooseSampleProject}
+            />
+          ) : null}
           {mockProposalStage === 'planning' ? (
             <div className="mock-planning-card" role="status">
               <span className="mock-planning-icon"><LoaderCircle className="spin" size={18} /></span>
@@ -3003,6 +3085,7 @@ function EditorInner() {
               onEditStart={beginFieldEdit}
               onEditEnd={endFieldEdit}
               onEditConcept={() => beginConceptEdit(selectedNode.id)}
+              onConvert={(role) => convertConceptRole(selectedNode.id, role)}
               converting={convertingId === selectedNode.id}
             />
           ) : (
@@ -3023,6 +3106,21 @@ function EditorInner() {
             onExploreSample={chooseSampleProject}
           />
         ) : null}
+
+        <CinemaCreationPalette
+          open={creationPaletteOpen}
+          hasStory={nodes.some((node) => node.data.kind === 'concept'
+            && cinemaDraftRole(node.data.domainType, node.data.eyebrow) === 'story')}
+          hasScene={nodes.some((node) => node.data.kind === 'concept'
+            && cinemaDraftRole(node.data.domainType, node.data.eyebrow) === 'scene')}
+          contextLabel={selectedNode?.data.kind === 'concept' ? selectedNode.data.label : null}
+          onClose={() => setCreationPaletteOpen(false)}
+          onCreate={createFromPalette}
+          onImportReference={() => {
+            setCreationPaletteOpen(false);
+            fileInputRef.current?.click();
+          }}
+        />
 
         {sceneBriefDefaults ? (
           <SceneBriefDialog
@@ -3149,6 +3247,7 @@ type NodeInspectorProps = {
   onEditStart: () => void;
   onEditEnd: () => void;
   onEditConcept: () => void;
+  onConvert: (role: CinemaDraftRole) => void;
   converting: boolean;
 };
 
@@ -3284,6 +3383,7 @@ function NodeInspector({
   onEditStart,
   onEditEnd,
   onEditConcept,
+  onConvert,
   converting,
 }: NodeInspectorProps) {
   const updateData = (data: Partial<EditorNode['data']>, shouldRecord = true) =>
@@ -3332,6 +3432,22 @@ function NodeInspector({
         ) : null}
         {node.data.kind === 'concept' ? (
           <>
+            <label className="stacked-field">
+              <span>Cinema role</span>
+              <select
+                value={cinemaDraftRole(node.data.domainType, node.data.eyebrow) ?? ''}
+                disabled={node.data.locked}
+                onChange={(event) => {
+                  if (event.target.value) onConvert(event.target.value as CinemaDraftRole);
+                }}
+              >
+                <option value="">Generic note</option>
+                {CINEMA_DRAFT_DESCRIPTORS.map((descriptor) => (
+                  <option key={descriptor.role} value={descriptor.role}>{descriptor.label}</option>
+                ))}
+              </select>
+              <small>Conversion changes meaning and contextual add actions, not your written content.</small>
+            </label>
             <label className="stacked-field">
               <span>Eyebrow</span>
               <input

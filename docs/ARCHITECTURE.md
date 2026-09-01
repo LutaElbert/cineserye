@@ -26,6 +26,10 @@ Provider prompts, credentials, model SDKs, research logic, and cinema business r
 
 `app/editor/canvas-commands.ts` is the only agent mutation route. It treats commands as untrusted, limits the batch, applies them to a clone, respects locks and connection rules, validates the complete graph after every command, and returns affected IDs without mutating editor state.
 
+Generic concept nodes may carry an optional bounded `domainType`. The editor validates, persists, and includes the value in portable backups but does not assign product meaning to it. `app/domain/cinema/manual-creation.ts` maps Cineserye's `cinema.story`, `cinema.scene`, `cinema.shot`, `cinema.character`, `cinema.location`, `cinema.prop`, `cinema.visual-element`, and `cinema.note` types to labels, naming, styles, and contextual relationship rules. Manual creation and role conversion compile to `CanvasCommandProposal` and therefore exercise the same mutation boundary as future agent output.
+
+Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the destructive intent and writes a validated `last-non-empty` document into the existing IndexedDB document store before removal. Undo remains the primary same-session route; the persisted recovery copy handles reload. Recovery replaces the complete document atomically, clears the recovery copy after success, and never merges potentially inconsistent fragments.
+
 ## Cinema domain and presentation
 
 `app/domain/cinema/project-data.ts` defines the persisted version-1 cinema sidecar. Scene briefs use a separately versioned V2 contract, and valid V1 briefs migrate at the validation boundary. The sidecar contains relational records for:

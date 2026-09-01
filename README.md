@@ -16,6 +16,8 @@ The first copilot vertical slice is now implemented: one selected scene becomes 
 - An automatic Project Outline that derives production groups, chronological shots, duration, and expected cost from the active cinema canvas without storing a second hierarchy.
 - Server-only provider contracts, bounded retry/timeout/cancellation, runtime output validation, and content-free structured telemetry.
 - Ghost proposal review with atomic acceptance, rejection without mutation, and one-step undo.
+- Cinema-aware manual creation for story, scene, shot, character, location, prop, visual-element, and note drafts, with contextual child/sibling actions.
+- A guarded empty-canvas state with same-session undo, a persisted last-non-empty recovery copy, clean scene bootstrap, backup restore, and an explicit sample choice.
 
 The initial story canvas is a linear fixture:
 
@@ -39,6 +41,14 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 6. Select any outline item to focus its corresponding ghost node.
 7. Review **Details**, **Prompt**, **Sources**, and **Cost** in the inspector. Research starts as **Needs verification**; pin useful sources, mark them supported, or remove irrelevant items before acceptance.
 8. Reject the proposal to leave the canvas unchanged, or accept it as one undoable operation.
+
+## Manual canvas building
+
+Use **Add** in the Layers panel or **Add filmmaking layer** in the canvas toolbar to open the creation palette. It exposes cinema roles instead of generic templates and enforces simple prerequisites—for example, a shot requires a scene. When a scene is selected, a new shot, character, location, prop, visual element, or note is connected beneath it automatically. Selected story, scene, and shot cards also expose contextual actions such as **Add scene**, **Add shot**, and **Add next shot**.
+
+These drafts remain generic canvas concept nodes with a validated `domainType`; the canvas engine stores but does not interpret that value. The cinema domain layer owns role labels, naming, relationship rules, and conversion behavior. Manual creation and role conversion use the same validated command boundary reserved for future copilot proposals.
+
+If every unlocked layer is deleted, Cineserye asks for confirmation and stores the last non-empty document locally before applying the deletion. The empty canvas then offers **Undo delete** during the current session or **Recover last canvas** after reload. It also provides explicit choices to start with a scene, add a layer, restore a backup, or explore the sample. Sample data is never inserted automatically.
 
 The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 

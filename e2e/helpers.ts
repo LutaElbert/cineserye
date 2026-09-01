@@ -12,6 +12,17 @@ export async function openEditor(page: Page) {
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
 }
 
+export async function addCinemaDraft(page: Page, role: string, finishEditing = false) {
+  await page.getByRole('button', { name: 'Add filmmaking layer' }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Add a filmmaking layer' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: new RegExp(`^${role}(?: |$)`) }).click();
+  if (finishEditing) {
+    await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+    await page.getByRole('button', { name: 'Fit View' }).click();
+  }
+}
+
 export function canvasNode(page: Page, name: string): Locator {
   return page.locator('.react-flow__node').filter({ hasText: name }).first();
 }

@@ -280,6 +280,32 @@ Run UC-01 and UC-03 end to end in fixture mode. Repeat UC-01 at 390px with keybo
 
 Show UC-01 from a cleared local database and UC-03 with an invalid model source ID. Do not proceed if any unrelated fallback citation appears.
 
+## 5.1 Sprint 1.1 — Cinema creation and empty-canvas recovery
+
+This shipped bridge closes the blank-workspace UX gap before Sprint 2's proposal-revision work.
+
+### Use-case scenarios
+
+- A first-time creator selects **Scene 01**, chooses **Add shot**, names the new draft, and receives a validated Scene → Shot connection without arranging or wiring it manually.
+- A creator adds characters, locations, props, visual elements, and production notes through one categorized palette, then converts a draft's cinema role without losing its text.
+- A creator deletes the entire canvas, immediately restores it with undo, or reloads and recovers the persisted last-non-empty copy.
+- A creator intentionally starts over from the empty state with a scene, imports a backup, or opens the sample; no mock data appears automatically.
+
+### Acceptance criteria
+
+- Manual story, scene, shot, character, location, prop, visual-element, and note drafts use validated `cinema.*` metadata while remaining generic canvas nodes.
+- Contextual child and sibling actions derive from cinema role and create valid connections through `CanvasCommandProposal`.
+- The creation palette communicates shot and story prerequisites, traps focus as a modal dialog, closes with Escape, and works at the mobile breakpoint.
+- Deleting the final unlocked layer set requires confirmation and saves one validated local recovery copy before mutation.
+- Empty state exposes session undo, persisted recovery, clean scene bootstrap, typed Add, backup restore, and explicit sample actions.
+- Restore, autosave, `.cineserye` round-trip, undo/redo, graph validation, selection, accessibility, and the accepted shot-planning path do not regress.
+
+### Test cases
+
+- Unit: role recognition and legacy inference, contextual role mapping, stable sequential names, bounded `domainType` round-trip and rejection.
+- Browser: typed creation, automatic connections, command undo/redo, role conversion with text preservation, palette prerequisites, full-delete confirmation, session undo, reload recovery, and accessibility semantics.
+- Regression: complete type, lint, unit, compatibility, build, client-boundary, dependency audit, and Chromium/Firefox/WebKit Playwright gates.
+
 ## 6. Sprint 2 — Revision, Recovery, and Source-of-Truth Editing
 
 ### Sprint objective

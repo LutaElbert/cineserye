@@ -1,6 +1,6 @@
 # Cineserye privacy baseline
 
-Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, illustrative cost profiles, and history are stored in the browser's `cineserye-local` IndexedDB database. `.cineserye` backups and SVG exports are created only when the creator asks for a download.
+Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, illustrative cost profiles, checkpoints, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups and SVG exports are created only when the creator asks for a download.
 
 ## Fixture mode
 
@@ -31,6 +31,8 @@ ADK prompt/response capture and completion upload are disabled by default. Cloud
 - Displayed citations are limited to explicit, valid planner-to-source relationships; missing source IDs do not receive substitutes.
 - Generation-cost figures are illustrative planning estimates, not provider quotes or billing records. A plan can also be expressed in credits or marked unpriced.
 - Acceptance is one undoable operation.
+- Deleting the final unlocked layers requires confirmation. Before applying it, Cineserye stores one local last-non-empty recovery document; restoring it does not contact a provider.
+- The recovery document is overwritten by the next confirmed full-canvas deletion and removed after a successful recovery. It is not a substitute for a portable backup.
 - Clearing browser site data removes the local working copy; a downloaded `.cineserye` file is the recovery mechanism.
 - No authentication, collaboration cloud, media generation, or automatic deployment is implemented.
 

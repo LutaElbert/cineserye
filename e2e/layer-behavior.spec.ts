@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { canvasNode, connectLayers, createDiagramPng, openEditor, waitForSaved } from './helpers';
+import { addCinemaDraft, canvasNode, connectLayers, createDiagramPng, openEditor, waitForSaved } from './helpers';
 
 async function dragResizeControl(page: Page, node: Locator, selector: string, deltaX: number, deltaY: number) {
   const handle = node.locator(selector);
@@ -264,7 +264,7 @@ test('child and sibling actions create compact layers below the parent with vert
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
   await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
-  await page.getByRole('button', { name: 'Add child', exact: true }).click();
+  await page.getByRole('button', { name: 'Add scene', exact: true }).click();
   await page.getByLabel('Concept title').fill('Compact child');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
 
@@ -286,7 +286,7 @@ test('child and sibling actions create compact layers below the parent with vert
   expect(Math.abs(childTop!.y + childTop!.height / 2 - childBox!.y)).toBeLessThan(4);
 
   await page.getByRole('button', { name: 'Compact child', exact: true }).click();
-  await page.getByRole('button', { name: 'Add sibling', exact: true }).click();
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
   await page.getByLabel('Concept title').fill('Compact sibling');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
   const refreshedChildBox = await canvasNode(page, 'Compact child').boundingBox();
@@ -506,11 +506,11 @@ test('connection rules reject self and duplicate edges but allow reverse cycles'
 
 test('reconnects a connector endpoint as one undoable operation', async ({ page }) => {
   await openEditor(page);
-  await page.getByRole('button', { name: 'Add concept layer' }).click();
+  await addCinemaDraft(page, 'Note', true);
   const originalEdge = page.getByLabel('Connector from Story Premise to Scene 01');
   await originalEdge.locator('.react-flow__edge-path').click({ force: true });
   const updater = originalEdge.locator('.react-flow__edgeupdater-target');
-  const targetHandle = canvasNode(page, 'New concept').locator('.react-flow__handle.target').first();
+  const targetHandle = canvasNode(page, 'Note 01').locator('.react-flow__handle.target').first();
   const updaterBox = await updater.boundingBox();
   const targetBox = await targetHandle.boundingBox();
   expect(updaterBox).toBeTruthy();
@@ -520,13 +520,13 @@ test('reconnects a connector endpoint as one undoable operation', async ({ page 
   await page.mouse.down();
   await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 10 });
   await page.mouse.up();
-  await expect(page.getByLabel('Connector from Story Premise to New concept')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Note 01')).toBeVisible();
   await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toBeVisible();
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
-  await expect(page.getByLabel('Connector from Story Premise to New concept')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Note 01')).toBeVisible();
   await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toHaveCount(0);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
 
@@ -567,23 +567,24 @@ test('connector deletion and layer deletion cascade through undo and redo', asyn
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(page.getByLabel('Connector from Scene 01 to Story Premise')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Add concept layer' }).click();
-  await connectLayers(page, 'Shot 01', 'New concept');
+  await page.getByRole('button', { name: 'Shot 01', exact: true }).click();
+  await addCinemaDraft(page, 'Note', true);
+  await expect(page.getByLabel('Connector from Shot 01 to Note 01')).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
-  const newConceptNode = canvasNode(page, 'New concept');
+  const newConceptNode = canvasNode(page, 'Note 01');
   await newConceptNode.focus();
   await newConceptNode.press('Delete');
-  await expect(page.getByRole('button', { name: 'New concept', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Note 01', exact: true })).toHaveCount(0);
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'New concept', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Note 01', exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
-  await page.getByRole('button', { name: 'New concept', exact: true }).click();
+  await page.getByRole('button', { name: 'Note 01', exact: true }).click();
   await page.locator('.inspector-panel').getByRole('button', { name: 'Delete layer' }).click();
-  await expect(page.getByRole('button', { name: 'New concept', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Note 01', exact: true })).toHaveCount(0);
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'New concept', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Note 01', exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
 });
 

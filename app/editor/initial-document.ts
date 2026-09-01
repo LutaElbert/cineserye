@@ -15,6 +15,7 @@ export const initialDocument: EditorDocument = {
       deletable: true,
       data: {
         kind: 'concept',
+        domainType: 'cinema.story',
         name: 'Story Premise',
         label: 'Story Premise',
         title: conceptTitleFromPlainText('Story Premise'),
@@ -36,6 +37,7 @@ export const initialDocument: EditorDocument = {
       deletable: true,
       data: {
         kind: 'concept',
+        domainType: 'cinema.scene',
         name: 'Scene 01',
         label: 'Scene 01',
         title: conceptTitleFromPlainText('Scene 01'),
@@ -57,6 +59,7 @@ export const initialDocument: EditorDocument = {
       deletable: true,
       data: {
         kind: 'concept',
+        domainType: 'cinema.shot',
         name: 'Shot 01',
         label: 'Shot 01',
         title: conceptTitleFromPlainText('Shot 01'),

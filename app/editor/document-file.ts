@@ -253,6 +253,9 @@ function parseNode(value: unknown, index: number, sourceVersion: 1 | 2 | 3 | 4 |
       type: 'concept',
       data: {
         kind,
+        ...(data.domainType === undefined
+          ? {}
+          : { domainType: boundedString(data.domainType, 'Concept domain type', 160) }),
         name,
         opacity,
         locked,
