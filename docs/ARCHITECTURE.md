@@ -15,7 +15,17 @@ selected scene + creator constraints
                 |
  locked ghost preview → accept or reject
                 |
- editor history, graph rules, IndexedDB, backup/export
+editor history, graph rules, IndexedDB, backup/export
+
+accepted shot + approved local references
+                |
+      storyboard preflight + spend cap
+                |
+ fixture provider / Vertex image adapter
+                |
+ validated blobs + immutable provenance
+                |
+ compare variants → approve one shot anchor
 ```
 
 ## Generic editor foundation
@@ -43,6 +53,7 @@ Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the dest
 - research-source records with supported, needs-verification, or irrelevant review state plus creator pinning and usage relationships;
 - illustrative, credits-based, or explicitly unpriced cost records with a versioned profile and visible assumptions.
 - immutable accepted-plan revision snapshots with predecessor links and one active revision.
+- visual pre-production records for typed references, explicit rights/allowed-use/approval, storyboard runs, and immutable frame provenance.
 
 Runtime validation resolves every scene, shot, character, asset, prompt, source, cost, run, and host canvas node relationship. The sidecar participates in document migrations, IndexedDB autosave, checkpoints, `.cineserye` backup/restore, and undo/redo.
 
@@ -61,6 +72,12 @@ Runtime validation resolves every scene, shot, character, asset, prompt, source,
 - `proposal-compiler.ts` deterministically compiles the validated sidecar into generic canvas commands. The model never authors editor commands.
 
 Fixture providers remain the default for deterministic UI and pull-request tests. Live mode is enabled only by server environment configuration and requires explicit per-request content-transfer consent in both the UI and API boundary.
+
+`app/domain/cinema/visual-preproduction.ts` is the separate visual domain layer. It validates reference types and usage, enforces conservative generation eligibility, blocks deletion while usages exist, validates storyboard run/frame provenance, and permits only one approved anchor per shot. `app/editor/persistence.ts` owns a provider-neutral `media-blobs` IndexedDB store keyed by SHA-256; it does not interpret cinema records.
+
+`app/server/cinema/storyboard-provider.ts` defines the still-image provider contract. The fixture emits deterministic safe SVG storyboards without networking. The opt-in Vertex adapter defaults to the current recommended `gemini-2.5-flash-image` model but remains environment-selectable. The route validates accepted-plan intent, prompt purpose, approved reference payloads, output count, safety, response dimensions, provider provenance, current unit pricing, and maximum estimated spend before returning pixels. The browser validates raster signatures again before local storage.
+
+Portable backup version 6 embeds only media hashes referenced by the current project. Restore verifies size and SHA-256 before writing any blob, never fetches external inspiration links, and remains compatible with text-only backup versions 1–5.
 
 ## Review and persistence sequence
 
@@ -84,9 +101,9 @@ The browser retains at most 50 content-free run traces in the local `agent-trace
 ## Deliberately absent
 
 - authentication, accounts, collaboration, or cloud project storage;
-- image, storyboard-frame, audio, or video generation;
+- audio or video generation;
 - API-key entry in the browser;
 - automatic proposal acceptance or background autonomy;
 - A2A exposure, deployment, or provisioned observability infrastructure.
 
-The next media-facing phase should begin only after a creator approves text prompts: generate one storyboard reference frame for one accepted shot, preserve provenance, and keep a separate approval boundary before any video generation.
+The next implementation phase is Sprint 5 professional planning and handoff. Video generation remains intentionally outside the current boundary.

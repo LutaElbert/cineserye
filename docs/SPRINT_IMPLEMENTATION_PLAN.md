@@ -8,6 +8,27 @@
 
 **Scope:** seven remaining product sprints, from one-scene workflow closure through multi-scene microdrama planning
 
+**Execution status (2026-09-01):** Sprints 1–4 complete and verified. Gate B—the visual pre-production MVP—is the current product boundary. Sprints 5–7 remain intentionally unstarted.
+
+| Sprint | Status | Acceptance evidence |
+| --- | --- | --- |
+| 1 — Trustworthy First Plan | Complete | Fixture/live planning boundary, cited proposal review, cost semantics, atomic accept/reject, and regression suite |
+| 2 — Revision and Recovery | Complete | Immutable revisions, restore-as-new, accepted-shot edits, pending-proposal recovery, cancellation, traces, and evaluation assets |
+| 3 — Rights-Aware Reference Deck | Complete | Explicit rights/use approval, upload/canvas/link origins, SHA-256 dedupe, shot/prompt usage, safe cleanup, media-inclusive backup/restore, policy and accessibility tests |
+| 4 — One-Shot Storyboard Frame | Complete | Offline fixture and opt-in Vertex adapter, accepted-plan/reference validation, 1–4 variants, spend caps, cancel/retry, immutable provenance, one approved anchor, reload/restore, and accessibility tests |
+| 5–7 | Not started | Outside the requested Sprint 4 stop point |
+
+### Sprint 4 close evidence
+
+- Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).
+- Static validation: TypeScript, ESLint, and the server/client provider-boundary check pass.
+- Unit/integration: **128 passed, 2 opt-in live tests skipped** across 28 files.
+- Browser regression: **154 passed, 2 skipped** across Chromium, Firefox, and WebKit, including accessibility and the 500-layer/800-connector stress case.
+- Production build: complete, with the storyboard route included and no deployment performed.
+- Dependency audit: no high or critical findings at the configured high-severity gate; 13 moderate transitive findings remain in Google ADK/OpenTelemetry and `gaxios`/`uuid`. Their available full fix would introduce a breaking ADK downgrade, so it was not applied silently.
+- Provider safety: all automated and UI acceptance runs used the deterministic offline fixture. The opt-in live smoke test was intentionally not run, so no provider credits were spent.
+- WebKit portability: local binary media is stored as raw bytes and reconstructed as browser blobs, avoiding WebKit's direct-Blob IndexedDB limitation while preserving SHA-256 deduplication and portable backups.
+
 ## 1. Outcome and implementation posture
 
 This plan evolves the verified local proof of concept without replacing the generic canvas engine or weakening the current proposal boundary. Every sprint must leave a coherent, testable product increment. Media generation is gated behind versioning, recovery, provenance, and explicit approval.
@@ -595,6 +616,8 @@ Run UC-06 with one creator-owned upload, one licensed upload, one inspiration-on
 
 Complete UC-06 and export/restore the project on a clean browser profile. Do not enable image generation until provenance and allowed-use enforcement are proven.
 
+**Completion evidence:** passed. The browser scenario covers an inspiration-only external link with no fetch, duplicate local upload deduplication, explicit rights/use approval, shot attachment, prompt inheritance, and portable backup hash verification. Unit tests cover invalid rights state, explicit eligibility, relationship validation, and deletion guards.
+
 ## 8. Sprint 4 — One-Shot Storyboard Frame
 
 ### Sprint objective
@@ -714,6 +737,8 @@ Run UC-07 with fixture generation, then one explicitly approved bounded live smo
 ### Sprint 4 demo gate
 
 Run UC-01 through UC-07 in one story: start blank, plan, revise, curate references, generate variants, and approve one frame. This is the recommended hackathon MVP stop.
+
+**Completion evidence:** passed in deterministic fixture mode. Computer-use and Playwright scenarios generated three variants, changed the single approved anchor, cancelled and retried a run, restored verified pixels from a version-6 `.cineserye` backup, and reran the visual accessibility scan. The live smoke remains deliberately opt-in through `CINESERYE_RUN_STORYBOARD_SMOKE=1` because it can spend Vertex credits.
 
 ## 9. Sprint 5 — Professional Planning and Handoff
 

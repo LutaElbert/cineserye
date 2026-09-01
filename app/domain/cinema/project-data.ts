@@ -129,6 +129,7 @@ export type CinemaPromptArtifactRecord = {
   negativeConstraints: string[];
   continuityNodeIds: string[];
   researchSourceIds: string[];
+  referenceIds?: string[];
   version: number;
   status: 'draft' | 'stale' | 'approved';
 };
@@ -212,6 +213,7 @@ export type CinemaProjectData = Omit<CinemaProjectDataV1, 'schemaVersion'> & {
   projectId: string;
   activeRevisionId: string | null;
   revisions: Record<string, CinemaPlanRevisionRecord>;
+  visualPreproduction?: import('./visual-preproduction').CinemaVisualPreproductionData;
 };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -459,6 +461,7 @@ export function createEmptyCinemaProjectData(projectId = 'cineserye-local-projec
     prompts: {},
     sources: {},
     costs: {},
+    visualPreproduction: createEmptyVisualPreproductionData(),
   };
 }
 
@@ -565,6 +568,7 @@ function validateCinemaProjectDataV1(
     negativeConstraints: stringList(record.negativeConstraints, 'Prompt negative constraints'),
     continuityNodeIds: idList(record.continuityNodeIds, 'Prompt continuity node ids'),
     researchSourceIds: idList(record.researchSourceIds, 'Prompt research source ids'),
+    referenceIds: record.referenceIds === undefined ? [] : idList(record.referenceIds, 'Prompt reference ids'),
     version: integer(record.version, 'Prompt version'),
     status: oneOf(record.status, ['draft', 'stale', 'approved'], 'Prompt status'),
   }));
@@ -827,6 +831,7 @@ function migrateCinemaProjectDataV1(project: CinemaProjectDataV1): CinemaProject
     projectId: migratedProjectId(project),
     activeRevisionId: revisionId,
     revisions: revision ? { [revision.id]: revision } : {},
+    visualPreproduction: createEmptyVisualPreproductionData(),
   };
 }
 
@@ -885,6 +890,19 @@ export function validateCinemaProjectData(
       }
     }
   }
+  const visualPreproduction = validateVisualPreproductionData(value.visualPreproduction, {
+    scenes: current.scenes,
+    shots: current.shots,
+    prompts: current.prompts,
+    revisions,
+  });
+  for (const prompt of Object.values(current.prompts)) {
+    for (const referenceId of prompt.referenceIds ?? []) {
+      if (!visualPreproduction.references[referenceId]) {
+        throw new Error(`Prompt ${prompt.id} refers to missing visual reference ${referenceId}.`);
+      }
+    }
+  }
   return {
     ...current,
     ...extensions(value),
@@ -892,6 +910,7 @@ export function validateCinemaProjectData(
     projectId,
     activeRevisionId,
     revisions,
+    visualPreproduction,
   };
 }
 
@@ -928,12 +947,26 @@ export function acceptCinemaPlanRevision(
     acceptedAt,
     snapshot: captureCinemaRevisionSnapshot(next, sceneId),
   };
-  return {
+  const result: CinemaProjectData = {
     ...next,
     projectId: current?.projectId ?? incoming.projectId,
     activeRevisionId: revisionId,
     revisions,
+    visualPreproduction: structuredClone(
+      current?.visualPreproduction ?? incoming.visualPreproduction ?? createEmptyVisualPreproductionData(),
+    ),
   };
+  for (const shot of Object.values(result.shots)) {
+    const referenceIds = Object.values(result.visualPreproduction?.references ?? {})
+      .filter((reference) => reference.shotIds.includes(shot.id))
+      .map((reference) => reference.id);
+    for (const prompt of Object.values(result.prompts)) {
+      if (prompt.ownerNodeId === shot.nodeId && (prompt.purpose === 'storyboard' || prompt.purpose === 'video')) {
+        prompt.referenceIds = referenceIds;
+      }
+    }
+  }
+  return result;
 }
 
 export type CinemaRevisionComparison = {
@@ -1099,5 +1132,37 @@ export function removeCinemaRecordsForNodes(
     run.promptIds = run.promptIds.filter((promptId) => Boolean(next.prompts[promptId]));
   }
 
+  if (next.visualPreproduction) {
+    const removedReferenceIds = new Set<string>();
+    for (const [referenceId, reference] of Object.entries(next.visualPreproduction.references)) {
+      if (removedSceneIds.has(reference.sceneId)) {
+        delete next.visualPreproduction.references[referenceId];
+        removedReferenceIds.add(referenceId);
+      } else {
+        reference.shotIds = reference.shotIds.filter((shotId) => !removedShotIds.has(shotId));
+      }
+    }
+    const removedStoryboardRunIds = new Set<string>();
+    for (const [runId, run] of Object.entries(next.visualPreproduction.storyboardRuns)) {
+      if (removedShotIds.has(run.shotId)) {
+        delete next.visualPreproduction.storyboardRuns[runId];
+        removedStoryboardRunIds.add(runId);
+      } else {
+        run.referenceIds = run.referenceIds.filter((referenceId) => !removedReferenceIds.has(referenceId));
+      }
+    }
+    for (const [frameId, frame] of Object.entries(next.visualPreproduction.storyboardFrames)) {
+      if (removedStoryboardRunIds.has(frame.runId) || removedShotIds.has(frame.shotId)) {
+        delete next.visualPreproduction.storyboardFrames[frameId];
+      } else {
+        frame.referenceIds = frame.referenceIds.filter((referenceId) => !removedReferenceIds.has(referenceId));
+      }
+    }
+    for (const prompt of Object.values(next.prompts)) {
+      prompt.referenceIds = (prompt.referenceIds ?? []).filter((referenceId) => !removedReferenceIds.has(referenceId));
+    }
+  }
+
   return validateCinemaProjectData(next, remainingHostNodeIds);
 }
+import { createEmptyVisualPreproductionData, validateVisualPreproductionData } from './visual-preproduction';

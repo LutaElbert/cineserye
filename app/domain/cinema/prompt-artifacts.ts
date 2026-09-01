@@ -10,6 +10,7 @@ export type PromptArtifact = {
   negativeConstraints: string[];
   continuitySourceIds: string[];
   researchSourceIds: string[];
+  referenceIds?: string[];
   version: number;
   status: 'draft' | 'stale' | 'approved';
 };

@@ -20,7 +20,7 @@ import { APP_CONFIG } from './config';
 import { validateCinemaProjectData } from '../domain/cinema/project-data';
 
 export const PROJECT_FORMAT = APP_CONFIG.storage.projectFormat;
-export const PROJECT_FILE_VERSION = 5;
+export const PROJECT_FILE_VERSION = 6;
 export const MAX_PROJECT_FILE_SIZE = 40 * 1024 * 1024;
 
 const MAX_TITLE_LENGTH = 120;
@@ -35,6 +35,21 @@ type ProjectEnvelope = {
   version: typeof PROJECT_FILE_VERSION;
   exportedAt: string;
   document: EditorDocument;
+  media?: PortableProjectMedia[];
+};
+
+export type PortableProjectMedia = {
+  hash: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  base64: string;
+};
+
+export type ParsedProjectBackup = {
+  document: EditorDocument;
+  media: Array<Omit<PortableProjectMedia, 'base64'> & { blob: Blob }>;
 };
 
 const RICH_TEXT_NODE_TYPES = new Set<RichTextNode['type']>([
@@ -437,6 +452,46 @@ export function serializeProjectBackup(document: EditorDocument): string {
   return JSON.stringify(envelope, null, 2);
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read local media.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
+
+export async function serializeProjectBackupWithMedia(
+  document: EditorDocument,
+  media: ReadonlyArray<{ hash: string; blob: Blob; mimeType: string; width: number; height: number; byteSize: number }>,
+): Promise<string> {
+  const portable: PortableProjectMedia[] = await Promise.all(media.map(async (entry) => ({
+    hash: entry.hash,
+    mimeType: entry.mimeType,
+    width: entry.width,
+    height: entry.height,
+    byteSize: entry.byteSize,
+    base64: await blobToBase64(entry.blob),
+  })));
+  const envelope: ProjectEnvelope = {
+    format: PROJECT_FORMAT,
+    version: PROJECT_FILE_VERSION,
+    exportedAt: new Date().toISOString(),
+    document: validateEditorDocument(document),
+    media: portable,
+  };
+  const result = JSON.stringify(envelope, null, 2);
+  if (result.length > MAX_PROJECT_FILE_SIZE) throw new Error('The portable project exceeds the 40 MB backup limit.');
+  return result;
+}
+
 export function parseProjectBackup(source: string): EditorDocument {
   if (source.length > MAX_PROJECT_FILE_SIZE) throw new Error('The project backup is too large.');
   let value: unknown;
@@ -445,10 +500,45 @@ export function parseProjectBackup(source: string): EditorDocument {
   } catch {
     throw new Error('The selected file is not valid JSON.');
   }
-  if (!isRecord(value) || value.format !== PROJECT_FORMAT || ![1, 2, 3, 4, 5].includes(value.version as number)) {
+  if (!isRecord(value) || value.format !== PROJECT_FORMAT || ![1, 2, 3, 4, 5, 6].includes(value.version as number)) {
     throw new Error(`This is not a supported ${APP_CONFIG.name} project backup.`);
   }
   return validateEditorDocument(value.document, { strictGraph: true });
+}
+
+export async function parseProjectBackupWithMedia(source: string): Promise<ParsedProjectBackup> {
+  if (source.length > MAX_PROJECT_FILE_SIZE) throw new Error('The project backup is too large.');
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    throw new Error('The selected file is not valid JSON.');
+  }
+  if (!isRecord(value) || value.format !== PROJECT_FORMAT || ![1, 2, 3, 4, 5, 6].includes(value.version as number)) {
+    throw new Error(`This is not a supported ${APP_CONFIG.name} project backup.`);
+  }
+  const document = validateEditorDocument(value.document, { strictGraph: true });
+  const rawMedia = value.media === undefined ? [] : value.media;
+  if (!Array.isArray(rawMedia) || rawMedia.length > 500) throw new Error('Project media manifest is invalid.');
+  const media = await Promise.all(rawMedia.map(async (raw, index) => {
+    if (!isRecord(raw)) throw new Error(`Project media item ${index + 1} is invalid.`);
+    const hash = boundedString(raw.hash, 'Project media hash', 128);
+    const mimeType = boundedString(raw.mimeType, 'Project media MIME type', 100);
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'].includes(mimeType)) {
+      throw new Error(`Project media item ${index + 1} has an unsupported type.`);
+    }
+    const width = finiteNumber(raw.width, 'Project media width');
+    const height = finiteNumber(raw.height, 'Project media height');
+    const byteSize = finiteNumber(raw.byteSize, 'Project media byte size');
+    const base64 = boundedString(raw.base64, 'Project media payload', MAX_PROJECT_FILE_SIZE);
+    const blob = base64ToBlob(base64, mimeType);
+    if (blob.size !== byteSize) throw new Error(`Project media item ${index + 1} has a corrupt size.`);
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    const actual = [...new Uint8Array(digest)].map((entry) => entry.toString(16).padStart(2, '0')).join('');
+    if (actual !== hash) throw new Error(`Project media item ${index + 1} failed its integrity check.`);
+    return { hash, mimeType, width, height, byteSize, blob };
+  }));
+  return { document, media };
 }
 
 export function downloadProjectBackup(source: string, fileName: string) {

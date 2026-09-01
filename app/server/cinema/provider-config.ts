@@ -14,7 +14,9 @@ export type CinemaProviderConfig = {
 type Environment = Record<string, string | undefined>;
 
 export function readCinemaProviderConfig(environment: Environment = process.env): CinemaProviderConfig {
-  const mode = environment.CINESERYE_PROVIDER_MODE ?? 'fixture';
+  const mode = environment.CINESERYE_E2E_FIXTURE === 'true'
+    ? 'fixture'
+    : environment.CINESERYE_PROVIDER_MODE ?? 'fixture';
   if (mode !== 'fixture' && mode !== 'live') {
     throw new ProviderError('INVALID_CONFIGURATION', 'Cineserye provider mode is invalid.');
   }

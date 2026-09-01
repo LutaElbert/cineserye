@@ -89,6 +89,7 @@ export function cinemaProjectPresentation(
       negativeConstraints: [...prompt.negativeConstraints],
       continuitySourceIds: [...prompt.continuityNodeIds],
       researchSourceIds: [...prompt.researchSourceIds],
+      referenceIds: [...(prompt.referenceIds ?? [])],
       version: prompt.version,
       status: prompt.status,
     } satisfies PromptArtifact,

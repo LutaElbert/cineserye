@@ -2,7 +2,7 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-The first copilot vertical slice is now implemented: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until the creator accepts it. Deterministic fixture mode is the default. Optional live mode uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK. Cineserye still contains no authentication, cloud project store, image/video generation, or deployment.
+The visual pre-production MVP is now implemented through Sprint 4: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references and generate one to four storyboard still variants for a selected accepted shot. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills use an environment-selected Vertex image model. Cineserye still contains no authentication, cloud project store, video generation, or deployment.
 
 ## Foundation
 
@@ -18,6 +18,9 @@ The first copilot vertical slice is now implemented: one selected scene becomes 
 - Ghost proposal review with atomic acceptance, rejection without mutation, and one-step undo.
 - Cinema-aware manual creation for story, scene, shot, character, location, prop, visual-element, and note drafts, with contextual child/sibling actions.
 - A guarded empty-canvas state with same-session undo, a persisted last-non-empty recovery copy, clean scene bootstrap, backup restore, and an explicit sample choice.
+- A scene-level Reference Deck for validated local uploads, existing canvas images, and non-fetched external inspiration links, with explicit provenance, rights, allowed-use, approval, pinning, search, filtering, and shot usage.
+- Content-addressed local media storage with SHA-256 deduplication, safe orphan cleanup, and version-6 `.cineserye` backups that embed and verify required media.
+- A one-shot Storyboard Workbench with an offline fixture, an opt-in Vertex adapter, explicit preflight confirmation, server output/spend caps, cancellation, three-variant review, exact provenance, and one approved shot anchor.
 
 The initial story canvas is a linear fixture:
 
@@ -41,6 +44,16 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 6. Select any outline item to focus its corresponding ghost node.
 7. Review **Details**, **Prompt**, **Sources**, and **Cost** in the inspector. Research starts as **Needs verification**; pin useful sources, mark them supported, or remove irrelevant items before acceptance.
 8. Reject the proposal to leave the canvas unchanged, or accept it as one undoable operation.
+
+## Visual pre-production walkthrough
+
+1. Select an accepted scene or shot and open **Visuals**.
+2. Upload a PNG/JPEG/WebP image, attach an existing raster canvas layer, or add an HTTPS inspiration link. External links are never fetched automatically.
+3. Categorize the reference, confirm its rights, enable image-generation use where permitted, approve it, and attach it to the selected shot. Inspiration-only items remain visible but are excluded from provider payloads.
+4. Review the inherited storyboard prompt, output count, model profile, approved references, and estimate. Changing the output count clears the confirmation.
+5. Confirm and generate one to four still variants. Fixture mode is offline and costs $0; live mode requires server-side pricing and a maximum estimated-spend setting before it can run.
+6. Compare, reject, regenerate, or approve one frame as the shot anchor. The accepted shot and plan revision remain unchanged.
+7. Download a `.cineserye` backup to carry the validated media and provenance to another browser profile.
 
 ## Manual canvas building
 
@@ -82,6 +95,11 @@ export PARALLEL_API_KEY='set-this-outside-git'
 export GOOGLE_CLOUD_PROJECT=cineserye
 export GOOGLE_CLOUD_LOCATION=global
 export CINESERYE_VERTEX_MODEL=gemini-3.7-flash
+# Storyboard stills remain blocked until both values are configured.
+export CINESERYE_VERTEX_IMAGE_MODEL=gemini-2.5-flash-image
+export CINESERYE_STORYBOARD_USD_PER_IMAGE='set-current-provider-price'
+export CINESERYE_STORYBOARD_MAX_ESTIMATED_USD='set-a-small-per-request-limit'
+export CINESERYE_STORYBOARD_MAX_OUTPUTS=4
 npm run dev
 ```
 
@@ -105,6 +123,12 @@ The opt-in local Vertex/ADK contract smoke uses credits and never calls Parallel
 
 ```sh
 CINESERYE_RUN_VERTEX_SMOKE=1 npx vitest run app/server/cinema/vertex-adk-live.test.ts --config vitest.config.ts
+```
+
+The separate storyboard smoke also spends credits and is never part of ordinary CI:
+
+```sh
+CINESERYE_RUN_STORYBOARD_SMOKE=1 npx vitest run app/server/cinema/storyboard-live.test.ts --config vitest.config.ts
 ```
 
 CI builds the application and runs Playwright against the local production Cloudflare Worker in Chromium, Firefox, and WebKit. Verification does not deploy the Worker.

@@ -19,16 +19,20 @@ import type {
 import type { ResearchSourceCuration } from '../../domain/cinema/project-data';
 import {
   compareCinemaPlanRevisions,
+  type CinemaProjectData,
   type CinemaPlanRevisionRecord,
   type CinemaShotRecord,
 } from '../../domain/cinema/project-data';
+import type { CinemaVisualPreproductionData } from '../../domain/cinema/visual-preproduction';
+import { VisualPreproductionPanel } from '../storyboard/VisualPreproductionPanel';
 import { planningLabel } from './planning-labels';
 
-type InspectorTab = 'details' | 'prompt' | 'sources' | 'cost';
+type InspectorTab = 'details' | 'prompt' | 'visuals' | 'sources' | 'cost';
 
 const TAB_LABELS: ReadonlyArray<{ id: InspectorTab; label: string }> = [
   { id: 'details', label: 'Details' },
   { id: 'prompt', label: 'Prompt' },
+  { id: 'visuals', label: 'Visuals' },
   { id: 'sources', label: 'Sources' },
   { id: 'cost', label: 'Cost' },
 ];
@@ -86,6 +90,12 @@ function PromptCard({
           </span>
         </div>
       ) : null}
+      {prompt.referenceIds?.length ? (
+        <div className="prompt-inheritance">
+          <Link2 size={12} aria-hidden="true" />
+          <span>{prompt.referenceIds.length} visual {prompt.referenceIds.length === 1 ? 'reference' : 'references'} attached; rights gates apply before generation.</span>
+        </div>
+      ) : null}
       <p className="prompt-text">{prompt.generatedText}</p>
       {prompt.negativeConstraints.length ? (
         <div className="prompt-constraints">
@@ -117,6 +127,12 @@ export function CinemaInspector({
   activeRevisionId,
   onRestoreRevision,
   onNotice,
+  cinemaDomain,
+  cinemaSceneId,
+  providerMode,
+  onUpdateVisual,
+  canvasImages,
+  onCleanupMedia,
 }: {
   detail: CinemaNodePresentation;
   project: CinemaProjectPresentation;
@@ -133,6 +149,12 @@ export function CinemaInspector({
   activeRevisionId: string | null;
   onRestoreRevision: (revisionId: string) => void;
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
+  cinemaDomain: CinemaProjectData;
+  cinemaSceneId: string;
+  providerMode: 'fixture' | 'live';
+  onUpdateVisual: (updater: (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData) => void;
+  canvasImages: Array<{ nodeId: string; name: string; fileName: string; src: string; width: number; height: number }>;
+  onCleanupMedia: () => Promise<void>;
 }) {
   const [tab, setTab] = useState<InspectorTab>(detail.kind === 'shot' ? 'prompt' : 'details');
 
@@ -327,6 +349,20 @@ export function CinemaInspector({
               <span>This node organizes the proposal rather than generating media.</span>
             </div>
           )
+        ) : null}
+
+        {tab === 'visuals' ? (
+          <VisualPreproductionPanel
+            cinema={cinemaDomain}
+            sceneId={cinemaSceneId}
+            shot={shot}
+            accepted={accepted}
+            providerMode={providerMode}
+            canvasImages={canvasImages}
+            onCleanupMedia={onCleanupMedia}
+            onUpdate={onUpdateVisual}
+            onNotice={onNotice}
+          />
         ) : null}
 
         {tab === 'sources' ? (

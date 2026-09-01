@@ -69,3 +69,22 @@ test('keeps controls usable with reduced motion and enlarged text on mobile', as
   await page.getByRole('button', { name: 'Open properties panel' }).click();
   await expect(page.getByRole('heading', { name: 'Properties' })).toBeVisible();
 });
+
+test('S3-A11Y-01 and S4-A11Y-01 expose the visual workflow without serious violations', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  const chooser = page.getByRole('dialog', { name: /Start with your scene/ });
+  await chooser.getByRole('button', { name: /Explore the sample/ }).click();
+  await page.getByRole('button', { name: '03 · The Impossible Film', exact: true }).click();
+  await page.getByRole('tab', { name: 'Visuals' }).click();
+  const panel = page.getByRole('tabpanel', { name: 'Visuals' });
+  await expect(panel.getByLabel('Search reference deck')).toBeVisible();
+  await expect(panel.getByLabel('Variants')).toHaveValue('3');
+  const results = await new AxeBuilder({ page })
+    .include('.visual-preproduction')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  const blocking = results.violations.filter((violation) =>
+    violation.impact === 'critical' || violation.impact === 'serious');
+  expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join('\n')).toEqual([]);
+});

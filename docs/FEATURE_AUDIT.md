@@ -1,5 +1,7 @@
 # Cineserye current-feature audit
 
+> **Status update — 2026-09-01:** the findings that became Sprints 1–4 are now implemented and verified. P0-08’s rights-aware Reference Deck and Increment C’s one-shot storyboard-still workflow are complete. The findings below remain as the decision record; outstanding recommendations begin with Sprint 5 professional planning and handoff.
+
 **Audit date:** 2026-09-01
 
 **Audited baseline:** `d4dd5eefecd0a0512338f9cd520a0afd6d380e59`

@@ -80,8 +80,8 @@ import '@xyflow/react/dist/style.css';
 import {
   downloadProjectBackup,
   MAX_PROJECT_FILE_SIZE,
-  parseProjectBackup,
-  serializeProjectBackup,
+  parseProjectBackupWithMedia,
+  serializeProjectBackupWithMedia,
 } from './document-file';
 import {
   applyCanvasCommandProposal,
@@ -115,9 +115,11 @@ import {
   clearPendingCinemaProposals,
   createLocalCheckpoint,
   deleteLocalCheckpoint,
+  deleteLocalMediaBlob,
   deletePendingCinemaProposal,
   listLocalCheckpoints,
   listLocalCinemaTraces,
+  listLocalMediaBlobs,
   loadLocalDocument,
   loadLatestPendingCinemaProposal,
   loadLocalRecoveryDocument,
@@ -126,6 +128,7 @@ import {
   updatePendingCinemaProposal,
   saveLocalRecoveryDocument,
   saveLocalDocument,
+  saveLocalMediaBlob,
   type LocalCheckpoint,
   type LocalCinemaTrace,
 } from './persistence';
@@ -160,6 +163,10 @@ import {
   removeCinemaRecordsForNodes,
   type ResearchSourceCuration,
 } from '../domain/cinema/project-data';
+import {
+  createEmptyVisualPreproductionData,
+  type CinemaVisualPreproductionData,
+} from '../domain/cinema/visual-preproduction';
 import {
   cinemaProposalCanvasSource,
   compileCinemaCanvasProposal,
@@ -1689,6 +1696,55 @@ function EditorInner() {
     }
   }, [announce, getCurrentDocument, recordHistory]);
 
+  const updateVisualPreproduction = useCallback((
+    updater: (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData,
+  ) => {
+    const applyVisual = (current: CinemaProjectData) => {
+      const visualPreproduction = updater(current.visualPreproduction ?? createEmptyVisualPreproductionData());
+      const prompts = structuredClone(current.prompts);
+      for (const shot of Object.values(current.shots)) {
+        const referenceIds = Object.values(visualPreproduction.references)
+          .filter((reference) => reference.shotIds.includes(shot.id))
+          .map((reference) => reference.id);
+        for (const prompt of Object.values(prompts)) {
+          if (prompt.ownerNodeId === shot.nodeId && (prompt.purpose === 'storyboard' || prompt.purpose === 'video')) {
+            prompt.referenceIds = referenceIds;
+          }
+        }
+      }
+      return { ...current, prompts, visualPreproduction };
+    };
+    if (mockProposalPreview) {
+      setProposalCinema((current) => current ? applyVisual(current) : current);
+      return;
+    }
+    recordHistory();
+    setCinema((current) => current ? applyVisual(current) : current);
+  }, [mockProposalPreview, recordHistory]);
+
+  const cleanupUnusedMedia = useCallback(async () => {
+    try {
+      const documents = [getCurrentDocument(), ...(await listLocalCheckpoints()).map((checkpoint) => checkpoint.document)];
+      const used = new Set(documents.flatMap((document) => {
+        const visual = document.cinema?.visualPreproduction;
+        return [
+          ...Object.values(visual?.references ?? {}).flatMap((reference) => reference.blobHash ? [reference.blobHash] : []),
+          ...Object.values(visual?.storyboardFrames ?? {}).map((frame) => frame.blobHash),
+        ];
+      }));
+      const unused = (await listLocalMediaBlobs()).filter((entry) => !used.has(entry.hash));
+      if (!unused.length) {
+        announce('No unused local media was found.');
+        return;
+      }
+      if (!window.confirm(`Delete ${unused.length} unused local media ${unused.length === 1 ? 'item' : 'items'}? Media used by the current project or a checkpoint will remain.`)) return;
+      await Promise.all(unused.map((entry) => deleteLocalMediaBlob(entry.hash)));
+      announce(`${unused.length} unused local media ${unused.length === 1 ? 'item' : 'items'} deleted.`, 'success');
+    } catch {
+      announce('Unused local media could not be cleaned.', 'error');
+    }
+  }, [announce, getCurrentDocument]);
+
   const updateSelectedNodes = useCallback((updater: (node: EditorNode) => EditorNode) => {
     const selectedIds = new Set(nodesRef.current.filter((node) => node.selected && !node.data.locked).map((node) => node.id));
     if (!selectedIds.size) return;
@@ -2353,13 +2409,22 @@ function EditorInner() {
     URL.revokeObjectURL(url);
     announce(`${localCinemaTraces.length} local ${localCinemaTraces.length === 1 ? 'trace' : 'traces'} exported.`, 'success');
   }, [announce, localCinemaTraces]);
-  const performBackup = useCallback(() => {
+  const performBackup = useCallback(async () => {
     try {
+      const document = getCurrentDocument();
+      const visual = document.cinema?.visualPreproduction;
+      const requiredHashes = new Set([
+        ...Object.values(visual?.references ?? {}).flatMap((reference) => reference.blobHash ? [reference.blobHash] : []),
+        ...Object.values(visual?.storyboardFrames ?? {}).map((frame) => frame.blobHash),
+      ]);
+      const media = (await listLocalMediaBlobs()).filter((entry) => requiredHashes.has(entry.hash));
+      const missing = [...requiredHashes].filter((hash) => !media.some((entry) => entry.hash === hash));
+      if (missing.length) throw new Error(`${missing.length} referenced local media ${missing.length === 1 ? 'item is' : 'items are'} missing. Restore it before creating a portable backup.`);
       downloadProjectBackup(
-        serializeProjectBackup(getCurrentDocument()),
+        await serializeProjectBackupWithMedia(document, media),
         safeFileBase(titleRef.current),
       );
-      announce('Project backup downloaded.', 'success');
+      announce(`Project backup downloaded. Includes ${media.length} local media ${media.length === 1 ? 'item' : 'items'}.`, 'success');
     } catch (error) {
       announce(error instanceof Error ? error.message : 'Project backup failed.', 'error');
     }
@@ -2409,8 +2474,10 @@ function EditorInner() {
   const restoreProject = useCallback(async (file: File) => {
     try {
       if (file.size > MAX_PROJECT_FILE_SIZE) throw new Error('The project backup is larger than 40 MB.');
-      const restored = parseProjectBackup(await file.text());
-      if (!window.confirm(`Replace the current canvas with “${restored.title}”?`)) return;
+      const parsed = await parseProjectBackupWithMedia(await file.text());
+      const restored = parsed.document;
+      if (!window.confirm(`Replace the current canvas with “${restored.title}” and restore ${parsed.media.length} local media ${parsed.media.length === 1 ? 'item' : 'items'}?`)) return;
+      await Promise.all(parsed.media.map((entry) => saveLocalMediaBlob(entry.blob, entry)));
       conversionControllerRef.current?.abort();
       pastRef.current = [];
       futureRef.current = [];
@@ -2430,7 +2497,7 @@ function EditorInner() {
       await queueDocumentSave(restored);
       setBackupOpen(false);
       window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 60);
-      announce('Project backup restored.', 'success');
+      announce(`Project backup restored. ${parsed.media.length} verified local media ${parsed.media.length === 1 ? 'item' : 'items'} included.`, 'success');
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The project backup could not be restored.', 'error');
     }
@@ -3288,6 +3355,21 @@ function EditorInner() {
               activeRevisionId={cinema?.activeRevisionId ?? null}
               onRestoreRevision={restorePlanRevision}
               onNotice={announce}
+              cinemaDomain={activeCinemaData!}
+              cinemaSceneId={selectedAcceptedShot?.sceneId
+                ?? Object.values(activeCinemaData!.scenes).find((scene) => scene.nodeId === selectedNode.id)?.id
+                ?? activeCinemaData!.activeSceneId!}
+              providerMode={configuredProviderMode === 'live' ? 'live' : 'fixture'}
+              onUpdateVisual={updateVisualPreproduction}
+              canvasImages={presentedNodes.flatMap((node) => node.data.kind === 'raster' ? [{
+                nodeId: node.id,
+                name: node.data.name,
+                fileName: node.data.fileName,
+                src: node.data.src,
+                width: node.data.naturalWidth,
+                height: node.data.naturalHeight,
+              }] : [])}
+              onCleanupMedia={cleanupUnusedMedia}
             />
           ) : selectedNode ? (
             <NodeInspector

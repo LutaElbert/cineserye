@@ -10,9 +10,10 @@ const STORE_NAME = 'documents';
 const CHECKPOINT_STORE_NAME = 'checkpoints';
 const PENDING_PROPOSAL_STORE_NAME = 'pending-proposals';
 const TRACE_STORE_NAME = 'agent-traces';
+const MEDIA_STORE_NAME = 'media-blobs';
 const DOCUMENT_ID = 'current';
 const RECOVERY_DOCUMENT_ID = 'last-non-empty';
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 6;
 const MAX_CHECKPOINTS = 20;
 const MAX_LOCAL_TRACES = 50;
 
@@ -46,6 +47,44 @@ export type LocalCinemaTrace = {
   events: CinemaClientTraceEvent[];
 };
 
+export type LocalMediaBlob = {
+  hash: string;
+  blob: Blob;
+  mimeType: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  createdAt: number;
+};
+
+type StoredLocalMediaBlob = Omit<LocalMediaBlob, 'blob'> & {
+  bytes?: ArrayBuffer;
+  /** Version 6 development builds stored Blob directly. Read it for migration. */
+  blob?: Blob;
+};
+
+function hydrateLocalMediaBlob(stored: StoredLocalMediaBlob): LocalMediaBlob {
+  const blob = stored.blob ?? new Blob([stored.bytes ?? new ArrayBuffer(0)], { type: stored.mimeType });
+  return {
+    hash: stored.hash,
+    blob,
+    mimeType: stored.mimeType,
+    width: stored.width,
+    height: stored.height,
+    byteSize: stored.byteSize,
+    createdAt: stored.createdAt,
+  };
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((value) => value.toString(16).padStart(2, '0')).join('');
+}
+
+export async function sha256Blob(blob: Blob): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return bytesToHex(new Uint8Array(digest));
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
@@ -67,11 +106,108 @@ function openDatabase(): Promise<IDBDatabase> {
         const store = database.createObjectStore(TRACE_STORE_NAME, { keyPath: 'id' });
         store.createIndex('createdAt', 'createdAt');
       }
+      if (!database.objectStoreNames.contains(MEDIA_STORE_NAME)) {
+        const store = database.createObjectStore(MEDIA_STORE_NAME, { keyPath: 'hash' });
+        store.createIndex('createdAt', 'createdAt');
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+export async function saveLocalMediaBlob(
+  blob: Blob,
+  metadata: Pick<LocalMediaBlob, 'mimeType' | 'width' | 'height'>,
+): Promise<LocalMediaBlob> {
+  const hash = await sha256Blob(blob);
+  const entry: LocalMediaBlob = {
+    hash,
+    blob,
+    mimeType: metadata.mimeType,
+    width: metadata.width,
+    height: metadata.height,
+    byteSize: blob.size,
+    createdAt: Date.now(),
+  };
+  // WebKit's IndexedDB implementation can reject direct Blob structured clones.
+  // ArrayBuffer is portable across Chromium, Firefox, WebKit, and backup exports.
+  const storedEntry: StoredLocalMediaBlob = {
+    hash,
+    bytes: await blob.arrayBuffer(),
+    mimeType: entry.mimeType,
+    width: entry.width,
+    height: entry.height,
+    byteSize: entry.byteSize,
+    createdAt: entry.createdAt,
+  };
+  const database = await openDatabase();
+  try {
+    const existing = await new Promise<StoredLocalMediaBlob | undefined>((resolve, reject) => {
+      const transaction = database.transaction(MEDIA_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(MEDIA_STORE_NAME).get(hash);
+      request.onsuccess = () => resolve(request.result as StoredLocalMediaBlob | undefined);
+      request.onerror = () => reject(request.error);
+    });
+    if (existing) return hydrateLocalMediaBlob(existing);
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(MEDIA_STORE_NAME, 'readwrite');
+      const request = transaction.objectStore(MEDIA_STORE_NAME).put(storedEntry);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(request.error ?? transaction.error ?? new Error('Could not store local media.'));
+      transaction.onabort = () => reject(request.error ?? transaction.error ?? new Error('Could not store local media.'));
+    });
+    return entry;
+  } finally {
+    database.close();
+  }
+}
+
+export async function loadLocalMediaBlob(hash: string): Promise<LocalMediaBlob | null> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<LocalMediaBlob | null>((resolve, reject) => {
+      const transaction = database.transaction(MEDIA_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(MEDIA_STORE_NAME).get(hash);
+      request.onsuccess = () => {
+        const stored = request.result as StoredLocalMediaBlob | undefined;
+        resolve(stored ? hydrateLocalMediaBlob(stored) : null);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function listLocalMediaBlobs(): Promise<LocalMediaBlob[]> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<LocalMediaBlob[]>((resolve, reject) => {
+      const transaction = database.transaction(MEDIA_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(MEDIA_STORE_NAME).getAll();
+      request.onsuccess = () => resolve((request.result as StoredLocalMediaBlob[]).map(hydrateLocalMediaBlob));
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function deleteLocalMediaBlob(hash: string): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(MEDIA_STORE_NAME, 'readwrite');
+      transaction.objectStore(MEDIA_STORE_NAME).delete(hash);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function saveLocalCinemaTrace(trace: LocalCinemaTrace): Promise<void> {
