@@ -82,6 +82,10 @@ import {
   parseProjectBackup,
   serializeProjectBackup,
 } from './document-file';
+import {
+  applyCanvasCommandProposal,
+  type AppliedCanvasCommandProposal,
+} from './canvas-commands';
 import { APP_CONFIG } from './config';
 import { buildSvgDocument, downloadSvg } from './export-svg';
 import { EDITOR_FEATURES } from './features';
@@ -131,6 +135,13 @@ import type {
   VectorPathLayer,
 } from './types';
 import { vectorizeDataUrl } from './vectorize';
+import {
+  MOCK_SHOT_PLAN_PROPOSAL,
+  REEL_KNOWS_TOMORROW,
+} from '../domain/cinema/mock/reel-knows-tomorrow';
+import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
+import { buildCinemaOutline } from '../features/project-outline/outline-model';
+import { CinemaInspector } from '../features/scene-planner/CinemaInspector';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges'>;
 type ToolMode = 'select' | 'hand';
@@ -217,6 +228,8 @@ type NodeActionContextValue = {
 
 const NodeActionContext = createContext<NodeActionContextValue | null>(null);
 const SelectedNodeCountContext = createContext(0);
+const ProposedNodeIdsContext = createContext<ReadonlySet<string>>(new Set());
+const CinemaNodeIdsContext = createContext<ReadonlySet<string>>(new Set());
 
 function useNodeActions() {
   const value = useContext(NodeActionContext);
@@ -238,9 +251,13 @@ function CommonHandles() {
 function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
   const actions = useNodeActions();
   const selectedNodeCount = useContext(SelectedNodeCountContext);
+  const proposedNodeIds = useContext(ProposedNodeIdsContext);
+  const cinemaNodeIds = useContext(CinemaNodeIdsContext);
   if (data.kind !== 'concept') return null;
   const editing = actions.editingConceptId === id;
   const singleSelection = selected && selectedNodeCount === 1;
+  const cinemaDetail = cinemaNodeIds.has(id) ? REEL_KNOWS_TOMORROW.nodes[id] : undefined;
+  const proposed = proposedNodeIds.has(id);
   return (
     <>
       <NodeToolbar isVisible={singleSelection && !editing && !data.locked} position={Position.Top} offset={14}>
@@ -259,7 +276,8 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
         onResizeEnd={(_, dimensions) => actions.recordResizeEnd(id, dimensions)}
       />
       <article
-        className={`concept-node tone-${data.tone} content-align-${data.horizontalAlign} content-valign-${data.verticalAlign} ${editing ? 'is-editing nodrag nowheel' : ''}`}
+        className={`concept-node tone-${data.tone} content-align-${data.horizontalAlign} content-valign-${data.verticalAlign} ${cinemaDetail ? `cinema-node cinema-${cinemaDetail.kind}` : ''} ${proposed ? 'is-proposed' : ''} ${editing ? 'is-editing nodrag nowheel' : ''}`}
+        data-cinema-kind={cinemaDetail?.kind}
         style={{ opacity: data.opacity }}
         onDoubleClick={(event) => {
           event.stopPropagation();
@@ -267,6 +285,11 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
         }}
       >
         <span>{data.eyebrow}</span>
+        {cinemaDetail ? (
+          <span className={`cinema-node-status risk-${cinemaDetail.risk}`}>
+            {proposed ? 'Proposed' : cinemaDetail.statusLabel}
+          </span>
+        ) : null}
         {editing ? (
           <Suspense fallback={<span className="editor-loading">Loading editor…</span>}>
             <InlineConceptEditor
@@ -284,6 +307,7 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
               ? <RichTextView document={data.title} className="concept-title-rich-text" />
               : <strong className="concept-title-placeholder">Untitled concept</strong>}
             {!richTextIsEmpty(data.body) ? <RichTextView document={data.body} /> : null}
+            {cinemaDetail ? <small className="cinema-node-metric">{cinemaDetail.metricLabel}</small> : null}
           </>
         )}
         {actions.hasChildren(id) ? (
@@ -542,6 +566,12 @@ function EditorInner() {
   const [conceptTemplate, setConceptTemplate] = useState<keyof typeof CONCEPT_TEMPLATES>('idea');
   const [checkpoints, setCheckpoints] = useState<LocalCheckpoint[]>([]);
   const [autosaveRevision, setAutosaveRevision] = useState(0);
+  const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
+  const [mockProposalPreview, setMockProposalPreview] = useState<AppliedCanvasCommandProposal | null>(null);
+  const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
+  const [expandedOutlineBranches, setExpandedOutlineBranches] = useState<Set<OutlineBranchId>>(
+    () => new Set(['project', 'scene', 'planning', 'characters', 'locations', 'props', 'visual-elements', 'shots', 'assets']),
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const exportDialogRef = useRef<HTMLDialogElement>(null);
@@ -563,6 +593,7 @@ function EditorInner() {
   const saveQueueRef = useRef(Promise.resolve());
   const saveTicketRef = useRef(0);
   const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges });
+  const mockPlanningTimerRef = useRef<number | null>(null);
   const {
     screenToFlowPosition,
     fitView,
@@ -583,6 +614,10 @@ function EditorInner() {
     };
     window.addEventListener('error', handleResizeObserverNotification, true);
     return () => window.removeEventListener('error', handleResizeObserverNotification, true);
+  }, []);
+
+  useEffect(() => () => {
+    if (mockPlanningTimerRef.current !== null) window.clearTimeout(mockPlanningTimerRef.current);
   }, []);
 
   useLayoutEffect(() => {
@@ -660,6 +695,62 @@ function EditorInner() {
     updatedAt: Date.now(),
   }), []);
 
+  const planMockScene = useCallback(() => {
+    if (mockProposalStage !== 'idle' || mockProposalPreview) return;
+    if (!nodesRef.current.some((node) => node.id === REEL_KNOWS_TOMORROW.sceneNodeId)) {
+      announce('The demo scene is not available in this document.', 'error');
+      return;
+    }
+    if (nodesRef.current.some((node) => node.id === 'cine-agent-plan')) {
+      announce('The mock shot plan is already on the canvas.');
+      return;
+    }
+    setMockProposalStage('planning');
+    setMobilePanel('inspector');
+    announce('Building a local mock prompt package. No network request is running.');
+    const sourceDocument = getCurrentDocument();
+    mockPlanningTimerRef.current = window.setTimeout(() => {
+      mockPlanningTimerRef.current = null;
+      try {
+        const preview = applyCanvasCommandProposal(sourceDocument, MOCK_SHOT_PLAN_PROPOSAL);
+        setMockProposalPreview(preview);
+        setPreviewSelectedNodeId('cine-shot-03');
+        setMockProposalStage('ready');
+        window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
+        announce('Mock proposal ready: six shots, reusable elements, prompts, sources, and cost ranges.', 'success');
+      } catch (error) {
+        setMockProposalStage('idle');
+        announce(error instanceof Error ? error.message : 'The mock proposal could not be prepared.', 'error');
+      }
+    }, 520);
+  }, [announce, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage]);
+
+  const rejectMockProposal = useCallback(() => {
+    setMockProposalPreview(null);
+    setMockProposalStage('idle');
+    setPreviewSelectedNodeId(null);
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === REEL_KNOWS_TOMORROW.sceneNodeId })));
+    setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
+    window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
+    announce('Mock proposal rejected. The saved canvas was not changed.');
+  }, [announce, fitView]);
+
+  const acceptMockProposal = useCallback(() => {
+    if (!mockProposalPreview) return;
+    recordHistory();
+    setNodes(mockProposalPreview.document.nodes.map((node) => ({
+      ...node,
+      selected: node.id === 'cine-shot-03',
+    })));
+    setEdges(mockProposalPreview.document.edges.map((edge) => ({ ...edge, selected: false })));
+    setMockProposalPreview(null);
+    setMockProposalStage('idle');
+    setPreviewSelectedNodeId(null);
+    setSelectedPath(null);
+    window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
+    announce('Prompt package accepted as one undoable canvas change.', 'success');
+  }, [announce, fitView, mockProposalPreview, recordHistory]);
+
   const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
     const ticket = pendingTicket ?? ++saveTicketRef.current;
     if (ticket !== saveTicketRef.current) return Promise.resolve();
@@ -733,23 +824,32 @@ function EditorInner() {
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<EditorNode>[]) => {
+      if (mockProposalPreview) {
+        const selectedChange = [...changes].reverse().find((change) => change.type === 'select' && change.selected);
+        if (selectedChange?.type === 'select') setPreviewSelectedNodeId(selectedChange.id);
+        if (changes.some((change) => change.type === 'select' && !change.selected && change.id === previewSelectedNodeId)
+          && !selectedChange) setPreviewSelectedNodeId(null);
+        return;
+      }
       if (changes.some((change) => change.type === 'remove')) recordHistory();
       setNodes((current) => applyNodeChanges(changes, current));
       if (changes.some((change) => change.type === 'remove')) setSelectedPath(null);
     },
-    [recordHistory],
+    [mockProposalPreview, previewSelectedNodeId, recordHistory],
   );
 
   const handleEdgesChange = useCallback(
     (changes: EdgeChange<EditorEdge>[]) => {
+      if (mockProposalPreview) return;
       if (changes.some((change) => change.type === 'remove')) recordHistory();
       setEdges((current) => applyEdgeChanges(changes, current));
     },
-    [recordHistory],
+    [mockProposalPreview, recordHistory],
   );
 
   const handleConnect = useCallback(
     (connection: Connection) => {
+      if (mockProposalPreview) return;
       const issue = connectionIssue(nodesRef.current, edgesRef.current, connection);
       if (issue) {
         announce(connectionIssueMessage(issue), 'error');
@@ -771,10 +871,11 @@ function EditorInner() {
         ),
       );
     },
-    [announce, recordHistory],
+    [announce, mockProposalPreview, recordHistory],
   );
 
   const handleReconnect = useCallback((edge: EditorEdge, connection: Connection) => {
+    if (mockProposalPreview) return;
     const issue = connectionIssue(nodesRef.current, edgesRef.current, connection, edge.id);
     if (issue) {
       announce(connectionIssueMessage(issue), 'error');
@@ -782,7 +883,7 @@ function EditorInner() {
     }
     recordHistory();
     setEdges((current) => reconnectEdge(edge, connection, current, { shouldReplaceId: false }));
-  }, [announce, recordHistory]);
+  }, [announce, mockProposalPreview, recordHistory]);
 
   const isValidConnection = useCallback(
     (connection: Connection | EditorEdge) => canConnect(nodesRef.current, edgesRef.current, connection),
@@ -1182,12 +1283,39 @@ function EditorInner() {
     announce(`${template.eyebrow} template added.`, 'success');
   }, [announce, conceptTemplate, recordHistory, screenToFlowPosition]);
 
-  const selectedNodes = nodes.filter((node) => node.selected);
+  const previewNodeIds = useMemo(
+    () => new Set(mockProposalPreview?.affectedNodeIds ?? []),
+    [mockProposalPreview],
+  );
+  const presentedNodes = useMemo(
+    () => mockProposalPreview
+      ? mockProposalPreview.document.nodes.map((node) => ({
+          ...node,
+          selected: node.id === previewSelectedNodeId,
+        }))
+      : nodes,
+    [mockProposalPreview, nodes, previewSelectedNodeId],
+  );
+  const presentedEdges = mockProposalPreview?.document.edges ?? edges;
+  const mockPlanAccepted = nodes.some((node) => node.id === 'cine-agent-plan');
+  const cinemaOutlineActive = Boolean(mockProposalPreview || mockPlanAccepted);
+  const cinemaNodeIds = useMemo(
+    () => mockProposalPreview || mockPlanAccepted
+      ? new Set(Object.keys(REEL_KNOWS_TOMORROW.nodes))
+      : new Set<string>(),
+    [mockPlanAccepted, mockProposalPreview],
+  );
+  const selectedNodes = presentedNodes.filter((node) => node.selected);
   const selectedNode = selectedNodes[0] ?? null;
   const selectedNodeId = selectedNode?.id ?? null;
   const selectedNodeCount = selectedNodes.length;
   const selectedUnlockedCount = selectedNodes.filter((node) => !node.data.locked).length;
-  const selectedEdge = edges.find((edge) => edge.selected) ?? null;
+  const selectedEdge = mockProposalPreview ? null : edges.find((edge) => edge.selected) ?? null;
+  const selectedCinemaDetail = selectedNode && (
+    mockProposalPreview
+    || mockPlanAccepted
+    || selectedNode.id === REEL_KNOWS_TOMORROW.sceneNodeId
+  ) ? REEL_KNOWS_TOMORROW.nodes[selectedNode.id] ?? null : null;
   const selectedVectorPath = useMemo(() => {
     if (!selectedPath) return null;
     const node = nodes.find((item) => item.id === selectedPath.nodeId);
@@ -1679,6 +1807,7 @@ function EditorInner() {
     if (!window.confirm('Start a new local document? This clears the current canvas on this device.')) return;
     try {
       conversionControllerRef.current?.abort();
+      if (mockPlanningTimerRef.current !== null) window.clearTimeout(mockPlanningTimerRef.current);
       await clearLocalDocument();
       pastRef.current = [];
       futureRef.current = [];
@@ -1686,6 +1815,9 @@ function EditorInner() {
       setEdges(structuredClone(initialDocument.edges));
       setTitle(initialDocument.title);
       setSelectedPath(null);
+      setMockProposalPreview(null);
+      setMockProposalStage('idle');
+      setPreviewSelectedNodeId(null);
       refreshHistoryState();
       announce('New local document created.', 'success');
     } catch {
@@ -1725,6 +1857,9 @@ function EditorInner() {
     setEdges(restored.edges);
     setTitle(restored.title);
     setSelectedPath(null);
+    setMockProposalPreview(null);
+    setMockProposalStage('idle');
+    setPreviewSelectedNodeId(null);
     await queueDocumentSave(restored);
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
@@ -1753,6 +1888,9 @@ function EditorInner() {
       setEdges(restored.edges);
       setTitle(restored.title);
       setSelectedPath(null);
+      setMockProposalPreview(null);
+      setMockProposalStage('idle');
+      setPreviewSelectedNodeId(null);
       setExpandedVectors(new Set());
       refreshHistoryState();
       await queueDocumentSave(restored);
@@ -1853,7 +1991,7 @@ function EditorInner() {
   );
 
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
-  const layerNodes = [...nodes].reverse().filter((node) => {
+  const layerNodes = [...presentedNodes].reverse().filter((node) => {
     if (!normalizedSearch) return true;
     const searchable = [
       node.data.name,
@@ -1863,7 +2001,18 @@ function EditorInner() {
     ].join(' ').toLocaleLowerCase();
     return searchable.includes(normalizedSearch);
   });
+  const cinemaOutlineModel = useMemo(
+    () => cinemaOutlineActive
+      ? buildCinemaOutline(presentedNodes, REEL_KNOWS_TOMORROW, previewNodeIds, searchQuery)
+      : null,
+    [cinemaOutlineActive, presentedNodes, previewNodeIds, searchQuery],
+  );
   const handleLayerSelection = useCallback((event: ReactMouseEvent<HTMLButtonElement>, id: string) => {
+    if (mockProposalPreview) {
+      setPreviewSelectedNodeId(id);
+      setSelectedPath(null);
+      return;
+    }
     const anchorId = layerSelectionAnchorRef.current;
     if (event.shiftKey && anchorId) {
       const anchorIndex = layerNodes.findIndex((node) => node.id === anchorId);
@@ -1887,13 +2036,43 @@ function EditorInner() {
 
     layerSelectionAnchorRef.current = id;
     revealAndSelectNode(id);
-  }, [layerNodes, revealAndSelectNode, selectNode]);
-  const collapsedNodeIds = useMemo(() => collapsedDescendantIds(nodes, edges), [edges, nodes]);
+  }, [layerNodes, mockProposalPreview, revealAndSelectNode, selectNode]);
+  const handleOutlineSelection = useCallback((id: string) => {
+    if (mockProposalPreview) {
+      setPreviewSelectedNodeId(id);
+      setSelectedPath(null);
+    } else {
+      revealAndSelectNode(id);
+    }
+    window.setTimeout(() => fitView({ nodes: [{ id }], duration: 280, padding: 0.6, maxZoom: 1.35 }), 0);
+  }, [fitView, mockProposalPreview, revealAndSelectNode]);
+  const focusOutlineNodes = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    fitView({ nodes: ids.map((id) => ({ id })), duration: 300, padding: 0.3, maxZoom: 1.2 });
+  }, [fitView]);
+  const toggleOutlineBranch = useCallback((id: OutlineBranchId) => {
+    setExpandedOutlineBranches((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+  const collapsedNodeIds = useMemo(
+    () => collapsedDescendantIds(presentedNodes, presentedEdges),
+    [presentedEdges, presentedNodes],
+  );
   const canvasNodes = useMemo(
-    () => nodes.map((node) => {
+    () => presentedNodes.map((node) => {
+      const previewPresentation = mockProposalPreview ? {
+        className: previewNodeIds.has(node.id) ? 'proposal-ghost-node' : 'proposal-context-node',
+        draggable: false,
+        deletable: false,
+        data: { ...node.data, locked: true },
+      } : {};
       if (node.data.kind !== 'concept') {
         return {
           ...node,
+          ...previewPresentation,
           hidden: Boolean(node.hidden || collapsedNodeIds.has(node.id)),
         };
       }
@@ -1906,30 +2085,39 @@ function EditorInner() {
       } as CSSProperties;
       return {
         ...node,
+        ...previewPresentation,
         style,
         hidden: Boolean(node.hidden || collapsedNodeIds.has(node.id)),
       };
     }),
-    [collapsedNodeIds, nodes],
+    [collapsedNodeIds, mockProposalPreview, presentedNodes, previewNodeIds],
   );
   const canvasEdges = useMemo(
     () => {
-      const nodeNames = new Map(nodes.map((node) => [node.id, node.data.name]));
-      return edges
+      const nodeNames = new Map(presentedNodes.map((node) => [node.id, node.data.name]));
+      const affectedEdgeIds = new Set(mockProposalPreview?.affectedEdgeIds ?? []);
+      return presentedEdges
         .filter((edge) => !collapsedNodeIds.has(edge.source) && !collapsedNodeIds.has(edge.target))
         .map((edge) => ({
           ...edge,
+          ...(affectedEdgeIds.has(edge.id) ? {
+            className: 'proposal-ghost-edge',
+            animated: true,
+            style: { stroke: '#716af2', strokeWidth: 1.75, strokeDasharray: '6 5' },
+          } : {}),
           ariaLabel: `Connector from ${nodeNames.get(edge.source) ?? edge.source} to ${nodeNames.get(edge.target) ?? edge.target}${edge.data?.label ? `: ${edge.data.label}` : ''}`,
         }));
     },
-    [collapsedNodeIds, edges, nodes],
+    [collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
   );
 
   return (
     <SelectedNodeCountContext.Provider value={selectedNodeCount}>
-      <NodeActionContext.Provider value={nodeActionValue}>
+      <CinemaNodeIdsContext.Provider value={cinemaNodeIds}>
+        <ProposedNodeIdsContext.Provider value={previewNodeIds}>
+          <NodeActionContext.Provider value={nodeActionValue}>
         <main
-        className="editor-shell"
+        className={`editor-shell ${cinemaOutlineActive ? 'cinema-outline-active' : ''}`}
         aria-label={APP_CONFIG.editorAriaLabel}
         aria-busy={!hydrated}
         data-ready={hydrated ? 'true' : 'false'}
@@ -1968,6 +2156,22 @@ function EditorInner() {
             >
               <SlidersHorizontal size={16} />
             </button>
+            <button
+              type="button"
+              className="ghost-button plan-scene-button"
+              disabled={mockProposalStage === 'planning' || mockProposalStage === 'ready'}
+              onClick={() => {
+                if (mockPlanAccepted) {
+                  revealAndSelectNode('cine-agent-plan');
+                  setMobilePanel('inspector');
+                  return;
+                }
+                planMockScene();
+              }}
+            >
+              {mockProposalStage === 'planning' ? <LoaderCircle className="spin" size={14} /> : mockPlanAccepted ? <Check size={14} /> : <Sparkles size={14} />}
+              <span>{mockProposalStage === 'planning' ? 'Planning…' : mockPlanAccepted ? 'Plan ready' : 'Plan scene'}</span>
+            </button>
             <button type="button" className="icon-button backup-button" aria-label="Project backup and restore" onClick={openBackup}>
               <HardDrive size={16} />
             </button>
@@ -2002,28 +2206,36 @@ function EditorInner() {
 
         <aside className={`panel layers-panel ${mobilePanel === 'layers' ? 'panel-open' : ''}`} aria-labelledby="layers-title">
           <div className="panel-heading">
-            <div><span className="eyebrow">Document</span><h1 id="layers-title">Layers</h1></div>
+            <div>
+              <span className="eyebrow">{cinemaOutlineActive ? 'Production' : 'Document'}</span>
+              <h1 id="layers-title">{cinemaOutlineActive ? 'Project Outline' : 'Layers'}</h1>
+            </div>
             <div className="panel-heading-actions">
-              <button type="button" className="icon-button" aria-label="Add concept layer" onClick={addConceptNode}><Plus size={16} /></button>
+              {!cinemaOutlineActive ? <button type="button" className="icon-button" aria-label="Add concept layer" onClick={addConceptNode}><Plus size={16} /></button> : null}
               <button type="button" className="icon-button panel-close-button" aria-label="Close layers panel" onClick={() => setMobilePanel(null)}><X size={16} /></button>
             </div>
           </div>
           <div className="layer-search">
             <Search size={13} aria-hidden="true" />
-            <label htmlFor="layer-search-input" className="visually-hidden">Search layers and concept text</label>
+            <label htmlFor="layer-search-input" className="visually-hidden">{cinemaOutlineActive ? 'Search project outline' : 'Search layers and concept text'}</label>
             <input
               id="layer-search-input"
               type="search"
-              placeholder="Search layers and notes"
+              placeholder={cinemaOutlineActive ? 'Search scenes, assets, shots' : 'Search layers and notes'}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && layerNodes[0]) revealAndSelectNode(layerNodes[0].id);
+                if (event.key !== 'Enter') return;
+                const firstOutlineNode = cinemaOutlineModel?.groups[0]?.items[0]?.nodeId
+                  ?? cinemaOutlineModel?.scene.nodeId
+                  ?? cinemaOutlineModel?.project?.nodeId;
+                if (cinemaOutlineActive && firstOutlineNode) handleOutlineSelection(firstOutlineNode);
+                else if (layerNodes[0]) revealAndSelectNode(layerNodes[0].id);
               }}
             />
-            {normalizedSearch ? <span aria-live="polite">{layerNodes.length}</span> : null}
+            {normalizedSearch ? <span aria-live="polite">{cinemaOutlineModel?.visibleItemCount ?? layerNodes.length}</span> : null}
           </div>
-          <div className="template-picker">
+          {!cinemaOutlineActive ? <div className="template-picker">
             <label htmlFor="concept-template">Quick template</label>
             <select id="concept-template" value={conceptTemplate} onChange={(event) => setConceptTemplate(event.target.value as keyof typeof CONCEPT_TEMPLATES)}>
               <option value="idea">Idea</option>
@@ -2032,16 +2244,32 @@ function EditorInner() {
               <option value="question">Open question</option>
             </select>
             <button type="button" onClick={addConceptFromTemplate}><Plus size={12} /> Add</button>
-          </div>
+          </div> : null}
           <p id="layer-list-instructions" className="visually-hidden">
-            Double-click an unlocked layer or press F2 while it is focused to rename it.
+            {cinemaOutlineActive
+              ? 'The project outline is generated automatically from the active cinema canvas. Select an item to focus its node.'
+              : 'Double-click an unlocked layer or press F2 while it is focused to rename it.'}
           </p>
-          <ul className="layer-list" aria-label="Canvas layers" aria-describedby="layer-list-instructions">
+          {cinemaOutlineActive && cinemaOutlineModel ? (
+            <ProjectOutline
+              model={cinemaOutlineModel}
+              selectedNodeId={selectedNodeId}
+              expandedBranches={expandedOutlineBranches}
+              proposalPreview={Boolean(mockProposalPreview)}
+              searchActive={Boolean(normalizedSearch)}
+              onToggleBranch={toggleOutlineBranch}
+              onSelectNode={handleOutlineSelection}
+              onFocusNodes={focusOutlineNodes}
+              onToggleVisibility={toggleNodeVisibility}
+              onToggleLock={toggleNodeLock}
+            />
+          ) : <ul className="layer-list" aria-label="Canvas layers" aria-describedby="layer-list-instructions">
             {layerNodes.map((node) => {
               const expanded = expandedVectors.has(node.id);
+              const cinemaDetail = cinemaNodeIds.has(node.id) ? REEL_KNOWS_TOMORROW.nodes[node.id] : undefined;
               return (
                 <li key={node.id}>
-                  <div className={`layer-row ${node.selected ? 'active' : ''}`}>
+                  <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''}`}>
                     {node.data.kind === 'vector' ? (
                       <button
                         type="button"
@@ -2058,7 +2286,9 @@ function EditorInner() {
                     {renamingLayerId === node.id ? (
                       <div className="layer-main layer-renaming">
                         <span className="layer-icon" aria-hidden="true">
-                          {node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
+                          {cinemaDetail
+                            ? <span className={`cinema-layer-glyph kind-${cinemaDetail.kind}`} data-glyph={cinemaDetail.kind === 'agent-run' ? 'AI' : cinemaDetail.kind.slice(0, 1).toUpperCase()} />
+                            : node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
                         </span>
                         <input
                           aria-label="Layer name"
@@ -2109,7 +2339,9 @@ function EditorInner() {
                         }}
                       >
                         <span className="layer-icon" aria-hidden="true">
-                          {node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
+                          {cinemaDetail
+                            ? <span className={`cinema-layer-glyph kind-${cinemaDetail.kind}`} data-glyph={cinemaDetail.kind === 'agent-run' ? 'AI' : cinemaDetail.kind.slice(0, 1).toUpperCase()} />
+                            : node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
                         </span>
                         <span className="layer-name">{node.data.name}</span>
                       </button>
@@ -2152,7 +2384,7 @@ function EditorInner() {
                 </li>
               );
             })}
-          </ul>
+          </ul>}
           <div className="local-note">
             <span className="local-note-icon" aria-hidden="true"><Check size={11} /></span>
             <div><strong>Local workspace</strong><span>Images and edits stay on this device</span></div>
@@ -2166,6 +2398,7 @@ function EditorInner() {
           tabIndex={-1}
           onDragEnter={(event) => {
             event.preventDefault();
+            if (mockProposalPreview) return;
             dragDepthRef.current += 1;
             setDragActive(true);
           }}
@@ -2180,13 +2413,14 @@ function EditorInner() {
           }}
           onDrop={(event) => {
             event.preventDefault();
+            if (mockProposalPreview) return;
             dragDepthRef.current = 0;
             setDragActive(false);
             void ingestFiles(Array.from(event.dataTransfer.files), { x: event.clientX, y: event.clientY });
           }}
           onDoubleClick={(event) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (toolMode !== 'select' || !target?.classList.contains('react-flow__pane')) return;
+            if (mockProposalPreview || toolMode !== 'select' || !target?.classList.contains('react-flow__pane')) return;
             event.preventDefault();
             addConceptAt({ x: event.clientX, y: event.clientY }, true);
           }}
@@ -2201,9 +2435,11 @@ function EditorInner() {
             onReconnect={handleReconnect}
             isValidConnection={isValidConnection}
             onNodeDragStart={() => {
+              if (mockProposalPreview) return;
               dragOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current);
             }}
             onNodeDragStop={() => {
+              if (mockProposalPreview) return;
               if (dragOriginRef.current) {
                 recordHistory(dragOriginRef.current);
                 dragOriginRef.current = null;
@@ -2224,7 +2460,7 @@ function EditorInner() {
             zoomActivationKeyCode={['Meta', 'Control']}
             zoomOnPinch
             zoomOnDoubleClick={false}
-            selectionOnDrag={toolMode === 'select'}
+            selectionOnDrag={toolMode === 'select' && !mockProposalPreview}
             selectionMode={SelectionMode.Partial}
             selectionKeyCode={['Meta', 'Control']}
             multiSelectionKeyCode={['Meta', 'Control', 'Shift']}
@@ -2233,11 +2469,11 @@ function EditorInner() {
             autoPanOnSelection
             autoPanOnNodeDrag
             autoPanOnConnect
-            nodesDraggable={toolMode === 'select' && !temporaryPanActive}
+            nodesDraggable={toolMode === 'select' && !temporaryPanActive && !mockProposalPreview}
             nodesFocusable
             edgesFocusable
             selectNodesOnDrag={toolMode === 'select' && !temporaryPanActive}
-            deleteKeyCode={['Backspace', 'Delete']}
+            deleteKeyCode={mockProposalPreview ? null : ['Backspace', 'Delete']}
             ariaLabelConfig={{
               'controls.ariaLabel': 'Canvas controls',
               'minimap.ariaLabel': 'Diagram overview',
@@ -2318,10 +2554,10 @@ function EditorInner() {
               <button type="button" className={`tool ${toolMode === 'select' && !temporaryPanActive ? 'active' : ''}`} aria-label="Select tool, V" aria-pressed={toolMode === 'select' && !temporaryPanActive} title="Select layers (V) · Drag empty canvas to select" onClick={() => setToolMode('select')}><MousePointer2 size={16} /></button>
               <button type="button" className={`tool ${toolMode === 'hand' || temporaryPanActive ? 'active' : ''}`} aria-label="Hand tool, H" aria-pressed={toolMode === 'hand' || temporaryPanActive} title="Pan canvas (H) · Hold Space from Select" onClick={() => setToolMode('hand')}><Hand size={16} /></button>
               <span className="toolbar-divider" />
-              <button type="button" className="tool" aria-label="Add concept" onClick={addConceptNode}><TypeIcon size={16} /></button>
-              <button type="button" className="tool" aria-label="Connect nodes by dragging their handles" onClick={() => announce('Drag from a node handle to another node to create a connector.')}><Waypoints size={16} /></button>
-              <button type="button" className="tool" aria-label="Tidy diagram layout" onClick={tidyDiagram}><Sparkles size={16} /></button>
-              <button type="button" className="tool" aria-label="Import image" onClick={() => fileInputRef.current?.click()}><Upload size={16} /></button>
+              <button type="button" className="tool" aria-label="Add concept" disabled={Boolean(mockProposalPreview)} onClick={addConceptNode}><TypeIcon size={16} /></button>
+              <button type="button" className="tool" aria-label="Connect nodes by dragging their handles" disabled={Boolean(mockProposalPreview)} onClick={() => announce('Drag from a node handle to another node to create a connector.')}><Waypoints size={16} /></button>
+              <button type="button" className="tool" aria-label="Tidy diagram layout" disabled={Boolean(mockProposalPreview)} onClick={tidyDiagram}><Sparkles size={16} /></button>
+              <button type="button" className="tool" aria-label="Import image" disabled={Boolean(mockProposalPreview)} onClick={() => fileInputRef.current?.click()}><Upload size={16} /></button>
             </Panel>
             <Panel position="bottom-right" className="zoom-readout">
               <button
@@ -2340,12 +2576,39 @@ function EditorInner() {
                 }}
               >{Math.round(viewportZoom * 100)}%</button>
             </Panel>
-            <Panel position="bottom-center" className="drop-prompt">
+            {!mockProposalPreview && mockProposalStage !== 'planning' ? <Panel position="bottom-center" className="drop-prompt">
               <span className="upload-symbol" aria-hidden="true"><Upload size={16} /></span>
               <div><strong>Drop an image anywhere</strong><span>or paste with ⌘V</span></div>
               <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>Browse files</button>
-            </Panel>
+            </Panel> : null}
           </ReactFlow>
+          {mockProposalStage === 'planning' ? (
+            <div className="mock-planning-card" role="status">
+              <span className="mock-planning-icon"><LoaderCircle className="spin" size={18} /></span>
+              <div>
+                <strong>Drafting the prompt package</strong>
+                <span>Local mock · scene → elements → six shots → cost range</span>
+              </div>
+            </div>
+          ) : null}
+          {mockProposalPreview ? (
+            <section className="proposal-review-bar" aria-label="Mock shot proposal review">
+              <div className="proposal-review-icon" aria-hidden="true"><Sparkles size={16} /></div>
+              <div className="proposal-review-copy">
+                <span>Mock proposal ready</span>
+                <strong>6 shots · 36 sec · ₱820 expected</strong>
+                <small>Inspect every ghost node before committing one undoable change.</small>
+              </div>
+              <div className="proposal-cost-range" aria-label="Illustrative cost range">
+                <span><small>Minimum</small>₱430</span>
+                <span><small>High risk</small>₱1,140</span>
+              </div>
+              <div className="proposal-review-actions">
+                <button type="button" className="secondary-button" onClick={rejectMockProposal}>Reject</button>
+                <button type="button" className="primary-button" onClick={acceptMockProposal}><Check size={14} /> Accept plan</button>
+              </div>
+            </section>
+          ) : null}
           {dragActive ? (
             <div className="drop-overlay" role="status">
               <Upload size={26} />
@@ -2360,6 +2623,7 @@ function EditorInner() {
             aria-label="Choose images to add to the canvas"
             accept="image/png,image/jpeg,image/webp"
             multiple
+            disabled={Boolean(mockProposalPreview)}
             onChange={(event) => {
               void ingestFiles(Array.from(event.target.files ?? []));
               event.target.value = '';
@@ -2369,14 +2633,14 @@ function EditorInner() {
 
         <aside className={`panel inspector-panel ${mobilePanel === 'inspector' ? 'panel-open' : ''}`} aria-labelledby="inspector-title">
           <div className="panel-heading">
-            <div><span className="eyebrow">Selection</span><h2 id="inspector-title">Properties</h2></div>
+            <div><span className="eyebrow">Selection</span><h2 id="inspector-title">{selectedCinemaDetail ? 'Scene planner' : 'Properties'}</h2></div>
             <div className="panel-heading-actions">
               {selectedNodes.length > 1
                 ? <span className="selection-kind">{selectedNodes.length} layers</span>
                 : selectedEdge
                   ? <span className="selection-kind">connector</span>
                   : selectedNode
-                    ? <span className="selection-kind">{selectedNode.data.kind}</span>
+                    ? <span className="selection-kind">{selectedCinemaDetail?.kind ?? selectedNode.data.kind}</span>
                     : null}
               <button type="button" className="icon-button panel-close-button" aria-label="Close properties panel" onClick={() => setMobilePanel(null)}><X size={16} /></button>
             </div>
@@ -2420,6 +2684,17 @@ function EditorInner() {
               onLock={() => setSelectedNodesLocked(true)}
               onUnlock={() => setSelectedNodesLocked(false)}
               onDelete={deleteSelectedNodes}
+            />
+          ) : selectedNode && selectedCinemaDetail ? (
+            <CinemaInspector
+              key={selectedCinemaDetail.nodeId}
+              detail={selectedCinemaDetail}
+              project={REEL_KNOWS_TOMORROW}
+              proposed={previewNodeIds.has(selectedNode.id)}
+              planning={mockProposalStage === 'planning'}
+              accepted={mockPlanAccepted}
+              onPlan={planMockScene}
+              onNotice={announce}
             />
           ) : selectedNode ? (
             <NodeInspector
@@ -2541,7 +2816,9 @@ function EditorInner() {
           </form>
         </dialog>
         </main>
-      </NodeActionContext.Provider>
+          </NodeActionContext.Provider>
+        </ProposedNodeIdsContext.Provider>
+      </CinemaNodeIdsContext.Provider>
     </SelectedNodeCountContext.Provider>
   );
 }
