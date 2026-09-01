@@ -491,9 +491,6 @@ export function validateCinemaProjectData(
     if (cost.minimum > cost.expected || cost.expected > cost.highRisk) {
       throw new Error(`Cost estimate ${cost.id} ranges are out of order.`);
     }
-    if (cost.ceiling !== null && cost.highRisk > cost.ceiling) {
-      throw new Error(`Cost estimate ${cost.id} exceeds its ceiling.`);
-    }
   }
 
   return {

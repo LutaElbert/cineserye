@@ -136,7 +136,7 @@ describe('cinema project data', () => {
     );
   });
 
-  it('rejects unordered and over-ceiling cost ranges', () => {
+  it('rejects unordered cost ranges and preserves an over-ceiling estimate for warning UI', () => {
     const unordered = completeCinemaData();
     unordered.costs['cost-01'].minimum = 250;
     unordered.costs['cost-01'].expected = 200;
@@ -144,7 +144,7 @@ describe('cinema project data', () => {
 
     const overCeiling = completeCinemaData();
     overCeiling.costs['cost-01'].ceiling = 250;
-    expect(() => validateCinemaProjectData(overCeiling, hostNodeIds)).toThrow('exceeds its ceiling');
+    expect(validateCinemaProjectData(overCeiling, hostNodeIds).costs['cost-01'].highRisk).toBe(300);
   });
 
   it('cascades scene removal without leaving cinema orphans', () => {

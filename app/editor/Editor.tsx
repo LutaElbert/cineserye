@@ -145,6 +145,11 @@ import { removeCinemaRecordsForNodes } from '../domain/cinema/project-data';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
 import { buildCinemaOutline } from '../features/project-outline/outline-model';
 import { CinemaInspector } from '../features/scene-planner/CinemaInspector';
+import {
+  SceneBriefDialog,
+  type SceneBriefDefaults,
+} from '../features/scene-planner/SceneBriefDialog';
+import type { ScenePlanningBrief } from '../domain/cinema/scene-brief';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
@@ -584,6 +589,7 @@ function EditorInner() {
   const [autosaveRevision, setAutosaveRevision] = useState(0);
   const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
   const [mockProposalPreview, setMockProposalPreview] = useState<AppliedCanvasCommandProposal | null>(null);
+  const [sceneBriefDefaults, setSceneBriefDefaults] = useState<SceneBriefDefaults | null>(null);
   const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
   const [expandedOutlineBranches, setExpandedOutlineBranches] = useState<Set<OutlineBranchId>>(
     () => new Set(['project', 'scene', 'planning', 'characters', 'locations', 'props', 'visual-elements', 'shots', 'assets']),
@@ -611,6 +617,7 @@ function EditorInner() {
   const saveTicketRef = useRef(0);
   const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges, cinema });
   const mockPlanningTimerRef = useRef<number | null>(null);
+  const confirmedSceneBriefRef = useRef<ScenePlanningBrief | null>(null);
   const {
     screenToFlowPosition,
     fitView,
@@ -726,7 +733,7 @@ function EditorInner() {
     updatedAt: Date.now(),
   }), []);
 
-  const planMockScene = useCallback(() => {
+  const runMockScene = useCallback((brief: ScenePlanningBrief) => {
     if (mockProposalStage !== 'idle' || mockProposalPreview) return;
     if (!nodesRef.current.some((node) => node.id === REEL_KNOWS_TOMORROW.sceneNodeId)) {
       announce('The demo scene is not available in this document.', 'error');
@@ -737,6 +744,7 @@ function EditorInner() {
       return;
     }
     setMockProposalStage('planning');
+    confirmedSceneBriefRef.current = brief;
     setMobilePanel('inspector');
     announce('Building a local mock prompt package. No network request is running.');
     const sourceDocument = getCurrentDocument();
@@ -756,10 +764,50 @@ function EditorInner() {
     }, 520);
   }, [announce, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage]);
 
+  const planMockScene = useCallback(() => {
+    if (mockProposalStage !== 'idle' || mockProposalPreview || sceneBriefDefaults) return;
+    const selected = nodesRef.current.filter((node) => node.selected);
+    const sceneNode = selected.length === 1 ? selected[0] : null;
+    if (
+      !sceneNode
+      || sceneNode.id !== REEL_KNOWS_TOMORROW.sceneNodeId
+      || sceneNode.data.kind !== 'concept'
+    ) {
+      announce('Select exactly one scene before planning.', 'error');
+      return;
+    }
+    const existing = cinemaRef.current?.scenes[sceneNode.id]?.brief;
+    const sceneText = richTextToPlainText(sceneNode.data.body).trim() || sceneNode.data.label.trim();
+    setSceneBriefDefaults({
+      version: 1,
+      sceneNodeId: sceneNode.id,
+      sceneText,
+      tone: existing?.tone ?? 'Restrained supernatural suspense',
+      locationPeriod: existing?.locationPeriod ?? 'Manila single-screen cinema · late 1980s',
+      budgetBand: existing?.budgetBand ?? 'micro',
+      currency: existing?.currency ?? 'PHP',
+      budgetCeiling: existing?.budgetCeiling ?? 1_200,
+      targetDurationSeconds: existing?.targetDurationSeconds ?? 36,
+      availableEquipment: existing?.availableEquipment ?? [
+        'Phone or compact cinema camera',
+        'Tripod',
+        'One practical flashlight',
+      ],
+    });
+  }, [announce, mockProposalPreview, mockProposalStage, sceneBriefDefaults]);
+
+  const closeSceneBrief = useCallback(() => {
+    setSceneBriefDefaults(null);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>('.plan-scene-button')?.focus();
+    });
+  }, []);
+
   const rejectMockProposal = useCallback(() => {
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
+    confirmedSceneBriefRef.current = null;
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === REEL_KNOWS_TOMORROW.sceneNodeId })));
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
@@ -774,10 +822,35 @@ function EditorInner() {
       selected: node.id === 'cine-shot-03',
     })));
     setEdges(mockProposalPreview.document.edges.map((edge) => ({ ...edge, selected: false })));
-    setCinema(structuredClone(MOCK_CINEMA_PROJECT_DATA));
+    const nextCinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
+    const confirmedBrief = confirmedSceneBriefRef.current;
+    if (confirmedBrief) {
+      nextCinema.scenes[confirmedBrief.sceneNodeId].synopsis = confirmedBrief.sceneText;
+      nextCinema.scenes[confirmedBrief.sceneNodeId].brief = {
+        tone: confirmedBrief.tone,
+        locationPeriod: confirmedBrief.locationPeriod,
+        budgetBand: confirmedBrief.budgetBand,
+        currency: confirmedBrief.currency,
+        budgetCeiling: confirmedBrief.budgetCeiling,
+        targetDurationSeconds: confirmedBrief.targetDurationSeconds,
+        availableEquipment: [...confirmedBrief.availableEquipment],
+      };
+      nextCinema.costs['cost-scene-01'].currency = confirmedBrief.currency;
+      nextCinema.costs['cost-scene-01'].ceiling = confirmedBrief.budgetCeiling;
+      if (
+        confirmedBrief.budgetCeiling !== null
+        && nextCinema.costs['cost-scene-01'].expected > confirmedBrief.budgetCeiling
+      ) {
+        nextCinema.agentRuns['cine-agent-plan'].warnings.push(
+          'The expected generation estimate exceeds the confirmed ceiling.',
+        );
+      }
+    }
+    setCinema(nextCinema);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
+    confirmedSceneBriefRef.current = null;
     setSelectedPath(null);
     window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
     announce('Prompt package accepted as one undoable canvas change.', 'success');
@@ -1355,6 +1428,8 @@ function EditorInner() {
     || mockPlanAccepted
     || selectedNode.id === REEL_KNOWS_TOMORROW.sceneNodeId
   ) ? REEL_KNOWS_TOMORROW.nodes[selectedNode.id] ?? null : null;
+  const planningSceneSelected = selectedNodes.length === 1
+    && selectedNode?.id === REEL_KNOWS_TOMORROW.sceneNodeId;
   const selectedVectorPath = useMemo(() => {
     if (!selectedPath) return null;
     const node = nodes.find((item) => item.id === selectedPath.nodeId);
@@ -1860,6 +1935,8 @@ function EditorInner() {
       setMockProposalPreview(null);
       setMockProposalStage('idle');
       setPreviewSelectedNodeId(null);
+      setSceneBriefDefaults(null);
+      confirmedSceneBriefRef.current = null;
       refreshHistoryState();
       announce('New local document created.', 'success');
     } catch {
@@ -1903,6 +1980,8 @@ function EditorInner() {
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
+    setSceneBriefDefaults(null);
+    confirmedSceneBriefRef.current = null;
     await queueDocumentSave(restored);
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
@@ -1935,6 +2014,8 @@ function EditorInner() {
       setMockProposalPreview(null);
       setMockProposalStage('idle');
       setPreviewSelectedNodeId(null);
+      setSceneBriefDefaults(null);
+      confirmedSceneBriefRef.current = null;
       setExpandedVectors(new Set());
       refreshHistoryState();
       await queueDocumentSave(restored);
@@ -2203,7 +2284,13 @@ function EditorInner() {
             <button
               type="button"
               className="ghost-button plan-scene-button"
-              disabled={mockProposalStage === 'planning' || mockProposalStage === 'ready'}
+              aria-label={mockProposalStage === 'planning' ? 'Planning scene' : mockPlanAccepted ? 'Plan ready' : 'Plan scene'}
+              disabled={
+                mockProposalStage === 'planning'
+                || mockProposalStage === 'ready'
+                || Boolean(sceneBriefDefaults)
+                || (!mockPlanAccepted && !planningSceneSelected)
+              }
               onClick={() => {
                 if (mockPlanAccepted) {
                   revealAndSelectNode('cine-agent-plan');
@@ -2766,6 +2853,17 @@ function EditorInner() {
         </aside>
 
         {mobilePanel ? <button type="button" className="panel-scrim" aria-label="Close side panel" onClick={() => setMobilePanel(null)} /> : null}
+
+        {sceneBriefDefaults ? (
+          <SceneBriefDialog
+            defaults={sceneBriefDefaults}
+            onCancel={closeSceneBrief}
+            onSubmit={(brief) => {
+              setSceneBriefDefaults(null);
+              runMockScene(brief);
+            }}
+          />
+        ) : null}
 
         <div className="toast-region" aria-live="polite" aria-atomic="false">
           {toasts.map((toast) => (
