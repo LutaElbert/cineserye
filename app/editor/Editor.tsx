@@ -160,9 +160,14 @@ import {
   removeCinemaRecordsForNodes,
   type ResearchSourceCuration,
 } from '../domain/cinema/project-data';
-import { cinemaProposalCanvasSource, prepareCinemaPlanProposal } from './cinema-plan-proposal';
+import {
+  cinemaProposalCanvasSource,
+  compileCinemaCanvasProposal,
+  prepareCinemaPlanProposal,
+} from './cinema-plan-proposal';
 import { cinemaSourceFingerprint } from './document-fingerprint';
 import { applyCinemaDomainCommand, type CinemaShotPatch } from './cinema-domain-commands';
+import { prepareCinemaRevisionRestore } from '../domain/cinema/revision-restore';
 import type { CinemaProjectPresentation } from '../domain/cinema/prompt-artifacts';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
 import { buildCinemaOutline } from '../features/project-outline/outline-model';
@@ -1031,6 +1036,39 @@ function EditorInner() {
     window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
     announce('Prompt package accepted as one undoable canvas change.', 'success');
   }, [announce, fitView, mockProposalPreview, pendingProposalId, proposalCinema, recordHistory]);
+
+  const restorePlanRevision = useCallback((revisionId: string) => {
+    const current = cinemaRef.current;
+    const revision = current?.revisions[revisionId];
+    if (!current || !revision || revision.id === current.activeRevisionId) return;
+    const nextNumber = Math.max(0, ...Object.values(current.revisions).map((item) => item.number)) + 1;
+    if (!window.confirm(`Restore Revision ${revision.number} as new Revision ${nextNumber}? The current plan remains in history and this change can be undone.`)) return;
+    try {
+      const restoredAt = new Date().toISOString();
+      const restoreRunId = crypto.randomUUID();
+      const restoredCinema = prepareCinemaRevisionRestore(current, revisionId, restoreRunId, restoredAt);
+      const source = getCurrentDocument();
+      const proposal = prepareCinemaPlanProposal(
+        source,
+        current,
+        compileCinemaCanvasProposal(restoreRunId, restoredCinema),
+      );
+      const applied = applyCanvasCommandProposal(cinemaProposalCanvasSource(source), proposal);
+      const acceptedCinema = acceptCinemaPlanRevision(current, restoredCinema, restoredAt);
+      const sceneNodeId = acceptedCinema.activeSceneId
+        ? acceptedCinema.scenes[acceptedCinema.activeSceneId]?.nodeId
+        : null;
+      recordHistory();
+      setNodes(applied.document.nodes.map((node) => ({ ...node, selected: node.id === sceneNodeId })));
+      setEdges(applied.document.edges.map((edge) => ({ ...edge, selected: false })));
+      setCinema(acceptedCinema);
+      setSelectedPath(null);
+      window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 80);
+      announce(`Revision ${revision.number} restored as new Revision ${nextNumber}.`, 'success');
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The revision could not be restored.', 'error');
+    }
+  }, [announce, fitView, getCurrentDocument, recordHistory]);
 
   const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
     const ticket = pendingTicket ?? ++saveTicketRef.current;
@@ -3248,6 +3286,7 @@ function EditorInner() {
               onUpdateShot={updateAcceptedShot}
               revisions={revisionHistory}
               activeRevisionId={cinema?.activeRevisionId ?? null}
+              onRestoreRevision={restorePlanRevision}
               onNotice={announce}
             />
           ) : selectedNode ? (

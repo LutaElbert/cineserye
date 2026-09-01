@@ -1119,6 +1119,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .revision-history li > div { display: flex; align-items: center; justify-content: space-between; }
 .revision-history li span { color: var(--accent); font-size: 8px; font-weight: 700; text-transform: uppercase; }
 .revision-history li small, .revision-history li p { margin: 3px 0 0; color: var(--muted); font-size: 8px; line-height: 1.4; }
+.revision-history .revision-restore-button { inline-size: 100%; min-block-size: 29px; margin-block-start: 8px; font-size: 8px; }
 .cinema-tags { display: flex; flex-wrap: wrap; gap: 5px; padding: 8px 16px 14px; }
 .cinema-tags span { padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; background: white; color: #686c75; font-size: 7px; }
 .scene-plan-action { display: grid; gap: 8px; padding: 14px 16px; border-block-start: 1px solid var(--line); }

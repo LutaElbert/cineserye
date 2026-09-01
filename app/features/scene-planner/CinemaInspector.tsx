@@ -115,6 +115,7 @@ export function CinemaInspector({
   onUpdateShot,
   revisions,
   activeRevisionId,
+  onRestoreRevision,
   onNotice,
 }: {
   detail: CinemaNodePresentation;
@@ -130,6 +131,7 @@ export function CinemaInspector({
     | 'durationSeconds' | 'audio' | 'risk'>>) => void;
   revisions: CinemaPlanRevisionRecord[];
   activeRevisionId: string | null;
+  onRestoreRevision: (revisionId: string) => void;
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
 }) {
   const [tab, setTab] = useState<InspectorTab>(detail.kind === 'shot' ? 'prompt' : 'details');
@@ -275,6 +277,13 @@ export function CinemaInspector({
                         <div><strong>Revision {revision.number}</strong>{revision.id === activeRevisionId ? <span>Current</span> : <span>Superseded</span>}</div>
                         <small>{new Date(revision.acceptedAt).toLocaleString()}</small>
                         {comparison ? <p>{comparison.addedShots} added · {comparison.removedShots} removed · {comparison.changedShots} changed · {comparison.durationDeltaSeconds >= 0 ? '+' : ''}{comparison.durationDeltaSeconds}s</p> : <p>Original accepted plan</p>}
+                        {revision.id !== activeRevisionId ? (
+                          <button
+                            type="button"
+                            className="secondary-button revision-restore-button"
+                            onClick={() => onRestoreRevision(revision.id)}
+                          >Restore Revision {revision.number} as new revision</button>
+                        ) : null}
                       </li>
                     );
                   })}

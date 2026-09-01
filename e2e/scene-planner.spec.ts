@@ -283,4 +283,24 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await expect(history).toContainText('Revision 2');
   await expect(history).toContainText('Revision 1');
   expect(planningRequests).toBe(2);
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await history.getByRole('button', { name: 'Restore Revision 1 as new revision' }).click();
+  await expect(page.getByText('Revision 1 restored as new Revision 3.')).toBeVisible();
+  await expect(history).toContainText('3 revisions');
+  await expect(history.locator('li').filter({ hasText: 'Revision 3' })).toContainText('Current');
+  await expect(history.getByRole('button', { name: 'Restore Revision 2 as new revision' })).toBeVisible();
+  expect(planningRequests).toBe(2);
+
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(history).toContainText('2 revisions');
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(history).toContainText('3 revisions');
+  await waitForSaved(page);
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  const restoredOutline = page.getByRole('navigation', { name: 'Project outline' });
+  await restoredOutline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details' }).click();
+  await expect(page.locator('.revision-history')).toContainText('3 revisions');
 });

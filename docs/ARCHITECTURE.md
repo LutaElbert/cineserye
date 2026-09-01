@@ -73,6 +73,7 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 7. Reload restores an exact matching pending proposal without another provider call; a changed source fingerprint quarantines it.
 8. Reject discards the preview byte-for-byte. Accept records one history snapshot, commits nodes/edges/sidecar once, and appends an immutable plan revision.
 9. One undo reverses the entire accepted proposal; redo and reload restore it. Accepted shot edits use a cinema-domain command that updates the sidecar and derived host atomically and marks owned prompts stale.
+10. Restoring a superseded revision rehydrates its immutable snapshot, gives every generated record a fresh restore-run identity, compiles new derived hosts through the same canvas boundary, and accepts it as a successor revision. The formerly current revision remains immutable in history.
 
 ## Evaluation and observability
 

@@ -28,6 +28,7 @@ ADK prompt/response capture and completion upload are disabled by default. Cloud
 - Cancelling, timing out, failing, or rejecting creates no canvas history entry.
 - A ready proposal is a locked ghost preview until explicit acceptance.
 - A ready proposal is saved locally before review so a reload does not repeat a provider call. It contains generated planning content and is restored only when its source-document fingerprint still matches; pending reviews are not included in SVG or `.cineserye` backup exports.
+- Restoring an accepted revision is an entirely local operation. It does not contact Parallel, Vertex AI, or another provider; the selected immutable snapshot is re-scoped into a new local revision after explicit confirmation.
 - Source pins, support states, and removals made during review affect only the pending preview until acceptance.
 - Displayed citations are limited to explicit, valid planner-to-source relationships; missing source IDs do not receive substitutes.
 - Generation-cost figures are illustrative planning estimates, not provider quotes or billing records. A plan can also be expressed in credits or marked unpriced.
