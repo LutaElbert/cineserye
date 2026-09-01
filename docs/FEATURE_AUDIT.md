@@ -8,6 +8,8 @@
 
 **Primary user:** an independent creator without a complete pre-production crew
 
+**Execution plan:** [remaining-sprints implementation plan](SPRINT_IMPLEMENTATION_PLAN.md)
+
 ## Executive assessment
 
 Cineserye already has a stronger technical foundation than most hackathon prototypes: the canvas engine is reusable, cinema data is versioned separately, provider credentials stay on the server, model output is runtime-validated, proposals are previewed before one atomic mutation, and the local document has serious persistence, backup, accessibility, and test coverage.
