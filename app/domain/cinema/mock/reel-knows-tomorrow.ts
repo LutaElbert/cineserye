@@ -364,8 +364,8 @@ function conceptNode(
     type: 'concept',
     position,
     style: { width: 250, height: 88 },
-    draggable: true,
-    deletable: true,
+    draggable: false,
+    deletable: false,
     data: {
       kind: 'concept', name: title, label: title, title: conceptTitleFromPlainText(title),
       body: richTextFromPlainText(body), eyebrow, tone, collapsed: false,
@@ -609,5 +609,10 @@ export const MOCK_SHOT_PLAN_PROPOSAL: CanvasCommandProposal = {
     },
     ...createdNodes.map((node) => ({ type: 'create-node' as const, node })),
     ...createdEdges.map((createdEdge) => ({ type: 'connect-nodes' as const, edge: createdEdge })),
+    ...createdNodes.map((node) => ({
+      type: 'update-node' as const,
+      id: node.id,
+      patch: { data: { locked: true } },
+    })),
   ],
 };

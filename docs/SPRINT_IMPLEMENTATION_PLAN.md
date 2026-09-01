@@ -308,6 +308,12 @@ This shipped bridge closes the blank-workspace UX gap before Sprint 2's proposal
 
 ## 6. Sprint 2 — Revision, Recovery, and Source-of-Truth Editing
 
+### Implementation status — delivered foundation on `codex/sprint-2-revision-recovery`
+
+The current branch implements the source-of-truth foundation: deterministic V1-to-V2 migration, stable project and run-scoped identities, immutable revision snapshots and comparison, atomic accepted-shot editing with prompt invalidation, reload-safe pending proposal recovery, cancellation, active-request idempotency, safe provider status, and a capped content-free local trace panel/export. The evaluation adapter is covered by the deterministic TypeScript test suite and remains compatible with a future Agents CLI endpoint.
+
+Two production-hardening items remain deliberately outside the local foundation: durable idempotency across deployed instances and a chargeable provider health probe. Restoring an old snapshot as a newly active revision should be implemented with a deterministic snapshot-to-proposal compiler before media work; the current UI preserves and compares old snapshots but does not silently overwrite the active revision.
+
 ### Sprint objective
 
 Make planning iterative and recoverable. An accepted plan can be revised without losing history; domain edits cannot diverge from their canvas presentation; paid ready proposals survive reload.

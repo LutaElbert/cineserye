@@ -11,7 +11,7 @@ export type PromptArtifact = {
   continuitySourceIds: string[];
   researchSourceIds: string[];
   version: number;
-  status: 'draft' | 'approved';
+  status: 'draft' | 'stale' | 'approved';
 };
 
 export type ResearchSource = {

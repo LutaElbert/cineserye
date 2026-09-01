@@ -1,5 +1,5 @@
 import { MarkerType } from '@xyflow/react';
-import type { CinemaAssetRecord, CinemaProjectDataV1 } from '../../domain/cinema/project-data';
+import type { CinemaAssetRecord, CinemaProjectData } from '../../domain/cinema/project-data';
 import type { CanvasCommandProposal } from '../../editor/canvas-commands';
 import { conceptTitleFromPlainText, richTextFromPlainText } from '../../editor/rich-text';
 import type { EditorEdge, EditorNode } from '../../editor/types';
@@ -17,8 +17,8 @@ function conceptNode(
     type: 'concept',
     position,
     style: { width: 250, height: 88 },
-    draggable: true,
-    deletable: true,
+    draggable: false,
+    deletable: false,
     data: {
       kind: 'concept',
       name: title,
@@ -56,7 +56,7 @@ function assetEyebrow(asset: CinemaAssetRecord) {
   return 'Asset';
 }
 
-function ceilingLabel(project: CinemaProjectDataV1, sceneId: string) {
+function ceilingLabel(project: CinemaProjectData, sceneId: string) {
   const scene = project.scenes[sceneId];
   const cost = Object.values(project.costs).find((item) => item.sceneId === sceneId);
   if (!cost || cost.ceiling === null) {
@@ -68,7 +68,7 @@ function ceilingLabel(project: CinemaProjectDataV1, sceneId: string) {
 
 export function compileCinemaCanvasProposal(
   runId: string,
-  cinema: CinemaProjectDataV1,
+  cinema: CinemaProjectData,
 ): CanvasCommandProposal {
   const sceneId = cinema.activeSceneId;
   if (!sceneId) throw new Error('A canvas proposal requires an active scene.');
@@ -117,20 +117,20 @@ export function compileCinemaCanvasProposal(
   ));
   const createdNodes = [...planningNodes, ...shotNodes];
   const createdEdges = [
-    edge('scene-agent-plan', scene.nodeId, run.nodeId),
+    edge(`${runId}-scene-agent-plan`, scene.nodeId, run.nodeId),
     ...characters.map((character, index) => edge(
-      `scene-character-${index + 1}`,
+      `${runId}-scene-character-${index + 1}`,
       scene.nodeId,
       character.nodeId,
     )),
     ...assets.map((asset, index) => edge(
-      `scene-asset-${index + 1}`,
+      `${runId}-scene-asset-${index + 1}`,
       scene.nodeId,
       asset.nodeId,
     )),
-    ...(shots[0] ? [edge('agent-shot-01', run.nodeId, shots[0].nodeId)] : []),
+    ...(shots[0] ? [edge(`${runId}-agent-shot-01`, run.nodeId, shots[0].nodeId)] : []),
     ...shots.slice(1).map((shot, index) => edge(
-      `shot-${index + 1}-shot-${index + 2}`,
+      `${runId}-shot-${index + 1}-shot-${index + 2}`,
       shots[index].nodeId,
       shot.nodeId,
     )),
@@ -141,7 +141,6 @@ export function compileCinemaCanvasProposal(
     proposalId: `${runId}-canvas-proposal`,
     summary: `Create a validated ${shots.length}-shot prompt package with reusable continuity references.`,
     commands: [
-      { type: 'delete-nodes', ids: ['shot-01'] },
       {
         type: 'update-node',
         id: 'story-premise',
@@ -169,6 +168,11 @@ export function compileCinemaCanvasProposal(
       },
       ...createdNodes.map((node) => ({ type: 'create-node' as const, node })),
       ...createdEdges.map((createdEdge) => ({ type: 'connect-nodes' as const, edge: createdEdge })),
+      ...createdNodes.map((node) => ({
+        type: 'update-node' as const,
+        id: node.id,
+        patch: { data: { locked: true } },
+      })),
     ],
   };
 }

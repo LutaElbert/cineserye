@@ -1,5 +1,5 @@
 import { REEL_KNOWS_TOMORROW, MOCK_CINEMA_PROJECT_DATA } from '../../domain/cinema/mock/reel-knows-tomorrow';
-import type { CinemaProjectDataV1 } from '../../domain/cinema/project-data';
+import type { CinemaProjectData } from '../../domain/cinema/project-data';
 import type {
   ResearchProvider,
   ResearchProviderRequest,
@@ -22,7 +22,7 @@ function distributeDuration(target: number): number[] {
   return scaled;
 }
 
-function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectDataV1 {
+function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectData {
   const cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
   const baseRun = cinema.agentRuns['cine-agent-plan'];
   delete cinema.agentRuns['cine-agent-plan'];

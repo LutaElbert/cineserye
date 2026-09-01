@@ -1,5 +1,5 @@
 import { REEL_KNOWS_TOMORROW } from './mock/reel-knows-tomorrow';
-import type { CinemaProjectDataV1 } from './project-data';
+import type { CinemaProjectData } from './project-data';
 import type {
   CinemaNodePresentation,
   CinemaProjectPresentation,
@@ -21,27 +21,27 @@ function unique(values: readonly string[]) {
   return [...new Set(values)];
 }
 
-function promptIdsForNode(project: CinemaProjectDataV1, nodeId: string) {
+function promptIdsForNode(project: CinemaProjectData, nodeId: string) {
   return Object.values(project.prompts)
     .filter((prompt) => prompt.ownerNodeId === nodeId)
     .map((prompt) => prompt.id);
 }
 
 function sourceIdsForPrompts(
-  project: CinemaProjectDataV1,
+  project: CinemaProjectData,
   promptIds: readonly string[],
 ) {
   return unique(promptIds.flatMap((id) => project.prompts[id]?.researchSourceIds ?? []));
 }
 
-function usageCount(project: CinemaProjectDataV1, nodeId: string) {
+function usageCount(project: CinemaProjectData, nodeId: string) {
   return Object.values(project.shots)
     .filter((shot) => shot.continuityNodeIds.includes(nodeId))
     .length;
 }
 
 function withPromptLinks(
-  project: CinemaProjectDataV1,
+  project: CinemaProjectData,
   detail: CinemaNodePresentation,
 ): CinemaNodePresentation {
   const promptIds = promptIdsForNode(project, detail.nodeId);
@@ -58,7 +58,7 @@ function withPromptLinks(
  * supplies visual copy for fields that are not yet part of the provider contract.
  */
 export function cinemaProjectPresentation(
-  project: CinemaProjectDataV1,
+  project: CinemaProjectData,
 ): CinemaProjectPresentation {
   const presentation = structuredClone(REEL_KNOWS_TOMORROW);
   const scene = project.activeSceneId ? project.scenes[project.activeSceneId] : undefined;

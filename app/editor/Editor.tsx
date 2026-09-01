@@ -112,14 +112,22 @@ import {
 import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
+  clearPendingCinemaProposals,
   createLocalCheckpoint,
   deleteLocalCheckpoint,
+  deletePendingCinemaProposal,
   listLocalCheckpoints,
+  listLocalCinemaTraces,
   loadLocalDocument,
+  loadLatestPendingCinemaProposal,
   loadLocalRecoveryDocument,
+  savePendingCinemaProposal,
+  saveLocalCinemaTrace,
+  updatePendingCinemaProposal,
   saveLocalRecoveryDocument,
   saveLocalDocument,
   type LocalCheckpoint,
+  type LocalCinemaTrace,
 } from './persistence';
 import {
   conceptTitleFromPlainText,
@@ -145,12 +153,16 @@ import {
   REEL_KNOWS_TOMORROW,
 } from '../domain/cinema/mock/reel-knows-tomorrow';
 import { cinemaProjectPresentation } from '../domain/cinema/project-presentation';
-import type { CinemaProjectDataV1 } from '../domain/cinema/project-data';
+import type { CinemaProjectData } from '../domain/cinema/project-data';
 import {
+  acceptCinemaPlanRevision,
   curateCinemaResearchSource,
   removeCinemaRecordsForNodes,
   type ResearchSourceCuration,
 } from '../domain/cinema/project-data';
+import { cinemaProposalCanvasSource, prepareCinemaPlanProposal } from './cinema-plan-proposal';
+import { cinemaSourceFingerprint } from './document-fingerprint';
+import { applyCinemaDomainCommand, type CinemaShotPatch } from './cinema-domain-commands';
 import type { CinemaProjectPresentation } from '../domain/cinema/prompt-artifacts';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
 import { buildCinemaOutline } from '../features/project-outline/outline-model';
@@ -467,7 +479,7 @@ const nodeTypes = {
 function cloneSnapshot(
   nodes: EditorNode[],
   edges: EditorEdge[],
-  cinema?: CinemaProjectDataV1,
+  cinema?: CinemaProjectData,
 ): EditorSnapshot {
   return structuredClone({ nodes, edges, ...(cinema === undefined ? {} : { cinema }) });
 }
@@ -476,7 +488,7 @@ type PersistableEditorState = {
   title: string;
   nodes: EditorNode[];
   edges: EditorEdge[];
-  cinema?: CinemaProjectDataV1;
+  cinema?: CinemaProjectData;
 };
 
 const TRANSIENT_ELEMENT_KEYS = new Set(['selected', 'dragging', 'measured', 'resizing']);
@@ -584,7 +596,7 @@ function connectorPresentation(kind: 'default' | 'dashed' | 'emphasis') {
 function EditorInner() {
   const [nodes, setNodes] = useState<EditorNode[]>(initialDocument.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialDocument.edges);
-  const [cinema, setCinema] = useState<CinemaProjectDataV1 | undefined>(initialDocument.cinema);
+  const [cinema, setCinema] = useState<CinemaProjectData | undefined>(initialDocument.cinema);
   const [title, setTitle] = useState(initialDocument.title);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [temporaryPanActive, setTemporaryPanActive] = useState(false);
@@ -605,6 +617,7 @@ function EditorInner() {
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
   const [exportOpen, setExportOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
@@ -615,9 +628,12 @@ function EditorInner() {
   const [autosaveRevision, setAutosaveRevision] = useState(0);
   const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
   const [mockProposalPreview, setMockProposalPreview] = useState<AppliedCanvasCommandProposal | null>(null);
-  const [proposalCinema, setProposalCinema] = useState<CinemaProjectDataV1 | null>(null);
+  const [proposalCinema, setProposalCinema] = useState<CinemaProjectData | null>(null);
   const [proposalMode, setProposalMode] = useState<'fixture' | 'live' | null>(null);
+  const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
   const [configuredProviderMode, setConfiguredProviderMode] = useState<'loading' | 'fixture' | 'live'>('loading');
+  const [configuredProviderStatus, setConfiguredProviderStatus] = useState<CinemaProviderStatus | null>(null);
+  const [localCinemaTraces, setLocalCinemaTraces] = useState<LocalCinemaTrace[]>([]);
   const [sceneBriefDefaults, setSceneBriefDefaults] = useState<SceneBriefDefaults | null>(null);
   const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
   const [expandedOutlineBranches, setExpandedOutlineBranches] = useState<Set<OutlineBranchId>>(
@@ -627,6 +643,7 @@ function EditorInner() {
   const projectInputRef = useRef<HTMLInputElement>(null);
   const exportDialogRef = useRef<HTMLDialogElement>(null);
   const backupDialogRef = useRef<HTMLDialogElement>(null);
+  const traceDialogRef = useRef<HTMLDialogElement>(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const cinemaRef = useRef(cinema);
@@ -680,9 +697,20 @@ function EditorInner() {
         if (!response.ok) throw new Error('Provider status is unavailable.');
         return response.json() as Promise<CinemaProviderStatus>;
       })
-      .then((status) => setConfiguredProviderMode(status.mode))
+      .then((status) => {
+        setConfiguredProviderMode(status.mode);
+        setConfiguredProviderStatus({
+          ...status,
+          research: status.research ?? { configured: false, provider: 'Parallel Search' },
+          planning: status.planning ?? { configured: false, provider: 'Vertex AI', model: null },
+          telemetryPolicy: status.telemetryPolicy ?? 'no-content-v1',
+        });
+      })
       .catch(() => {
-        if (!controller.signal.aborted) setConfiguredProviderMode('loading');
+        if (!controller.signal.aborted) {
+          setConfiguredProviderMode('loading');
+          setConfiguredProviderStatus(null);
+        }
       });
     return () => controller.abort();
   }, []);
@@ -696,6 +724,13 @@ function EditorInner() {
   useLayoutEffect(() => {
     cinemaRef.current = cinema;
   }, [cinema]);
+  useEffect(() => {
+    if (!pendingProposalId || !proposalCinema) return;
+    void updatePendingCinemaProposal(pendingProposalId, {
+      cinema: proposalCinema,
+      selectedNodeId: previewSelectedNodeId,
+    });
+  }, [pendingProposalId, previewSelectedNodeId, proposalCinema]);
   useLayoutEffect(() => {
     titleRef.current = title;
   }, [title]);
@@ -785,22 +820,21 @@ function EditorInner() {
       announce('The selected scene is not available in this document.', 'error');
       return;
     }
-    if (nodesRef.current.some((node) => node.id === 'cine-agent-plan')) {
-      announce('The shot plan is already on the canvas.');
-      return;
-    }
     setMockProposalStage('planning');
     setMobilePanel('inspector');
     announce('Generating a shot plan with the configured research and planning providers.');
     const sourceDocument = getCurrentDocument();
+    await saveLocalDocument(sourceDocument);
     const controller = new AbortController();
     planningControllerRef.current = controller;
     try {
+      const idempotencyKey = crypto.randomUUID();
       const response = await fetch('/api/cinema/plan-scene', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           version: 1,
+          idempotencyKey,
           brief,
           liveProviderConsent,
         } satisfies PlanSceneRequest),
@@ -808,11 +842,34 @@ function EditorInner() {
       });
       const payload = await response.json() as PlanSceneResponse;
       if (!payload.ok) throw new Error(payload.error.message);
-      const preview = applyCanvasCommandProposal(sourceDocument, payload.proposal);
+      const preparedProposal = prepareCinemaPlanProposal(sourceDocument, sourceDocument.cinema, payload.proposal);
+      const preview = applyCanvasCommandProposal(cinemaProposalCanvasSource(sourceDocument), preparedProposal);
+      const selectedShotId = payload.cinema.scenes[brief.sceneNodeId]?.shotIds[2]
+        ?? payload.cinema.scenes[brief.sceneNodeId]?.shotIds[0];
+      const selectedShotNodeId = selectedShotId ? payload.cinema.shots[selectedShotId]?.nodeId ?? null : null;
+      const pendingId = `${payload.cinema.projectId}:${brief.sceneNodeId}:${payload.runId}`;
+      const traceRecord = { id: payload.runId, createdAt: Date.now(), events: payload.trace };
+      await saveLocalCinemaTrace(traceRecord);
+      setLocalCinemaTraces((current) => [traceRecord, ...current.filter((entry) => entry.id !== traceRecord.id)].slice(0, 50));
+      await savePendingCinemaProposal({
+        id: pendingId,
+        projectId: payload.cinema.projectId,
+        sceneId: brief.sceneNodeId,
+        runId: payload.runId,
+        sourceFingerprint: cinemaSourceFingerprint(sourceDocument),
+        proposal: payload.proposal,
+        cinema: payload.cinema,
+        mode: payload.mode,
+        warningSummary: payload.warnings,
+        sourceCount: payload.sourceCount,
+        selectedNodeId: selectedShotNodeId,
+        readyAt: Date.now(),
+      });
+      setPendingProposalId(pendingId);
       setProposalCinema(payload.cinema);
       setProposalMode(payload.mode);
       setMockProposalPreview(preview);
-      setPreviewSelectedNodeId('cine-shot-03');
+      setPreviewSelectedNodeId(selectedShotNodeId);
       setMockProposalStage('ready');
       window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
       announce(
@@ -877,6 +934,43 @@ function EditorInner() {
     });
   }, [announce, configuredProviderMode, mockProposalPreview, mockProposalStage, sceneBriefDefaults]);
 
+  const createPlanRevision = useCallback(() => {
+    const sceneId = cinemaRef.current?.activeSceneId;
+    const sceneNode = sceneId ? nodesRef.current.find((node) => node.id === cinemaRef.current?.scenes[sceneId]?.nodeId) : null;
+    if (!sceneId || !sceneNode || sceneNode.data.kind !== 'concept') {
+      announce('The accepted plan no longer has a valid scene host.', 'error');
+      return;
+    }
+    const sceneRecord = cinemaRef.current?.scenes[sceneId];
+    const existing = sceneRecord?.brief;
+    const sceneText = sceneRecord?.synopsis.trim()
+      || richTextToPlainText(sceneNode.data.body).trim()
+      || sceneNode.data.label.trim();
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === sceneNode.id })));
+    setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
+    setSceneBriefDefaults({
+      version: 2,
+      sceneNodeId: sceneNode.id,
+      sceneText,
+      creationMode: existing?.creationMode ?? 'ai-generated',
+      aspectRatio: existing?.aspectRatio ?? '9:16',
+      targetPlatform: existing?.targetPlatform ?? 'short-form',
+      genreTone: existing?.genreTone ?? '',
+      locationPeriod: existing?.locationPeriod ?? '',
+      dialogueAudioIntent: existing?.dialogueAudioIntent ?? 'mixed',
+      targetDurationSeconds: existing?.targetDurationSeconds ?? 36,
+      requiredBeats: existing?.requiredBeats ?? [],
+      mustInclude: existing?.mustInclude ?? [],
+      mustAvoid: existing?.mustAvoid ?? [],
+      generationBudget: existing?.generationBudget ?? {
+        pricingMode: 'unpriced', currency: null, ceiling: null, maxAttempts: 2,
+      },
+      productionConstraints: existing?.productionConstraints ?? {
+        budgetBand: 'micro', currency: 'PHP', budgetCeiling: null, availableEquipment: [],
+      },
+    });
+  }, [announce]);
+
   const closeSceneBrief = useCallback(() => {
     setSceneBriefDefaults(null);
     window.requestAnimationFrame(() => {
@@ -885,16 +979,18 @@ function EditorInner() {
   }, []);
 
   const rejectMockProposal = useCallback(() => {
+    if (pendingProposalId) void deletePendingCinemaProposal(pendingProposalId);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
     setProposalCinema(null);
     setProposalMode(null);
+    setPendingProposalId(null);
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === REEL_KNOWS_TOMORROW.sceneNodeId })));
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
     announce('Proposal rejected. The saved canvas was not changed.');
-  }, [announce, fitView]);
+  }, [announce, fitView, pendingProposalId]);
 
   const curateProposalSource = useCallback((sourceId: string, action: ResearchSourceCuration) => {
     setProposalCinema((current) => {
@@ -922,23 +1018,19 @@ function EditorInner() {
       selected: node.id === 'cine-shot-03',
     })));
     setEdges(mockProposalPreview.document.edges.map((edge) => ({ ...edge, selected: false })));
-    const nextCinema = structuredClone(proposalCinema);
-    const acceptedRun = Object.values(nextCinema.agentRuns)
-      .find((run) => run.nodeId === 'cine-agent-plan');
-    if (acceptedRun) {
-      acceptedRun.status = 'accepted';
-      acceptedRun.completedAt = new Date().toISOString();
-    }
+    const nextCinema = acceptCinemaPlanRevision(cinemaRef.current, proposalCinema, new Date().toISOString());
     setCinema(nextCinema);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
     setProposalCinema(null);
     setProposalMode(null);
+    if (pendingProposalId) void deletePendingCinemaProposal(pendingProposalId);
+    setPendingProposalId(null);
     setSelectedPath(null);
     window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
     announce('Prompt package accepted as one undoable canvas change.', 'success');
-  }, [announce, fitView, mockProposalPreview, proposalCinema, recordHistory]);
+  }, [announce, fitView, mockProposalPreview, pendingProposalId, proposalCinema, recordHistory]);
 
   const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
     const ticket = pendingTicket ?? ++saveTicketRef.current;
@@ -960,11 +1052,18 @@ function EditorInner() {
 
   useEffect(() => {
     let active = true;
-    Promise.all([loadLocalDocument(), listLocalCheckpoints(), loadLocalRecoveryDocument()])
-      .then(([document, storedCheckpoints, storedRecovery]) => {
+    Promise.all([
+      loadLocalDocument(),
+      listLocalCheckpoints(),
+      loadLocalRecoveryDocument(),
+      loadLatestPendingCinemaProposal(),
+      listLocalCinemaTraces(),
+    ])
+      .then(([document, storedCheckpoints, storedRecovery, pending, storedTraces]) => {
         if (!active) return;
         setCheckpoints(storedCheckpoints);
         setRecoveryDocument(storedRecovery);
+        setLocalCinemaTraces(storedTraces.slice(0, 50));
         if (!document) {
           setFirstRunOpen(true);
           return;
@@ -973,6 +1072,22 @@ function EditorInner() {
         setEdges(document.edges.map((edge) => ({ ...edge, selected: false })));
         setTitle(document.title);
         setCinema(document.cinema);
+        if (pending) {
+          if (pending.sourceFingerprint === cinemaSourceFingerprint(document)) {
+            const prepared = prepareCinemaPlanProposal(document, document.cinema, pending.proposal);
+            const preview = applyCanvasCommandProposal(cinemaProposalCanvasSource(document), prepared);
+            setMockProposalPreview(preview);
+            setProposalCinema(pending.cinema);
+            setProposalMode(pending.mode);
+            setPendingProposalId(pending.id);
+            setPreviewSelectedNodeId(pending.selectedNodeId);
+            setMockProposalStage('ready');
+            announce('Recovered the pending shot plan without repeating provider calls.', 'success');
+          } else {
+            void deletePendingCinemaProposal(pending.id);
+            announce('A stale pending shot plan was discarded because the source canvas changed.', 'error');
+          }
+        }
       })
       .catch(() => {
         setSaveState('error');
@@ -1015,6 +1130,11 @@ function EditorInner() {
     if (backupOpen && !backupDialogRef.current?.open) backupDialogRef.current?.showModal();
     if (!backupOpen && backupDialogRef.current?.open) backupDialogRef.current.close();
   }, [backupOpen]);
+
+  useEffect(() => {
+    if (traceOpen && !traceDialogRef.current?.open) traceDialogRef.current?.showModal();
+    if (!traceOpen && traceDialogRef.current?.open) traceDialogRef.current.close();
+  }, [traceOpen]);
 
   const handleBeforeDelete = useCallback<OnBeforeDelete<EditorNode, EditorEdge>>(async ({ nodes: deletingNodes, edges: deletingEdges }) => {
     if (deletingNodes.length === 0) return { nodes: deletingNodes, edges: deletingEdges };
@@ -1444,7 +1564,8 @@ function EditorInner() {
     [mockProposalPreview, nodes, previewSelectedNodeId],
   );
   const presentedEdges = mockProposalPreview?.document.edges ?? edges;
-  const mockPlanAccepted = nodes.some((node) => node.id === 'cine-agent-plan');
+  const mockPlanAccepted = Boolean(cinema?.activeRevisionId)
+    || Object.values(cinema?.agentRuns ?? {}).some((run) => run.status === 'accepted');
   const planningUiState: PlanningUiState = mockProposalStage === 'planning'
     ? 'planning'
     : mockProposalPreview
@@ -1476,6 +1597,13 @@ function EditorInner() {
   const selectedCinemaDetail = selectedNode && activeCinemaData
     ? activeCinemaProject.nodes[selectedNode.id] ?? null
     : null;
+  const selectedAcceptedShot = selectedNode && cinema
+    ? Object.values(cinema.shots).find((shot) => shot.nodeId === selectedNode.id) ?? null
+    : null;
+  const revisionHistory = useMemo(
+    () => Object.values(cinema?.revisions ?? {}).sort((left, right) => right.number - left.number),
+    [cinema],
+  );
   const planningSceneSelected = selectedNodes.length === 1
     && selectedNode?.data.kind === 'concept'
     && (
@@ -1505,6 +1633,23 @@ function EditorInner() {
     },
     [recordHistory],
   );
+
+  const updateAcceptedShot = useCallback((
+    shotId: string,
+    patch: CinemaShotPatch,
+  ) => {
+    try {
+      const updated = applyCinemaDomainCommand(getCurrentDocument(), { type: 'update-shot', shotId, patch });
+      const shotNodeId = updated.cinema?.shots[shotId]?.nodeId;
+      recordHistory();
+      setNodes(updated.nodes.map((node) => ({ ...node, selected: node.id === shotNodeId })));
+      setEdges(updated.edges);
+      setCinema(updated.cinema);
+      announce('Accepted shot updated. Its generated prompts are now marked stale.', 'success');
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The shot could not be updated.', 'error');
+    }
+  }, [announce, getCurrentDocument, recordHistory]);
 
   const updateSelectedNodes = useCallback((updater: (node: EditorNode) => EditorNode) => {
     const selectedIds = new Set(nodesRef.current.filter((node) => node.selected && !node.data.locked).map((node) => node.id));
@@ -2082,6 +2227,7 @@ function EditorInner() {
       conversionControllerRef.current?.abort();
       planningControllerRef.current?.abort('new-document');
       await clearLocalDocument();
+      await clearPendingCinemaProposals();
       pastRef.current = [];
       futureRef.current = [];
       setNodes(structuredClone(initialDocument.nodes));
@@ -2095,6 +2241,7 @@ function EditorInner() {
       setSceneBriefDefaults(null);
       setProposalCinema(null);
       setProposalMode(null);
+      setPendingProposalId(null);
       refreshHistoryState();
       window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
       announce('New local document created.', 'success');
@@ -2151,6 +2298,23 @@ function EditorInner() {
 
   const openExport = useCallback(() => setExportOpen(true), []);
   const openBackup = useCallback(() => setBackupOpen(true), []);
+  const exportLocalTraces = useCallback(() => {
+    const artifact = {
+      format: 'cineserye-agent-traces',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      telemetryPolicy: 'no-content-v1',
+      traces: localCinemaTraces,
+    };
+    const blob = new Blob([JSON.stringify(artifact, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `cineserye-agent-traces-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    announce(`${localCinemaTraces.length} local ${localCinemaTraces.length === 1 ? 'trace' : 'traces'} exported.`, 'success');
+  }, [announce, localCinemaTraces]);
   const performBackup = useCallback(() => {
     try {
       downloadProjectBackup(
@@ -2443,16 +2607,21 @@ function EditorInner() {
     [collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
   );
   const planningActionDisabled = mockProposalStage === 'planning'
-    || Boolean(sceneBriefDefaults)
+    ? false
+    : Boolean(sceneBriefDefaults)
     || (planningUiState === 'idle' && !planningSceneSelected);
   const handlePlanningAction = () => {
+    if (mockProposalStage === 'planning') {
+      planningControllerRef.current?.abort('creator-cancelled');
+      announce('Shot planning cancelled. The canvas was not changed.');
+      return;
+    }
     if (mockProposalPreview) {
       setMobilePanel('inspector');
       return;
     }
     if (mockPlanAccepted) {
-      revealAndSelectNode('cine-agent-plan');
-      setMobilePanel('inspector');
+      createPlanRevision();
       return;
     }
     planMockScene();
@@ -2485,15 +2654,16 @@ function EditorInner() {
             </span>
           </label>
           <div className="topbar-actions">
-            <span
+            <button
+              type="button"
               className={`provider-mode-badge desktop-provider-mode mode-${configuredProviderMode === 'live' ? 'live' : 'fixture'}`}
-              role="status"
               aria-label={configuredProviderMode === 'loading'
                 ? 'Provider status loading'
-                : `${configuredProviderMode} provider mode`}
+                : `${configuredProviderMode} provider mode. Open provider status and local traces.`}
+              onClick={() => setTraceOpen(true)}
             >
               {configuredProviderMode === 'live' ? 'Live mode' : configuredProviderMode === 'fixture' ? 'Fixture mode' : 'Checking…'}
-            </span>
+            </button>
             <button
               type="button"
               className="icon-button mobile-layers-button"
@@ -2943,6 +3113,11 @@ function EditorInner() {
               <div><strong>Drop an image anywhere</strong><span>or paste with ⌘V</span></div>
               <button type="button" className="secondary-button" onClick={() => fileInputRef.current?.click()}>Browse files</button>
             </Panel> : null}
+            {mockProposalStage === 'planning' ? <Panel position="bottom-center" className="planning-progress" role="status" aria-label="Shot planning progress">
+              <LoaderCircle className="spin" size={16} />
+              <div><strong>Generating shot plan</strong><span>Researching → planning shots → validating proposal</span></div>
+              <button type="button" className="secondary-button" onClick={() => planningControllerRef.current?.abort('creator-cancelled')}>Cancel</button>
+            </Panel> : null}
           </ReactFlow>
           {nodes.length === 0 && !mockProposalPreview && mockProposalStage !== 'planning' ? (
             <EmptyCanvasRecovery
@@ -3067,8 +3242,12 @@ function EditorInner() {
               proposed={previewNodeIds.has(selectedNode.id)}
               planning={mockProposalStage === 'planning'}
               accepted={mockPlanAccepted}
-              onPlan={planMockScene}
+              onPlan={mockPlanAccepted ? createPlanRevision : planMockScene}
               onCurateSource={curateProposalSource}
+              shot={selectedAcceptedShot}
+              onUpdateShot={updateAcceptedShot}
+              revisions={revisionHistory}
+              activeRevisionId={cinema?.activeRevisionId ?? null}
               onNotice={announce}
             />
           ) : selectedNode ? (
@@ -3142,6 +3321,57 @@ function EditorInner() {
             </div>
           ))}
         </div>
+
+        <dialog
+          ref={traceDialogRef}
+          className="export-dialog trace-dialog"
+          aria-labelledby="trace-title"
+          onClose={() => setTraceOpen(false)}
+        >
+          <form method="dialog">
+            <div className="dialog-icon"><Sparkles size={19} /></div>
+            <div className="dialog-copy">
+              <span className="eyebrow">Developer diagnostics</span>
+              <h2 id="trace-title">Provider status and local traces</h2>
+              <p>Operational metadata stays on this device and excludes scene text, prompts, citations, and provider credentials.</p>
+            </div>
+            <dl className="export-summary">
+              <div><dt>Mode</dt><dd>{configuredProviderMode === 'loading' ? 'Unavailable' : configuredProviderMode}</dd></div>
+              <div><dt>Research</dt><dd>{configuredProviderStatus ? `${configuredProviderStatus.research.provider} · ${configuredProviderStatus.research.configured ? 'ready' : 'not configured'}` : 'Unavailable'}</dd></div>
+              <div><dt>Planning</dt><dd>{configuredProviderStatus ? `${configuredProviderStatus.planning.provider}${configuredProviderStatus.planning.model ? ` · ${configuredProviderStatus.planning.model}` : ''} · ${configuredProviderStatus.planning.configured ? 'ready' : 'not configured'}` : 'Unavailable'}</dd></div>
+              <div><dt>Telemetry</dt><dd>{configuredProviderStatus?.telemetryPolicy ?? 'no-content-v1'}</dd></div>
+            </dl>
+            <section className="trace-section" aria-labelledby="local-traces-title">
+              <div className="trace-heading">
+                <div><span className="eyebrow">On this device</span><h3 id="local-traces-title">Recent agent runs</h3></div>
+                <span>{localCinemaTraces.length}/50</span>
+              </div>
+              {localCinemaTraces.length ? (
+                <ul className="trace-list">
+                  {localCinemaTraces.map((trace) => (
+                    <li key={trace.id}>
+                      <div>
+                        <strong>{trace.id}</strong>
+                        <span>{new Date(trace.createdAt).toLocaleString()}</span>
+                      </div>
+                      <div className="trace-events" aria-label={`${trace.events.length} trace events`}>
+                        {trace.events.map((event, index) => (
+                          <span key={`${event.event}-${event.phase ?? 'run'}-${index}`} className={event.status === 'error' ? 'trace-error' : ''}>
+                            {event.phase ?? event.event}{event.durationMs === undefined ? '' : ` · ${event.durationMs} ms`}
+                          </span>
+                        ))}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="trace-empty">No local run traces yet. Generate a shot plan to record one.</p>}
+            </section>
+            <div className="dialog-actions">
+              <button type="button" className="secondary-button" onClick={() => setTraceOpen(false)}>Close</button>
+              <button type="button" className="primary-button" disabled={!localCinemaTraces.length} onClick={exportLocalTraces}><Download size={14} /> Export trace JSON</button>
+            </div>
+          </form>
+        </dialog>
 
         <dialog
           ref={exportDialogRef}

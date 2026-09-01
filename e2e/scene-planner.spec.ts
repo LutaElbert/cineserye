@@ -35,7 +35,7 @@ test('offers a clean start or a deterministic local sample only on genuine first
 
   await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
   await expect(page.getByRole('button', { name: '06 · The Figure Moves Closer', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review shot plan' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create revision' })).toBeVisible();
   await waitForSaved(page);
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
@@ -225,4 +225,62 @@ test('shows live mode before submission and requires explicit transfer consent',
   await expect(brief.getByRole('alert')).toContainText('Confirm the live provider content transfer');
   await expect(consent).toBeFocused();
   expect(planningRequests).toBe(0);
+});
+
+test('recovers a pending proposal, edits an accepted shot, and preserves revision history', async ({ page }) => {
+  let planningRequests = 0;
+  page.on('request', (request) => {
+    if (request.url().includes('/api/cinema/plan-scene')) planningRequests += 1;
+  });
+  await page.goto('/');
+  await chooseStartScene(page);
+  await editSceneText(page, 'Mara enters an abandoned cinema and sees a warning from her future self.');
+  await page.locator('.plan-scene-button').click();
+  let brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  await brief.getByLabel('Genre and tone').fill('Restrained supernatural suspense');
+  await brief.getByLabel('Location and period').fill('Manila cinema, late 1980s');
+  await brief.getByRole('button', { name: 'Generate shot plan' }).click();
+  const review = page.getByRole('region', { name: 'Shot proposal review' });
+  await expect(review).toBeVisible();
+  expect(planningRequests).toBe(1);
+
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await expect(review).toBeVisible();
+  await expect(page.getByText('Recovered the pending shot plan without repeating provider calls.')).toBeVisible();
+  expect(planningRequests).toBe(1);
+  await page.getByRole('button', { name: /fixture provider mode.*local traces/i }).click();
+  const traceDialog = page.getByRole('dialog', { name: 'Provider status and local traces' });
+  await expect(traceDialog).toContainText('no-content-v1');
+  await expect(traceDialog).toContainText('Recent agent runs');
+  await expect(traceDialog.locator('.trace-list > li')).toHaveCount(1);
+  await traceDialog.getByRole('button', { name: 'Close' }).click();
+  await review.getByRole('button', { name: 'Accept plan' }).click();
+  await expect(page.getByRole('button', { name: 'Create revision' })).toBeVisible();
+
+  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  await outline.getByRole('button', { name: '01 · Entering the Auditorium', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details' }).click();
+  await page.getByRole('button', { name: 'Edit accepted shot' }).click();
+  const editor = page.getByRole('region', { name: 'Accepted shot editor' });
+  await editor.getByLabel('Shot title').fill('Revised auditorium entrance');
+  await editor.getByLabel('Duration (seconds)').fill('8');
+  await editor.getByRole('button', { name: 'Save shot' }).click();
+  await expect(outline.getByRole('button', { name: '01 · Revised auditorium entrance', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Prompt' }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Prompt' })).toContainText('stale');
+
+  await page.getByRole('button', { name: 'Create revision' }).click();
+  brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  await expect(brief.getByLabel('Selected scene text')).toContainText('Mara enters an abandoned cinema');
+  await brief.getByRole('button', { name: 'Generate shot plan' }).click();
+  await expect(review).toBeVisible();
+  await review.getByRole('button', { name: 'Accept plan' }).click();
+  await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details' }).click();
+  const history = page.locator('.revision-history');
+  await expect(history).toContainText('2 revisions');
+  await expect(history).toContainText('Revision 2');
+  await expect(history).toContainText('Revision 1');
+  expect(planningRequests).toBe(2);
 });

@@ -1,4 +1,4 @@
-import type { CinemaProjectDataV1, CinemaResearchSourceRecord } from '../../domain/cinema/project-data';
+import type { CinemaProjectData, CinemaResearchSourceRecord } from '../../domain/cinema/project-data';
 import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 
 export type ProviderRequestContext = {
@@ -29,7 +29,7 @@ export type ShotPlannerProviderRequest = ProviderRequestContext & {
 export type ShotPlannerProviderResult = {
   provider: string;
   model: string;
-  cinema: CinemaProjectDataV1;
+  cinema: CinemaProjectData;
   warnings: string[];
 };
 

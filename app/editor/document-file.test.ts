@@ -106,7 +106,7 @@ describe('Cineserye project backups', () => {
     const restored = parseProjectBackup(serializeProjectBackup(planned));
 
     expect(restored.schemaVersion).toBe(5);
-    expect(restored.cinema?.schemaVersion).toBe(1);
+    expect(restored.cinema?.schemaVersion).toBe(2);
     expect(restored.cinema?.sceneOrder).toEqual(['scene-01']);
     expect(Object.keys(restored.cinema?.shots ?? {})).toHaveLength(6);
     expect(Object.keys(restored.cinema?.prompts ?? {})).toHaveLength(18);
@@ -126,7 +126,7 @@ describe('Cineserye project backups', () => {
 
   it('rejects an unsupported future cinema sidecar version', () => {
     const planned = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
-    planned.cinema = { ...structuredClone(MOCK_CINEMA_PROJECT_DATA), schemaVersion: 2 } as never;
+    planned.cinema = { ...structuredClone(MOCK_CINEMA_PROJECT_DATA), schemaVersion: 3 } as never;
 
     expect(() => validateEditorDocument(planned)).toThrow('unsupported cinema data version');
   });

@@ -130,7 +130,7 @@ export type CinemaPromptArtifactRecord = {
   continuityNodeIds: string[];
   researchSourceIds: string[];
   version: number;
-  status: 'draft' | 'approved';
+  status: 'draft' | 'stale' | 'approved';
 };
 
 export type CinemaResearchSourceRecord = {
@@ -183,6 +183,37 @@ export type CinemaProjectDataV1 = {
   costs: Record<string, CinemaCostEstimateRecord>;
 } & { [key: `x-${string}`]: JsonValue | undefined };
 
+export type CinemaRevisionSnapshot = {
+  scene: CinemaSceneRecord;
+  shots: Record<string, CinemaShotRecord>;
+  characters: Record<string, CinemaCharacterRecord>;
+  assets: Record<string, CinemaAssetRecord>;
+  agentRuns: Record<string, CinemaAgentRunRecord>;
+  prompts: Record<string, CinemaPromptArtifactRecord>;
+  sources: Record<string, CinemaResearchSourceRecord>;
+  costs: Record<string, CinemaCostEstimateRecord>;
+};
+
+export type CinemaPlanRevisionRecord = {
+  id: string;
+  sceneId: string;
+  number: number;
+  runId: string;
+  predecessorRevisionId: string | null;
+  status: 'active' | 'superseded';
+  summary: string;
+  createdAt: string;
+  acceptedAt: string;
+  snapshot: CinemaRevisionSnapshot;
+};
+
+export type CinemaProjectData = Omit<CinemaProjectDataV1, 'schemaVersion'> & {
+  schemaVersion: 2;
+  projectId: string;
+  activeRevisionId: string | null;
+  revisions: Record<string, CinemaPlanRevisionRecord>;
+};
+
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 const MAX_RECORDS = 2_500;
@@ -222,6 +253,12 @@ function positive(value: unknown, label: string): number {
 function integer(value: unknown, label: string): number {
   const result = finiteNonNegative(value, label);
   if (!Number.isInteger(result)) throw new Error(`${label} must be a whole number.`);
+  return result;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  const result = integer(value, label);
+  if (result <= 0) throw new Error(`${label} must be greater than zero.`);
   return result;
 }
 
@@ -405,9 +442,12 @@ function requireReference<T>(records: Record<string, T>, referenceId: string, la
   if (!records[referenceId]) throw new Error(`${label} refers to missing id ${referenceId}.`);
 }
 
-export function createEmptyCinemaProjectData(): CinemaProjectDataV1 {
+export function createEmptyCinemaProjectData(projectId = 'cineserye-local-project'): CinemaProjectData {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    projectId,
+    activeRevisionId: null,
+    revisions: {},
     projectNodeId: null,
     activeSceneId: null,
     sceneOrder: [],
@@ -422,7 +462,7 @@ export function createEmptyCinemaProjectData(): CinemaProjectDataV1 {
   };
 }
 
-export function validateCinemaProjectData(
+function validateCinemaProjectDataV1(
   value: unknown,
   hostNodeIds: ReadonlySet<string>,
 ): CinemaProjectDataV1 {
@@ -526,7 +566,7 @@ export function validateCinemaProjectData(
     continuityNodeIds: idList(record.continuityNodeIds, 'Prompt continuity node ids'),
     researchSourceIds: idList(record.researchSourceIds, 'Prompt research source ids'),
     version: integer(record.version, 'Prompt version'),
-    status: oneOf(record.status, ['draft', 'approved'], 'Prompt status'),
+    status: oneOf(record.status, ['draft', 'stale', 'approved'], 'Prompt status'),
   }));
   const sources = recordMap(value.sources, 'Research source', (record) => {
     const legacyStatus = record.status === 'pinned' || record.status === 'suggested'
@@ -692,16 +732,256 @@ export function validateCinemaProjectData(
   };
 }
 
+function revisionSnapshotHostIds(snapshot: Record<string, unknown>): Set<string> {
+  const result = new Set<string>();
+  const scene = isRecord(snapshot.scene) ? snapshot.scene : null;
+  if (scene && typeof scene.nodeId === 'string') result.add(scene.nodeId);
+  for (const collectionName of ['shots', 'characters', 'assets', 'agentRuns'] as const) {
+    const collection = isRecord(snapshot[collectionName]) ? snapshot[collectionName] : {};
+    for (const record of Object.values(collection)) {
+      if (isRecord(record) && typeof record.nodeId === 'string') result.add(record.nodeId);
+    }
+  }
+  return result;
+}
+
+function validateRevisionSnapshot(value: unknown): CinemaRevisionSnapshot {
+  if (!isRecord(value) || !isRecord(value.scene)) throw new Error('Plan revision snapshot is invalid.');
+  const sceneId = id(value.scene.id, 'Revision scene id');
+  const validated = validateCinemaProjectDataV1({
+    schemaVersion: 1,
+    projectNodeId: null,
+    activeSceneId: sceneId,
+    sceneOrder: [sceneId],
+    scenes: { [sceneId]: value.scene },
+    shots: value.shots,
+    characters: value.characters,
+    assets: value.assets,
+    agentRuns: value.agentRuns,
+    prompts: value.prompts,
+    sources: value.sources,
+    costs: value.costs,
+  }, revisionSnapshotHostIds(value));
+  return {
+    scene: validated.scenes[sceneId],
+    shots: validated.shots,
+    characters: validated.characters,
+    assets: validated.assets,
+    agentRuns: validated.agentRuns,
+    prompts: validated.prompts,
+    sources: validated.sources,
+    costs: validated.costs,
+  };
+}
+
+export function captureCinemaRevisionSnapshot(
+  project: CinemaProjectDataV1 | CinemaProjectData,
+  sceneId: string,
+): CinemaRevisionSnapshot {
+  const scene = project.scenes[sceneId];
+  if (!scene) throw new Error(`Scene ${sceneId} is missing.`);
+  const shotIds = new Set(scene.shotIds);
+  const shots = Object.fromEntries(Object.entries(project.shots)
+    .filter(([shotId]) => shotIds.has(shotId)));
+  const characters = Object.fromEntries(Object.entries(project.characters)
+    .filter(([, record]) => record.sceneIds.includes(sceneId)));
+  const assets = Object.fromEntries(Object.entries(project.assets)
+    .filter(([, record]) => record.sceneIds.includes(sceneId)));
+  const agentRuns = Object.fromEntries(Object.entries(project.agentRuns)
+    .filter(([, record]) => record.sceneId === sceneId));
+  const runIds = new Set(Object.keys(agentRuns));
+  const prompts = Object.fromEntries(Object.entries(project.prompts)
+    .filter(([, record]) => runIds.has(record.runId)));
+  const sources = Object.fromEntries(Object.entries(project.sources)
+    .filter(([, record]) => runIds.has(record.runId)));
+  const costs = Object.fromEntries(Object.entries(project.costs)
+    .filter(([, record]) => record.sceneId === sceneId && runIds.has(record.runId)));
+  return structuredClone({ scene, shots, characters, assets, agentRuns, prompts, sources, costs });
+}
+
+function migratedProjectId(project: CinemaProjectDataV1): string {
+  const anchor = project.projectNodeId ?? project.activeSceneId ?? 'local-project';
+  return `cineserye-${anchor.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
+function migrateCinemaProjectDataV1(project: CinemaProjectDataV1): CinemaProjectData {
+  const acceptedRun = Object.values(project.agentRuns)
+    .filter((run) => run.status === 'accepted')
+    .sort((left, right) => (right.completedAt ?? '').localeCompare(left.completedAt ?? ''))[0];
+  const revisionId = acceptedRun ? `revision-${acceptedRun.id}` : null;
+  const revision = acceptedRun ? {
+    id: revisionId as string,
+    sceneId: acceptedRun.sceneId,
+    number: 1,
+    runId: acceptedRun.id,
+    predecessorRevisionId: null,
+    status: 'active' as const,
+    summary: acceptedRun.summary,
+    createdAt: acceptedRun.startedAt ?? acceptedRun.completedAt ?? '1970-01-01T00:00:00.000Z',
+    acceptedAt: acceptedRun.completedAt ?? acceptedRun.startedAt ?? '1970-01-01T00:00:00.000Z',
+    snapshot: captureCinemaRevisionSnapshot(project, acceptedRun.sceneId),
+  } : null;
+  return {
+    ...project,
+    schemaVersion: 2,
+    projectId: migratedProjectId(project),
+    activeRevisionId: revisionId,
+    revisions: revision ? { [revision.id]: revision } : {},
+  };
+}
+
+export function validateCinemaProjectData(
+  value: unknown,
+  hostNodeIds: ReadonlySet<string>,
+): CinemaProjectData {
+  if (!isRecord(value)) throw new Error('This project uses an unsupported cinema data version.');
+  if (value.schemaVersion === 1) {
+    return migrateCinemaProjectDataV1(validateCinemaProjectDataV1(value, hostNodeIds));
+  }
+  if (value.schemaVersion !== 2) throw new Error('This project uses an unsupported cinema data version.');
+
+  const current = validateCinemaProjectDataV1({ ...value, schemaVersion: 1 }, hostNodeIds);
+  const revisions = recordMap(value.revisions, 'Plan revision', (record) => ({
+    id: id(record.id, 'Plan revision id'),
+    sceneId: id(record.sceneId, 'Plan revision scene id'),
+    number: positiveInteger(record.number, 'Plan revision number'),
+    runId: id(record.runId, 'Plan revision run id'),
+    predecessorRevisionId: record.predecessorRevisionId === null
+      ? null
+      : id(record.predecessorRevisionId, 'Predecessor revision id'),
+    status: oneOf(record.status, ['active', 'superseded'], 'Plan revision status'),
+    summary: text(record.summary, 'Plan revision summary'),
+    createdAt: isoDate(record.createdAt, 'Plan revision creation time'),
+    acceptedAt: isoDate(record.acceptedAt, 'Plan revision acceptance time'),
+    snapshot: validateRevisionSnapshot(record.snapshot),
+  }));
+  const projectId = id(value.projectId, 'Cinema project id');
+  const activeRevisionId = value.activeRevisionId === null
+    ? null
+    : id(value.activeRevisionId, 'Active plan revision id');
+  if (activeRevisionId !== null && !revisions[activeRevisionId]) {
+    throw new Error('Active plan revision is missing.');
+  }
+  const activeRevisions = Object.values(revisions).filter((revision) => revision.status === 'active');
+  if (activeRevisionId === null ? activeRevisions.length > 0 : activeRevisions.length !== 1 || activeRevisions[0].id !== activeRevisionId) {
+    throw new Error('Plan revision active status is inconsistent.');
+  }
+  const numbersByScene = new Set<string>();
+  for (const revision of Object.values(revisions)) {
+    requireReference(current.scenes, revision.sceneId, `Plan revision ${revision.id}`);
+    if (!revision.snapshot.agentRuns[revision.runId]) {
+      throw new Error(`Plan revision ${revision.id} refers to a missing snapshot run.`);
+    }
+    if (revision.snapshot.scene.id !== revision.sceneId) {
+      throw new Error(`Plan revision ${revision.id} snapshot scene does not match.`);
+    }
+    const numberKey = `${revision.sceneId}:${revision.number}`;
+    if (numbersByScene.has(numberKey)) throw new Error(`Scene ${revision.sceneId} contains duplicate revision numbers.`);
+    numbersByScene.add(numberKey);
+    if (revision.predecessorRevisionId !== null) {
+      const predecessor = revisions[revision.predecessorRevisionId];
+      if (!predecessor || predecessor.sceneId !== revision.sceneId || predecessor.number >= revision.number) {
+        throw new Error(`Plan revision ${revision.id} has an invalid predecessor.`);
+      }
+    }
+  }
+  return {
+    ...current,
+    ...extensions(value),
+    schemaVersion: 2,
+    projectId,
+    activeRevisionId,
+    revisions,
+  };
+}
+
+export function acceptCinemaPlanRevision(
+  current: CinemaProjectData | undefined,
+  incoming: CinemaProjectData,
+  acceptedAt: string,
+): CinemaProjectData {
+  const sceneId = incoming.activeSceneId;
+  if (!sceneId) throw new Error('An accepted plan requires an active scene.');
+  const readyRun = Object.values(incoming.agentRuns).find((record) => record.sceneId === sceneId && record.status === 'ready');
+  if (!readyRun) throw new Error('An accepted plan requires one ready agent run.');
+  const previous = current?.activeRevisionId ? current.revisions[current.activeRevisionId] : null;
+  const previousNumbers = Object.values(current?.revisions ?? {})
+    .filter((revision) => revision.sceneId === sceneId)
+    .map((revision) => revision.number);
+  const number = Math.max(0, ...previousNumbers) + 1;
+  const revisionId = `${sceneId}-revision-${number}-${readyRun.id}`;
+  const next = structuredClone(incoming);
+  const run = next.agentRuns[readyRun.id];
+  run.status = 'accepted';
+  run.completedAt = acceptedAt;
+  const revisions = structuredClone(current?.revisions ?? {});
+  for (const revision of Object.values(revisions)) revision.status = 'superseded';
+  revisions[revisionId] = {
+    id: revisionId,
+    sceneId,
+    number,
+    runId: run.id,
+    predecessorRevisionId: previous?.id ?? null,
+    status: 'active',
+    summary: run.summary,
+    createdAt: run.startedAt ?? acceptedAt,
+    acceptedAt,
+    snapshot: captureCinemaRevisionSnapshot(next, sceneId),
+  };
+  return {
+    ...next,
+    projectId: current?.projectId ?? incoming.projectId,
+    activeRevisionId: revisionId,
+    revisions,
+  };
+}
+
+export type CinemaRevisionComparison = {
+  addedShots: number;
+  removedShots: number;
+  changedShots: number;
+  durationDeltaSeconds: number;
+  expectedCostDelta: number | null;
+};
+
+export function compareCinemaPlanRevisions(
+  predecessor: CinemaPlanRevisionRecord,
+  successor: CinemaPlanRevisionRecord,
+): CinemaRevisionComparison {
+  const before = predecessor.snapshot.shots;
+  const after = successor.snapshot.shots;
+  const beforeTitles = new Map(Object.values(before).map((shot) => [shot.title.toLocaleLowerCase(), shot]));
+  const afterTitles = new Map(Object.values(after).map((shot) => [shot.title.toLocaleLowerCase(), shot]));
+  const sharedTitles = [...afterTitles.keys()].filter((title) => beforeTitles.has(title));
+  const changedShots = sharedTitles.filter((title) => {
+    const left = beforeTitles.get(title);
+    const right = afterTitles.get(title);
+    return left && right && JSON.stringify(left) !== JSON.stringify(right);
+  }).length;
+  const totalDuration = (shots: Record<string, CinemaShotRecord>) => Object.values(shots)
+    .reduce((sum, shot) => sum + shot.durationSeconds, 0);
+  const expectedCost = (revision: CinemaPlanRevisionRecord) => Object.values(revision.snapshot.costs)[0]?.expected ?? null;
+  const beforeCost = expectedCost(predecessor);
+  const afterCost = expectedCost(successor);
+  return {
+    addedShots: [...afterTitles.keys()].filter((title) => !beforeTitles.has(title)).length,
+    removedShots: [...beforeTitles.keys()].filter((title) => !afterTitles.has(title)).length,
+    changedShots,
+    durationDeltaSeconds: totalDuration(after) - totalDuration(before),
+    expectedCostDelta: beforeCost === null || afterCost === null ? null : afterCost - beforeCost,
+  };
+}
+
 export type ResearchSourceCuration =
   | { type: 'set-status'; status: CinemaResearchSourceRecord['status'] }
   | { type: 'set-pinned'; pinned: boolean }
   | { type: 'remove' };
 
 export function curateCinemaResearchSource(
-  project: CinemaProjectDataV1,
+  project: CinemaProjectData,
   sourceId: string,
   action: ResearchSourceCuration,
-): CinemaProjectDataV1 {
+): CinemaProjectData {
   if (!project.sources[sourceId]) throw new Error(`Research source ${sourceId} is missing.`);
   const next = structuredClone(project);
   if (action.type === 'set-status') {
@@ -725,17 +1005,17 @@ export function curateCinemaResearchSource(
 }
 
 export function supportedCitationIds(
-  project: CinemaProjectDataV1,
+  project: CinemaProjectData,
   sourceIds: readonly string[],
 ): string[] {
   return [...new Set(sourceIds.filter((sourceId) => project.sources[sourceId]?.status === 'supported'))];
 }
 
 export function removeCinemaRecordsForNodes(
-  project: CinemaProjectDataV1,
+  project: CinemaProjectData,
   removedNodeIds: ReadonlySet<string>,
   remainingHostNodeIds: ReadonlySet<string>,
-): CinemaProjectDataV1 {
+): CinemaProjectData {
   if (!removedNodeIds.size) return project;
   const next = structuredClone(project);
   if (next.projectNodeId !== null && removedNodeIds.has(next.projectNodeId)) next.projectNodeId = null;
@@ -765,6 +1045,12 @@ export function removeCinemaRecordsForNodes(
   next.sceneOrder = next.sceneOrder.filter((sceneId) => !removedSceneIds.has(sceneId));
   if (next.activeSceneId !== null && removedSceneIds.has(next.activeSceneId)) {
     next.activeSceneId = next.sceneOrder[0] ?? null;
+  }
+  for (const [revisionId, revision] of Object.entries(next.revisions)) {
+    if (removedSceneIds.has(revision.sceneId)) delete next.revisions[revisionId];
+  }
+  if (next.activeRevisionId !== null && !next.revisions[next.activeRevisionId]) {
+    next.activeRevisionId = null;
   }
   for (const scene of Object.values(next.scenes)) {
     scene.shotIds = scene.shotIds.filter((shotId) => !removedShotIds.has(shotId));

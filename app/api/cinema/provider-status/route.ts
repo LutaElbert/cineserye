@@ -3,6 +3,7 @@ import 'server-only';
 import type { CinemaProviderStatus } from '../../../features/scene-planner/plan-scene-api';
 import { readCinemaProviderConfig } from '../../../server/cinema/provider-config';
 import { publicProviderError } from '../../../server/cinema/provider-errors';
+import { CINEMA_TELEMETRY_POLICY } from '../../../server/cinema/telemetry';
 
 export async function GET(): Promise<Response> {
   try {
@@ -10,6 +11,16 @@ export async function GET(): Promise<Response> {
     const response: CinemaProviderStatus = {
       mode: config.mode,
       requiresContentTransferConsent: config.mode === 'live',
+      research: {
+        configured: config.mode === 'fixture' || Boolean(config.parallelApiKey),
+        provider: config.mode === 'fixture' ? 'fixture-research' : 'parallel',
+      },
+      planning: {
+        configured: config.mode === 'fixture' || Boolean(config.googleCloudProject),
+        provider: config.mode === 'fixture' ? 'fixture-shot-planner' : 'vertex-gemini',
+        model: config.mode === 'fixture' ? 'fixture-v1' : config.vertexModel,
+      },
+      telemetryPolicy: CINEMA_TELEMETRY_POLICY,
     };
     return Response.json(response);
   } catch (error) {

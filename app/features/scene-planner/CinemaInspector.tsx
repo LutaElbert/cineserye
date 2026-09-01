@@ -17,6 +17,11 @@ import type {
   PromptArtifact,
 } from '../../domain/cinema/prompt-artifacts';
 import type { ResearchSourceCuration } from '../../domain/cinema/project-data';
+import {
+  compareCinemaPlanRevisions,
+  type CinemaPlanRevisionRecord,
+  type CinemaShotRecord,
+} from '../../domain/cinema/project-data';
 import { planningLabel } from './planning-labels';
 
 type InspectorTab = 'details' | 'prompt' | 'sources' | 'cost';
@@ -106,6 +111,10 @@ export function CinemaInspector({
   accepted,
   onPlan,
   onCurateSource,
+  shot,
+  onUpdateShot,
+  revisions,
+  activeRevisionId,
   onNotice,
 }: {
   detail: CinemaNodePresentation;
@@ -115,6 +124,12 @@ export function CinemaInspector({
   accepted: boolean;
   onPlan: () => void;
   onCurateSource: (sourceId: string, action: ResearchSourceCuration) => void;
+  shot: CinemaShotRecord | null;
+  onUpdateShot: (shotId: string, patch: Partial<Pick<CinemaShotRecord,
+    'title' | 'description' | 'purpose' | 'framing' | 'cameraMovement' | 'lensMm'
+    | 'durationSeconds' | 'audio' | 'risk'>>) => void;
+  revisions: CinemaPlanRevisionRecord[];
+  activeRevisionId: string | null;
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
 }) {
   const [tab, setTab] = useState<InspectorTab>(detail.kind === 'shot' ? 'prompt' : 'details');
@@ -131,6 +146,18 @@ export function CinemaInspector({
   const cost = detail.cost ?? projectCost;
   const riskLabel = detail.risk === 'none' ? 'No direct risk' : `${detail.risk} risk`;
   const fixtureOnly = Object.values(project.sources).every((source) => source.isMock);
+  const [editingShot, setEditingShot] = useState(false);
+  const [shotDraft, setShotDraft] = useState(() => shot ? {
+    title: shot.title,
+    description: shot.description,
+    purpose: shot.purpose,
+    framing: shot.framing,
+    cameraMovement: shot.cameraMovement,
+    lensMm: shot.lensMm === null ? '' : String(shot.lensMm),
+    durationSeconds: String(shot.durationSeconds),
+    audio: shot.audio,
+    risk: shot.risk,
+  } : null);
 
   return (
     <div className="cinema-inspector">
@@ -192,17 +219,74 @@ export function CinemaInspector({
                 </div>
               ))}
             </dl>
+            {accepted && shot && shotDraft ? (
+              <section className="cinema-shot-editor" aria-label="Accepted shot editor">
+                {!editingShot ? (
+                  <button type="button" className="secondary-button" onClick={() => setEditingShot(true)}>Edit accepted shot</button>
+                ) : (
+                  <form onSubmit={(event) => {
+                    event.preventDefault();
+                    onUpdateShot(shot.id, {
+                      title: shotDraft.title,
+                      description: shotDraft.description,
+                      purpose: shotDraft.purpose,
+                      framing: shotDraft.framing,
+                      cameraMovement: shotDraft.cameraMovement,
+                      lensMm: shotDraft.lensMm.trim() ? Number(shotDraft.lensMm) : null,
+                      durationSeconds: Number(shotDraft.durationSeconds),
+                      audio: shotDraft.audio,
+                      risk: shotDraft.risk,
+                    });
+                    setEditingShot(false);
+                  }}>
+                    <label className="stacked-field"><span>Shot title</span><input value={shotDraft.title} onChange={(event) => setShotDraft({ ...shotDraft, title: event.target.value })} /></label>
+                    <div className="cinema-shot-field-grid">
+                      <label className="stacked-field"><span>Duration (seconds)</span><input type="number" min="0.1" max="600" step="0.1" value={shotDraft.durationSeconds} onChange={(event) => setShotDraft({ ...shotDraft, durationSeconds: event.target.value })} /></label>
+                      <label className="stacked-field"><span>Lens (mm)</span><input type="number" min="1" max="300" placeholder="Optional" value={shotDraft.lensMm} onChange={(event) => setShotDraft({ ...shotDraft, lensMm: event.target.value })} /></label>
+                    </div>
+                    <label className="stacked-field"><span>Framing</span><input value={shotDraft.framing} onChange={(event) => setShotDraft({ ...shotDraft, framing: event.target.value })} /></label>
+                    <label className="stacked-field"><span>Camera movement</span><input value={shotDraft.cameraMovement} onChange={(event) => setShotDraft({ ...shotDraft, cameraMovement: event.target.value })} /></label>
+                    <label className="stacked-field"><span>Purpose</span><textarea value={shotDraft.purpose} onChange={(event) => setShotDraft({ ...shotDraft, purpose: event.target.value })} /></label>
+                    <label className="stacked-field"><span>Action</span><textarea value={shotDraft.description} onChange={(event) => setShotDraft({ ...shotDraft, description: event.target.value })} /></label>
+                    <label className="stacked-field"><span>Audio</span><textarea value={shotDraft.audio} onChange={(event) => setShotDraft({ ...shotDraft, audio: event.target.value })} /></label>
+                    <label className="stacked-field"><span>Generation risk</span><select value={shotDraft.risk} onChange={(event) => setShotDraft({ ...shotDraft, risk: event.target.value as CinemaShotRecord['risk'] })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+                    <p>Saving updates the cinema record and its locked canvas card together. Existing media prompts are marked stale.</p>
+                    <div className="cinema-shot-editor-actions"><button type="button" className="secondary-button" onClick={() => setEditingShot(false)}>Cancel</button><button type="submit" className="primary-button"><Check size={13} /> Save shot</button></div>
+                  </form>
+                )}
+              </section>
+            ) : null}
             {detail.tags.length ? (
               <div className="cinema-tags" aria-label="Tags">
                 {detail.tags.map((tag) => <span key={tag}>{tag}</span>)}
               </div>
+            ) : null}
+            {accepted && (detail.kind === 'scene' || detail.kind === 'agent-run') && revisions.length ? (
+              <section className="revision-history" aria-labelledby="revision-history-title">
+                <div><span>Plan history</span><strong id="revision-history-title">{revisions.length} {revisions.length === 1 ? 'revision' : 'revisions'}</strong></div>
+                <ol>
+                  {revisions.map((revision) => {
+                    const predecessor = revision.predecessorRevisionId
+                      ? revisions.find((candidate) => candidate.id === revision.predecessorRevisionId)
+                      : null;
+                    const comparison = predecessor ? compareCinemaPlanRevisions(predecessor, revision) : null;
+                    return (
+                      <li key={revision.id}>
+                        <div><strong>Revision {revision.number}</strong>{revision.id === activeRevisionId ? <span>Current</span> : <span>Superseded</span>}</div>
+                        <small>{new Date(revision.acceptedAt).toLocaleString()}</small>
+                        {comparison ? <p>{comparison.addedShots} added · {comparison.removedShots} removed · {comparison.changedShots} changed · {comparison.durationDeltaSeconds >= 0 ? '+' : ''}{comparison.durationDeltaSeconds}s</p> : <p>Original accepted plan</p>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
             ) : null}
             {detail.kind === 'scene' ? (
               <div className="scene-plan-action">
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={planning || proposed || accepted}
+                  disabled={planning || proposed}
                   onClick={onPlan}
                 >
                   {planning ? <LoaderCircle className="spin" size={14} /> : accepted ? <Check size={14} /> : <Sparkles size={14} />}
@@ -214,7 +298,7 @@ export function CinemaInspector({
                         ? planningLabel('ready')
                         : planningLabel('idle')}
                 </button>
-                <p>{accepted ? 'The prompt package is on the canvas and remains one undoable change.' : 'Uses the configured server-side providers; the canvas changes only after explicit acceptance.'}</p>
+                <p>{accepted ? 'Create a new reviewable proposal while preserving the accepted revision.' : 'Uses the configured server-side providers; the canvas changes only after explicit acceptance.'}</p>
               </div>
             ) : null}
           </>

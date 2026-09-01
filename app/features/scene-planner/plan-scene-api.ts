@@ -1,4 +1,4 @@
-import type { CinemaProjectDataV1 } from '../../domain/cinema/project-data';
+import type { CinemaProjectData } from '../../domain/cinema/project-data';
 import type { CanvasCommandProposal } from '../../editor/canvas-commands';
 import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 
@@ -14,6 +14,7 @@ export type ProviderErrorCode =
 
 export type PlanSceneRequest = {
   version: 1;
+  idempotencyKey: string;
   brief: ScenePlanningBrief;
   liveProviderConsent: boolean;
 };
@@ -21,6 +22,9 @@ export type PlanSceneRequest = {
 export type CinemaProviderStatus = {
   mode: 'fixture' | 'live';
   requiresContentTransferConsent: boolean;
+  research: { configured: boolean; provider: string };
+  planning: { configured: boolean; provider: string; model: string | null };
+  telemetryPolicy: 'no-content-v1';
 };
 
 export type PlanSceneSuccess = {
@@ -29,9 +33,25 @@ export type PlanSceneSuccess = {
   mode: 'fixture' | 'live';
   runId: string;
   proposal: CanvasCommandProposal;
-  cinema: CinemaProjectDataV1;
+  cinema: CinemaProjectData;
   sourceCount: number;
   warnings: string[];
+  trace: CinemaClientTraceEvent[];
+};
+
+export type CinemaClientTraceEvent = {
+  event: 'run-started' | 'phase-completed' | 'run-completed' | 'run-failed';
+  runId: string;
+  phase?: 'research' | 'planning' | 'validation' | 'proposal';
+  durationMs?: number;
+  provider?: string;
+  model?: string;
+  resultCount?: number;
+  retryCount?: number;
+  status?: 'ok' | 'error';
+  errorCode?: string;
+  agentVersion?: string;
+  telemetryPolicy?: 'no-content-v1';
 };
 
 export type PlanSceneFailure = {

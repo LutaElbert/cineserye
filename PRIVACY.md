@@ -1,6 +1,6 @@
 # Cineserye privacy baseline
 
-Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, illustrative cost profiles, checkpoints, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups and SVG exports are created only when the creator asks for a download.
+Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, illustrative cost profiles, checkpoints, pending proposal reviews, content-free agent traces, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups, SVG exports, and trace JSON exports are created only when the creator asks for a download.
 
 ## Fixture mode
 
@@ -19,7 +19,7 @@ Parallel and Google process live request content under their own service terms a
 
 ## Telemetry and logs
 
-Default Cineserye telemetry records only run identifiers, agent/policy versions, phase, duration, provider/model names, result counts, status, and safe error codes. It excludes raw scene text, full prompts, provider payloads, credentials, and research excerpts.
+Default Cineserye telemetry records only run identifiers, agent/policy versions, phase, duration, provider/model names, result counts, status, and safe error codes. It excludes raw scene text, full prompts, provider payloads, credentials, research excerpts, and source URLs. The browser keeps at most 50 of these local traces. The diagnostics panel and its optional JSON export use the same `no-content-v1` contract.
 
 ADK prompt/response capture and completion upload are disabled by default. Cloud telemetry is opt-in through `CINESERYE_ENABLE_CLOUD_TELEMETRY=true`; enabling it requires a separate content handling, access, retention, and cost review. The application has not been deployed and no analytics SDK is installed.
 
@@ -27,6 +27,7 @@ ADK prompt/response capture and completion upload are disabled by default. Cloud
 
 - Cancelling, timing out, failing, or rejecting creates no canvas history entry.
 - A ready proposal is a locked ghost preview until explicit acceptance.
+- A ready proposal is saved locally before review so a reload does not repeat a provider call. It contains generated planning content and is restored only when its source-document fingerprint still matches; pending reviews are not included in SVG or `.cineserye` backup exports.
 - Source pins, support states, and removals made during review affect only the pending preview until acceptance.
 - Displayed citations are limited to explicit, valid planner-to-source relationships; missing source IDs do not receive substitutes.
 - Generation-cost figures are illustrative planning estimates, not provider quotes or billing records. A plan can also be expressed in credits or marked unpriced.

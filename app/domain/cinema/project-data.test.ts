@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  acceptCinemaPlanRevision,
+  compareCinemaPlanRevisions,
   curateCinemaResearchSource,
   createEmptyCinemaProjectData,
   removeCinemaRecordsForNodes,
@@ -103,8 +105,43 @@ describe('cinema project data', () => {
     );
   });
 
+  it('migrates an accepted V1 plan into a deterministic immutable revision', () => {
+    const first = validateCinemaProjectData(completeCinemaData(), hostNodeIds);
+    const second = validateCinemaProjectData(completeCinemaData(), hostNodeIds);
+    expect(first.schemaVersion).toBe(2);
+    expect(first.projectId).toBe('cineserye-story-premise');
+    expect(first).toEqual(second);
+    expect(first.revisions[first.activeRevisionId ?? '']).toMatchObject({
+      number: 1,
+      predecessorRevisionId: null,
+      status: 'active',
+    });
+  });
+
+  it('accepts a successor revision while preserving and comparing its predecessor snapshot', () => {
+    const current = validateCinemaProjectData(completeCinemaData(), hostNodeIds);
+    const incoming = structuredClone(current);
+    incoming.revisions = {};
+    incoming.activeRevisionId = null;
+    incoming.agentRuns['run-01'].status = 'ready';
+    incoming.shots['shot-01'].durationSeconds = 8;
+    incoming.shots['shot-01'].framing = 'Medium close-up';
+    const next = acceptCinemaPlanRevision(current, incoming, '2026-09-01T03:00:00.000Z');
+    const active = next.revisions[next.activeRevisionId ?? ''];
+    const predecessor = next.revisions[active.predecessorRevisionId ?? ''];
+    expect(active.number).toBe(2);
+    expect(predecessor.status).toBe('superseded');
+    expect(predecessor.snapshot.shots['shot-01'].durationSeconds).toBe(6);
+    expect(compareCinemaPlanRevisions(predecessor, active)).toMatchObject({
+      addedShots: 0,
+      removedShots: 0,
+      changedShots: 1,
+      durationDeltaSeconds: 2,
+    });
+  });
+
   it('preserves JSON-safe namespaced extension fields', () => {
-    const value = completeCinemaData();
+    const value = validateCinemaProjectData(completeCinemaData(), hostNodeIds);
     value['x-cineserye-test'] = { enabled: true };
     expect(validateCinemaProjectData(value, hostNodeIds)['x-cineserye-test']).toEqual({ enabled: true });
   });
@@ -142,7 +179,7 @@ describe('cinema project data', () => {
   });
 
   it('curates proposal sources without leaving fallback citation relationships', () => {
-    const value = completeCinemaData();
+    const value = validateCinemaProjectData(completeCinemaData(), hostNodeIds);
     const verification = curateCinemaResearchSource(value, 'source-01', {
       type: 'set-status', status: 'needs-verification',
     });
@@ -154,7 +191,7 @@ describe('cinema project data', () => {
   });
 
   it('rejects unsupported future versions', () => {
-    const value = { ...completeCinemaData(), schemaVersion: 2 };
+    const value = { ...completeCinemaData(), schemaVersion: 3 };
     expect(() => validateCinemaProjectData(value, hostNodeIds)).toThrow('unsupported cinema data version');
   });
 

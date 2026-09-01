@@ -3,7 +3,7 @@ import type {
   CinemaAssetRecord,
   CinemaCharacterRecord,
   CinemaCostEstimateRecord,
-  CinemaProjectDataV1,
+  CinemaProjectData,
   CinemaPromptArtifactRecord,
   CinemaShotRecord,
 } from '../../domain/cinema/project-data';
@@ -205,7 +205,7 @@ export function compileGeneratedScenePlan(
   untrustedOutput: unknown,
   provider: string,
   model: string,
-): CinemaProjectDataV1 {
+): CinemaProjectData {
   const parsed = GeneratedScenePlanSchema.safeParse(untrustedOutput);
   if (!parsed.success) {
     throw new ProviderError('UNEXPECTED_RESPONSE', 'The planner returned an invalid shot-plan structure.', true, {
@@ -373,7 +373,10 @@ export function compileGeneratedScenePlan(
   const proposedCommandCount = 3 + 2 * (1 + characterNodeIds.length + assetNodeIds.length + shotIds.length);
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    projectId: `cineserye-${request.brief.sceneNodeId}`,
+    activeRevisionId: null,
+    revisions: {},
     projectNodeId: 'story-premise',
     activeSceneId: sceneId,
     sceneOrder: [sceneId],

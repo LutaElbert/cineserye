@@ -9,6 +9,12 @@ This suite follows the Google Agents CLI evaluation dataset and configuration fo
 
 The deterministic Vitest suite remains the pull-request gate for schema validity, duration reconciliation, citation references, continuity, costs, command safety, and no-content telemetry. The opt-in Vertex smoke test proves the official TypeScript ADK path against local ADC.
 
+`app/server/cinema/evaluation-adapter.ts` is the runtime-neutral bridge. It emits a versioned evaluation artifact with the dataset case, validated input/output, provider configuration, scoring policy, run ID, and a `no-content-v1` trace. Its deterministic contract test runs with:
+
+```sh
+npx vitest run app/server/cinema/evaluation-adapter.test.ts
+```
+
 Agents CLI `eval generate` expects an ADK-compatible HTTP API rather than Cineserye's browser-facing `/api/cinema/plan-scene` contract. When an ADK/A2A evaluation endpoint is intentionally added, run:
 
 ```sh
@@ -19,4 +25,4 @@ agents-cli eval run \
   --app-name cineserye
 ```
 
-Do not add a Python production service solely to satisfy the CLI, and do not enable cloud prompt/response logging for these fixtures. Keep `CINESERYE_ENABLE_CLOUD_TELEMETRY` unset unless content handling and retention have been reviewed explicitly.
+The managed `agents-cli eval run` command is intentionally not part of the offline regression gate: it requires a running ADK-compatible endpoint and may invoke a model. Do not add a Python production service solely to satisfy the CLI, and do not enable cloud prompt/response logging for these fixtures. Keep `CINESERYE_ENABLE_CLOUD_TELEMETRY` unset unless content handling and retention have been reviewed explicitly.

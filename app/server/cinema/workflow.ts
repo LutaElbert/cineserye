@@ -1,4 +1,5 @@
 import { validateCinemaProjectData } from '../../domain/cinema/project-data';
+import { scopeCinemaProjectDataForRun } from '../../domain/cinema/revision-scope';
 import { validateScenePlanningBrief, type ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 import type { PlanSceneSuccess } from '../../features/scene-planner/plan-scene-api';
 import { FixtureResearchProvider, FixtureShotPlannerProvider } from './fixture-providers';
@@ -34,10 +35,16 @@ export async function runCinemaPlanningWorkflow(
   untrustedBrief: ScenePlanningBrief,
   dependencies: CinemaWorkflowDependencies,
   signal: AbortSignal,
+  requestedRunId?: string,
 ): Promise<PlanSceneSuccess> {
   const brief = validateScenePlanningBrief(untrustedBrief);
-  const runId = crypto.randomUUID();
-  const sink = dependencies.traceSink ?? consoleCinemaTraceSink;
+  const runId = requestedRunId ?? crypto.randomUUID();
+  const trace = [] as Parameters<NonNullable<CinemaWorkflowDependencies['traceSink']>>[0][];
+  const externalSink = dependencies.traceSink ?? consoleCinemaTraceSink;
+  const sink: CinemaTraceSink = (event) => {
+    trace.push(structuredClone(event));
+    externalSink(event);
+  };
   const startedAt = performance.now();
   sink({
     event: 'run-started', runId, status: 'ok',
@@ -68,13 +75,14 @@ export async function runCinemaPlanningWorkflow(
       ),
       (result) => ({ provider: result.provider, model: result.model, resultCount: Object.keys(result.cinema.shots).length }),
     );
-    const proposal = compileCinemaCanvasProposal(runId, planning.cinema);
+    const scopedCinema = scopeCinemaProjectDataForRun(planning.cinema, runId);
+    const proposal = compileCinemaCanvasProposal(runId, scopedCinema);
     const hostNodeIds = new Set(
       proposal.commands.flatMap((command) => command.type === 'create-node' ? [command.node.id] : []),
     );
-    if (planning.cinema.projectNodeId) hostNodeIds.add(planning.cinema.projectNodeId);
-    for (const scene of Object.values(planning.cinema.scenes)) hostNodeIds.add(scene.nodeId);
-    const cinema = validateCinemaProjectData(planning.cinema, hostNodeIds);
+    if (scopedCinema.projectNodeId) hostNodeIds.add(scopedCinema.projectNodeId);
+    for (const scene of Object.values(scopedCinema.scenes)) hostNodeIds.add(scene.nodeId);
+    const cinema = validateCinemaProjectData(scopedCinema, hostNodeIds);
     sink({
       event: 'phase-completed', runId, phase: 'validation', status: 'ok',
       agentVersion: CINEMA_AGENT_VERSION,
@@ -103,6 +111,7 @@ export async function runCinemaPlanningWorkflow(
       cinema,
       sourceCount: research.sources.length,
       warnings: [...new Set([...research.warnings, ...planning.warnings])],
+      trace,
     };
   } catch (error) {
     sink({

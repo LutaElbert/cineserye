@@ -16,6 +16,7 @@ import {
 } from '../../../server/cinema/workflow';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
+const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof runCinemaPlanningWorkflow>>>>();
 
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -29,7 +30,13 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       throw new ProviderError('INVALID_REQUEST', 'The scene brief is not valid JSON.');
     }
-    if (payload.version !== 1 || typeof payload.brief !== 'object' || payload.brief === null) {
+    if (
+      payload.version !== 1
+      || typeof payload.idempotencyKey !== 'string'
+      || !/^[a-zA-Z0-9_-]{8,160}$/.test(payload.idempotencyKey)
+      || typeof payload.brief !== 'object'
+      || payload.brief === null
+    ) {
       throw new ProviderError('INVALID_REQUEST', 'The scene planning request is malformed.');
     }
     const config = readCinemaProviderConfig();
@@ -38,7 +45,21 @@ export async function POST(request: Request): Promise<Response> {
     const dependencies = config.mode === 'live'
       ? (await import('../../../server/cinema/live-workflow')).liveWorkflowDependencies(config)
       : fixtureWorkflowDependencies();
-    const result = await runCinemaPlanningWorkflow(payload.brief, dependencies, request.signal);
+    let operation = activeRequests.get(payload.idempotencyKey);
+    if (!operation) {
+      operation = runCinemaPlanningWorkflow(
+        payload.brief,
+        dependencies,
+        request.signal,
+        payload.idempotencyKey,
+      );
+      activeRequests.set(payload.idempotencyKey, operation);
+      void operation.then(
+        () => activeRequests.delete(payload.idempotencyKey),
+        () => activeRequests.delete(payload.idempotencyKey),
+      );
+    }
+    const result = await operation;
     return Response.json(result, { status: 200 });
   } catch (error) {
     const safeError = publicProviderError(error);

@@ -32,7 +32,7 @@ Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the dest
 
 ## Cinema domain and presentation
 
-`app/domain/cinema/project-data.ts` defines the persisted version-1 cinema sidecar. Scene briefs use a separately versioned V2 contract, and valid V1 briefs migrate at the validation boundary. The sidecar contains relational records for:
+`app/domain/cinema/project-data.ts` defines the persisted version-2 cinema sidecar. Valid V1 sidecars migrate deterministically into a stable project identity and one recoverable revision; Scene Brief V1 values separately migrate into the V2 brief contract. The sidecar contains relational records for:
 
 - `scene`: brief, synopsis, purpose, continuity notes, and chronological shot IDs;
 - `shot`: scene, order, duration, framing, movement, audio, risk, and continuity node IDs;
@@ -42,6 +42,7 @@ Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the dest
 - prompt records;
 - research-source records with supported, needs-verification, or irrelevant review state plus creator pinning and usage relationships;
 - illustrative, credits-based, or explicitly unpriced cost records with a versioned profile and visible assumptions.
+- immutable accepted-plan revision snapshots with predecessor links and one active revision.
 
 Runtime validation resolves every scene, shot, character, asset, prompt, source, cost, run, and host canvas node relationship. The sidecar participates in document migrations, IndexedDB autosave, checkpoints, `.cineserye` backup/restore, and undo/redo.
 
@@ -67,15 +68,17 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 2. Research runs before planning; neither provider can access editor mutation or storage functions.
 3. Strict validation and deterministic compilation complete on the server.
 4. The browser applies the command proposal to a cloned document through the generic boundary.
-5. The creator inspects locked ghost nodes, prompts, linked sources, continuity, and costs. Source curation mutates only the preview until acceptance.
-6. Reject discards the preview byte-for-byte. Accept records one history snapshot and commits nodes, edges, and cinema sidecar once.
-7. One undo reverses the entire accepted proposal; redo and reload restore it.
+5. The browser writes the validated ready proposal to the local `pending-proposals` store with a fingerprint of the accepted source document before exposing review.
+6. The creator inspects locked ghost nodes, prompts, linked sources, continuity, and costs. Source curation mutates only the preview until acceptance.
+7. Reload restores an exact matching pending proposal without another provider call; a changed source fingerprint quarantines it.
+8. Reject discards the preview byte-for-byte. Accept records one history snapshot, commits nodes/edges/sidecar once, and appends an immutable plan revision.
+9. One undo reverses the entire accepted proposal; redo and reload restore it. Accepted shot edits use a cinema-domain command that updates the sidecar and derived host atomically and marks owned prompts stale.
 
 ## Evaluation and observability
 
-`tests/eval` contains a versioned, Agents CLI–compatible three-case dataset and scoring configuration. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, and telemetry privacy. `vertex-adk-live.test.ts` is opt-in and proves the real Vertex/ADK contract with local ADC while using a local research fixture.
+`tests/eval` contains a versioned, Agents CLI–compatible three-case dataset and scoring configuration. `evaluation-adapter.ts` creates a versioned artifact containing the brief, validated result, provider configuration, scoring policy, run ID, and content-free trace. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, and telemetry privacy. `vertex-adk-live.test.ts` is opt-in and proves the real Vertex/ADK contract with local ADC while using a local research fixture.
 
-Cloud trace or completion export is not configured. Prompt/response capture and completion upload are disabled unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately supplied after a retention review.
+The browser retains at most 50 content-free run traces in the local `agent-traces` store. The provider-mode badge exposes safe configuration metadata and trace JSON export; the export never contains scenes, prompts, research findings, citations, or credentials. Cloud trace or completion export is not configured. Prompt/response capture and completion upload are disabled unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately supplied after a retention review.
 
 ## Deliberately absent
 

@@ -3,6 +3,7 @@ import { validateCinemaProjectData } from '../../domain/cinema/project-data';
 import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 import { applyCanvasCommandProposal } from '../../editor/canvas-commands';
 import { initialDocument } from '../../editor/initial-document';
+import { prepareCinemaPlanProposal } from '../../editor/cinema-plan-proposal';
 import { ParallelResearchProvider } from './parallel-research-provider';
 import { compileCinemaCanvasProposal } from './proposal-compiler';
 import type { ResearchProviderResult, ShotPlannerProviderRequest } from './provider-contracts';
@@ -187,7 +188,10 @@ describe('VertexAdkShotPlannerProvider', () => {
     });
     expect(result.warnings).toContain('The expected generation estimate exceeds the confirmed ceiling.');
     const proposal = compileCinemaCanvasProposal('run-1', result.cinema);
-    const applied = applyCanvasCommandProposal(initialDocument, proposal);
+    const applied = applyCanvasCommandProposal(
+      initialDocument,
+      prepareCinemaPlanProposal(initialDocument, initialDocument.cinema, proposal),
+    );
     expect(applied.document.nodes).toHaveLength(9);
     expect(() => validateCinemaProjectData(
       result.cinema,
