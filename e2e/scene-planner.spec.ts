@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { waitForSaved } from './helpers';
 
 test('previews, inspects, accepts, rejects, and undoes the local mock shot plan', async ({ page, baseURL }) => {
   const externalRequests: string[] = [];
@@ -58,6 +59,37 @@ test('previews, inspects, accepts, rejects, and undoes the local mock shot plan'
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByRole('button', { name: '06 · The Figure Moves Closer', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Shot 01', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Layers' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Redo' }).click();
+  await expect(page.getByRole('button', { name: '06 · The Figure Moves Closer', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await waitForSaved(page);
+  const storedCinema = await page.evaluate(() => new Promise<{ schemaVersion: number; shotCount: number }>((resolve, reject) => {
+    const request = indexedDB.open('cineserye-local');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const stored = database.transaction('documents', 'readonly').objectStore('documents').get('current');
+      stored.onerror = () => reject(stored.error);
+      stored.onsuccess = () => {
+        resolve({
+          schemaVersion: stored.result.cinema.schemaVersion,
+          shotCount: Object.keys(stored.result.cinema.shots).length,
+        });
+        database.close();
+      };
+    };
+  }));
+  expect(storedCinema).toEqual({ schemaVersion: 1, shotCount: 6 });
+
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '06 · The Figure Moves Closer', exact: true })).toBeVisible();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: 'New', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Layers' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Plan scene' }).click();

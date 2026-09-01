@@ -17,9 +17,10 @@ import {
   sanitizeLinkHref,
 } from './rich-text';
 import { APP_CONFIG } from './config';
+import { validateCinemaProjectData } from '../domain/cinema/project-data';
 
 export const PROJECT_FORMAT = APP_CONFIG.storage.projectFormat;
-export const PROJECT_FILE_VERSION = 4;
+export const PROJECT_FILE_VERSION = 5;
 export const MAX_PROJECT_FILE_SIZE = 40 * 1024 * 1024;
 
 const MAX_TITLE_LENGTH = 120;
@@ -198,7 +199,7 @@ function parseVectorPath(value: unknown, index: number): VectorPathLayer {
   };
 }
 
-function parseNode(value: unknown, index: number, sourceVersion: 1 | 2 | 3 | 4): EditorNode {
+function parseNode(value: unknown, index: number, sourceVersion: 1 | 2 | 3 | 4 | 5): EditorNode {
   if (!isRecord(value) || !isRecord(value.position) || !isRecord(value.data)) {
     throw new Error(`Layer ${index + 1} is invalid.`);
   }
@@ -362,10 +363,10 @@ export function validateEditorDocument(
   value: unknown,
   options: { strictGraph?: boolean } = {},
 ): EditorDocument {
-  if (!isRecord(value) || (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4)) {
+  if (!isRecord(value) || ![1, 2, 3, 4, 5].includes(value.schemaVersion as number)) {
     throw new Error('This project uses an unsupported document version.');
   }
-  const sourceVersion = value.schemaVersion;
+  const sourceVersion = value.schemaVersion as 1 | 2 | 3 | 4 | 5;
   if (!Array.isArray(value.nodes) || value.nodes.length > MAX_NODES) {
     throw new Error('This project contains too many layers.');
   }
@@ -406,12 +407,16 @@ export function validateEditorDocument(
     directedPairs.add(pair);
     return valid;
   });
+  const cinema = sourceVersion >= 5 && value.cinema !== undefined
+    ? validateCinemaProjectData(value.cinema, nodeIds)
+    : undefined;
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     title: boundedString(value.title, 'Project title', MAX_TITLE_LENGTH),
     nodes,
     edges,
+    ...(cinema === undefined ? {} : { cinema }),
     updatedAt:
       typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt)
         ? value.updatedAt
@@ -437,7 +442,7 @@ export function parseProjectBackup(source: string): EditorDocument {
   } catch {
     throw new Error('The selected file is not valid JSON.');
   }
-  if (!isRecord(value) || value.format !== PROJECT_FORMAT || (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4)) {
+  if (!isRecord(value) || value.format !== PROJECT_FORMAT || ![1, 2, 3, 4, 5].includes(value.version as number)) {
     throw new Error(`This is not a supported ${APP_CONFIG.name} project backup.`);
   }
   return validateEditorDocument(value.document, { strictGraph: true });

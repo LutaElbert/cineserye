@@ -7,6 +7,10 @@ import {
   type CinemaNodePresentation,
   type PromptArtifact,
 } from '../prompt-artifacts';
+import {
+  validateCinemaProjectData,
+  type CinemaProjectDataV1,
+} from '../project-data';
 
 const SCENE_DIRECTION = 'Late-1980s Manila cinema, restrained supernatural suspense, vertical 9:16 cinematic realism, amber projector light against cool-blue darkness, subtle film grain, no gore.';
 const MARA_CONTINUITY = 'Mara, the same 24-year-old Filipino woman with shoulder-length black hair, a faded blue denim jacket, dark trousers, and a small metal flashlight.';
@@ -111,7 +115,7 @@ type ShotSeed = {
   purpose: string;
   framing: string;
   movement: string;
-  risk: CinemaNodePresentation['risk'];
+  risk: Exclude<CinemaNodePresentation['risk'], 'none'>;
   dependencies: string[];
   action: string;
   audio: string;
@@ -379,6 +383,152 @@ const createdEdges: EditorEdge[] = [
   edge('agent-shot-01', 'cine-agent-plan', 'cine-shot-01'),
   ...shots.slice(1).map((shot, index) => edge(`shot-${index + 1}-shot-${index + 2}`, shots[index].id, shot.id)),
 ];
+
+const mockRunId = 'cine-agent-plan';
+const mockRetrievedAt = '2026-09-01T00:00:00.000Z';
+const persistedPrompts = Object.fromEntries(Object.values(prompts).map((prompt) => [prompt.id, {
+  id: prompt.id,
+  ownerNodeId: prompt.ownerNodeId,
+  runId: mockRunId,
+  label: prompt.label,
+  purpose: prompt.purpose,
+  providerProfile: prompt.providerProfile,
+  generatedText: prompt.generatedText,
+  negativeConstraints: [...prompt.negativeConstraints],
+  continuityNodeIds: [...prompt.continuitySourceIds],
+  researchSourceIds: [...prompt.researchSourceIds],
+  version: prompt.version,
+  status: prompt.status,
+}]));
+const persistedSources = Object.fromEntries(Object.values(REEL_KNOWS_TOMORROW.sources).map((source) => [source.id, {
+  id: source.id,
+  runId: mockRunId,
+  title: source.title,
+  publisher: source.publisher,
+  url: null,
+  finding: source.finding,
+  queryPurpose: 'Local deterministic demonstration fixture',
+  status: source.status,
+  isMock: true,
+  retrievedAt: mockRetrievedAt,
+}]));
+
+const mockCinemaProjectData: CinemaProjectDataV1 = {
+  schemaVersion: 1,
+  projectNodeId: 'story-premise',
+  activeSceneId: 'scene-01',
+  sceneOrder: ['scene-01'],
+  scenes: {
+    'scene-01': {
+      id: 'scene-01',
+      nodeId: 'scene-01',
+      title: 'Scene 01 · The Abandoned Cinema',
+      synopsis: 'Mara discovers that an old projector is screening her immediate future.',
+      dramaticPurpose: 'Reveal an impossible warning and end on an escalating supernatural threat.',
+      status: 'draft',
+      continuityNotes: 'Keep the auditorium geography, projector position, wardrobe, and projection-only shadow consistent.',
+      brief: {
+        tone: 'Restrained supernatural suspense',
+        locationPeriod: 'Manila single-screen cinema · late 1980s',
+        budgetBand: 'micro',
+        currency: 'PHP',
+        budgetCeiling: 1_200,
+        targetDurationSeconds: 36,
+        availableEquipment: ['Phone or compact cinema camera', 'Tripod', 'One practical flashlight'],
+      },
+      shotIds: shots.map((shot) => shot.id),
+    },
+  },
+  shots: Object.fromEntries(shots.map((shot, index) => [shot.id, {
+    id: shot.id,
+    nodeId: shot.id,
+    sceneId: 'scene-01',
+    order: index + 1,
+    title: shot.title,
+    description: shot.action,
+    purpose: shot.purpose,
+    framing: shot.framing,
+    cameraMovement: shot.movement,
+    lensMm: null,
+    durationSeconds: shot.duration,
+    audio: shot.audio,
+    risk: shot.risk,
+    continuityNodeIds: [...shot.dependencies],
+    generationStatus: 'planned',
+  }])),
+  characters: {
+    'cine-character-mara': {
+      id: 'cine-character-mara',
+      nodeId: 'cine-character-mara',
+      sceneIds: ['scene-01'],
+      title: 'Mara',
+      summary: 'A restrained, observant protagonist whose stable wardrobe anchors every shot.',
+      appearanceReference: MARA_CONTINUITY,
+      voiceReference: 'No dialogue in this scene.',
+      wardrobeNotes: 'Faded blue denim jacket and dark trousers.',
+    },
+  },
+  assets: {
+    'cine-asset-cinema': {
+      id: 'cine-asset-cinema', nodeId: 'cine-asset-cinema', sceneIds: ['scene-01'], title: 'Abandoned Cinema',
+      category: 'location', summary: 'A reusable single-screen cinema location.', continuityNotes: CINEMA_CONTINUITY,
+      source: 'planned', uri: '', provenance: 'Mock cited research fixture',
+    },
+    'cine-asset-projector': {
+      id: 'cine-asset-projector', nodeId: 'cine-asset-projector', sceneIds: ['scene-01'], title: 'Vintage Projector',
+      category: 'prop', summary: 'The period hero prop that triggers the supernatural event.', continuityNotes: PROJECTOR_CONTINUITY,
+      source: 'planned', uri: '', provenance: 'Mock cited research fixture',
+    },
+    'cine-asset-flashlight': {
+      id: 'cine-asset-flashlight', nodeId: 'cine-asset-flashlight', sceneIds: ['scene-01'], title: 'Metal Flashlight',
+      category: 'prop', summary: 'Mara’s practical motivated light.', continuityNotes: 'Small brushed-metal body and narrow warm beam.',
+      source: 'planned', uri: '', provenance: 'Mock cited research fixture',
+    },
+    'cine-asset-shadow': {
+      id: 'cine-asset-shadow', nodeId: 'cine-asset-shadow', sceneIds: ['scene-01'], title: 'Shadow Figure',
+      category: 'visual-element', summary: 'A faceless threat visible only in the projected image.',
+      continuityNotes: 'Tall narrow silhouette, no facial detail, never physically present in the auditorium.',
+      source: 'planned', uri: '', provenance: 'Mock cited research fixture',
+    },
+  },
+  agentRuns: {
+    [mockRunId]: {
+      id: mockRunId,
+      nodeId: mockRunId,
+      sceneId: 'scene-01',
+      status: 'accepted',
+      summary: 'Fixture-backed research and six-shot planning package.',
+      proposedCommandCount: createdNodes.length + createdEdges.length + 3,
+      researchProvider: 'fixture',
+      planningProvider: 'fixture',
+      model: 'fixture-v1',
+      sourceIds: Object.keys(persistedSources),
+      promptIds: Object.keys(persistedPrompts),
+      warnings: ['Costs are illustrative generation estimates, not production quotes.'],
+      startedAt: mockRetrievedAt,
+      completedAt: mockRetrievedAt,
+    },
+  },
+  prompts: persistedPrompts,
+  sources: persistedSources,
+  costs: {
+    'cost-scene-01': {
+      id: 'cost-scene-01', runId: mockRunId, sceneId: 'scene-01',
+      currency: REEL_KNOWS_TOMORROW.cost.currency,
+      minimum: REEL_KNOWS_TOMORROW.cost.minimum,
+      expected: REEL_KNOWS_TOMORROW.cost.expected,
+      highRisk: REEL_KNOWS_TOMORROW.cost.highRisk,
+      ceiling: REEL_KNOWS_TOMORROW.cost.ceiling,
+      isIllustrative: true,
+      assumptions: [...REEL_KNOWS_TOMORROW.cost.assumptions],
+    },
+  },
+};
+
+export const MOCK_CINEMA_PROJECT_DATA = validateCinemaProjectData(
+  mockCinemaProjectData,
+  new Set(['story-premise', 'scene-01', ...createdNodes.map((node) => node.id)]),
+);
 
 export const MOCK_SHOT_PLAN_PROPOSAL: CanvasCommandProposal = {
   version: 1,

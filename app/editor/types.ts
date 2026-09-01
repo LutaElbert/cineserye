@@ -1,4 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
+import type { CinemaProjectDataV1 } from '../domain/cinema/project-data';
 
 export type VectorPathLayer = {
   id: string;
@@ -80,10 +81,11 @@ export type EditorEdgeData = Record<string, unknown> & {
 export type EditorEdge = Edge<EditorEdgeData>;
 
 export type EditorDocument = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   title: string;
   nodes: EditorNode[];
   edges: EditorEdge[];
+  cinema?: CinemaProjectDataV1;
   updatedAt: number;
 };
 

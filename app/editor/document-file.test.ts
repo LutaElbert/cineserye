@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import {
+  MOCK_CINEMA_PROJECT_DATA,
+  MOCK_SHOT_PLAN_PROPOSAL,
+} from '../domain/cinema/mock/reel-knows-tomorrow';
+import { applyCanvasCommandProposal } from './canvas-commands';
 import { initialDocument } from './initial-document';
 import {
   parseProjectBackup,
@@ -15,7 +20,7 @@ describe('Cineserye project backups', () => {
     expect(restored.nodes).toHaveLength(initialDocument.nodes.length);
     expect(restored.edges).toHaveLength(initialDocument.edges.length);
     expect(restored.nodes.every((node) => node.selected === false)).toBe(true);
-    expect(restored.schemaVersion).toBe(4);
+    expect(restored.schemaVersion).toBe(5);
   });
 
   it('migrates version 1 projects to the current document version', () => {
@@ -28,7 +33,7 @@ describe('Cineserye project backups', () => {
       delete node.data.title;
     }
     const migrated = validateEditorDocument(legacy);
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     const concept = migrated.nodes.find((node) => node.data.kind === 'concept');
     expect(concept?.data.kind === 'concept' && concept.data.body.type).toBe('doc');
     expect(concept?.data.kind === 'concept' && concept.data.title.type).toBe('doc');
@@ -42,7 +47,7 @@ describe('Cineserye project backups', () => {
     const migrated = validateEditorDocument(legacy);
     const concept = migrated.nodes.find((node) => node.data.kind === 'concept');
     if (!concept || concept.data.kind !== 'concept') throw new Error('Missing concept fixture.');
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(concept.data.title.content?.[0].content?.[0].marks).toEqual([{ type: 'bold' }]);
   });
 
@@ -56,7 +61,7 @@ describe('Cineserye project backups', () => {
     }
     const migrated = validateEditorDocument(legacy);
     const concept = migrated.nodes.find((node) => node.data.kind === 'concept');
-    expect(migrated.schemaVersion).toBe(4);
+    expect(migrated.schemaVersion).toBe(5);
     expect(concept?.data.kind === 'concept' && concept.data.horizontalAlign).toBe('left');
     expect(concept?.data.kind === 'concept' && concept.data.verticalAlign).toBe('top');
   });
@@ -71,6 +76,38 @@ describe('Cineserye project backups', () => {
     const restoredConcept = restored.nodes.find((node) => node.id === concept.id);
     expect(restoredConcept?.data.kind === 'concept' && restoredConcept.data.horizontalAlign).toBe('right');
     expect(restoredConcept?.data.kind === 'concept' && restoredConcept.data.verticalAlign).toBe('bottom');
+  });
+
+  it('round-trips a complete versioned cinema sidecar', () => {
+    const planned = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
+    planned.cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
+
+    const restored = parseProjectBackup(serializeProjectBackup(planned));
+
+    expect(restored.schemaVersion).toBe(5);
+    expect(restored.cinema?.schemaVersion).toBe(1);
+    expect(restored.cinema?.sceneOrder).toEqual(['scene-01']);
+    expect(Object.keys(restored.cinema?.shots ?? {})).toHaveLength(6);
+    expect(Object.keys(restored.cinema?.prompts ?? {})).toHaveLength(18);
+    expect(restored.cinema?.costs['cost-scene-01'].expected).toBe(820);
+  });
+
+  it('migrates a version 4 generic document without inventing cinema data', () => {
+    const legacy = structuredClone(initialDocument) as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 4;
+    delete legacy.cinema;
+
+    const migrated = validateEditorDocument(legacy);
+
+    expect(migrated.schemaVersion).toBe(5);
+    expect(migrated.cinema).toBeUndefined();
+  });
+
+  it('rejects an unsupported future cinema sidecar version', () => {
+    const planned = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
+    planned.cinema = { ...structuredClone(MOCK_CINEMA_PROJECT_DATA), schemaVersion: 2 } as never;
+
+    expect(() => validateEditorDocument(planned)).toThrow('unsupported cinema data version');
   });
 
   it('removes trailing empty checklist rows while loading saved documents', () => {

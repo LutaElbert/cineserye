@@ -136,14 +136,17 @@ import type {
 } from './types';
 import { vectorizeDataUrl } from './vectorize';
 import {
+  MOCK_CINEMA_PROJECT_DATA,
   MOCK_SHOT_PLAN_PROPOSAL,
   REEL_KNOWS_TOMORROW,
 } from '../domain/cinema/mock/reel-knows-tomorrow';
+import type { CinemaProjectDataV1 } from '../domain/cinema/project-data';
+import { removeCinemaRecordsForNodes } from '../domain/cinema/project-data';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
 import { buildCinemaOutline } from '../features/project-outline/outline-model';
 import { CinemaInspector } from '../features/scene-planner/CinemaInspector';
 
-type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges'>;
+type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
 type SelectionOperation = 'replace' | 'add' | 'subtract';
 type MobilePanel = 'layers' | 'inspector' | null;
@@ -450,14 +453,19 @@ const nodeTypes = {
   vector: VectorNode,
 };
 
-function cloneSnapshot(nodes: EditorNode[], edges: EditorEdge[]): EditorSnapshot {
-  return structuredClone({ nodes, edges });
+function cloneSnapshot(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  cinema?: CinemaProjectDataV1,
+): EditorSnapshot {
+  return structuredClone({ nodes, edges, ...(cinema === undefined ? {} : { cinema }) });
 }
 
 type PersistableEditorState = {
   title: string;
   nodes: EditorNode[];
   edges: EditorEdge[];
+  cinema?: CinemaProjectDataV1;
 };
 
 const TRANSIENT_ELEMENT_KEYS = new Set(['selected', 'dragging', 'measured', 'resizing']);
@@ -474,7 +482,12 @@ function persistableElementEqual(left: EditorNode | EditorEdge, right: EditorNod
 }
 
 function persistableEditorStateEqual(left: PersistableEditorState, right: PersistableEditorState) {
-  if (left.title !== right.title || left.nodes.length !== right.nodes.length || left.edges.length !== right.edges.length) {
+  if (
+    left.title !== right.title
+    || left.cinema !== right.cinema
+    || left.nodes.length !== right.nodes.length
+    || left.edges.length !== right.edges.length
+  ) {
     return false;
   }
   return left.nodes.every((node, index) => persistableElementEqual(node, right.nodes[index]))
@@ -505,7 +518,9 @@ function safeFileBase(fileName: string) {
 }
 
 function estimateSnapshotBytes(snapshot: EditorSnapshot) {
-  let characters = snapshot.edges.length * 280 + snapshot.nodes.length * 360;
+  let characters = snapshot.edges.length * 280
+    + snapshot.nodes.length * 360
+    + (snapshot.cinema ? JSON.stringify(snapshot.cinema).length : 0);
   for (const node of snapshot.nodes) {
     characters += node.data.name.length;
     if (node.data.kind === 'raster') characters += node.data.src.length;
@@ -540,6 +555,7 @@ function connectorPresentation(kind: 'default' | 'dashed' | 'emphasis') {
 function EditorInner() {
   const [nodes, setNodes] = useState<EditorNode[]>(initialDocument.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialDocument.edges);
+  const [cinema, setCinema] = useState<CinemaProjectDataV1 | undefined>(initialDocument.cinema);
   const [title, setTitle] = useState(initialDocument.title);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [temporaryPanActive, setTemporaryPanActive] = useState(false);
@@ -578,6 +594,7 @@ function EditorInner() {
   const backupDialogRef = useRef<HTMLDialogElement>(null);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
+  const cinemaRef = useRef(cinema);
   const titleRef = useRef(title);
   const pastRef = useRef<EditorSnapshot[]>([]);
   const futureRef = useRef<EditorSnapshot[]>([]);
@@ -592,7 +609,7 @@ function EditorInner() {
   const conversionControllerRef = useRef<AbortController | null>(null);
   const saveQueueRef = useRef(Promise.resolve());
   const saveTicketRef = useRef(0);
-  const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges });
+  const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges, cinema });
   const mockPlanningTimerRef = useRef<number | null>(null);
   const {
     screenToFlowPosition,
@@ -627,10 +644,13 @@ function EditorInner() {
     edgesRef.current = edges;
   }, [edges]);
   useLayoutEffect(() => {
+    cinemaRef.current = cinema;
+  }, [cinema]);
+  useLayoutEffect(() => {
     titleRef.current = title;
   }, [title]);
   useLayoutEffect(() => {
-    const next = { title, nodes, edges };
+    const next = { title, nodes, edges, cinema };
     const previous = autosaveInputRef.current;
     autosaveInputRef.current = next;
     if (!persistableEditorStateEqual(previous, next)) {
@@ -640,7 +660,7 @@ function EditorInner() {
       setSaveState('saving');
       setAutosaveRevision((current) => current + 1);
     }
-  }, [edges, nodes, title]);
+  }, [cinema, edges, nodes, title]);
 
   const announce = useCallback((message: string, tone: Toast['tone'] = 'info') => {
     const id = Date.now() + Math.random();
@@ -659,19 +679,28 @@ function EditorInner() {
   }, []);
 
   const recordHistory = useCallback((snapshot?: EditorSnapshot) => {
-    pastRef.current.push(snapshot ?? cloneSnapshot(nodesRef.current, edgesRef.current));
+    pastRef.current.push(snapshot ?? cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current));
     trimHistory(pastRef.current);
     futureRef.current = [];
     refreshHistoryState();
   }, [refreshHistoryState]);
 
+  const removeCinemaForNodeIds = useCallback((removedNodeIds: ReadonlySet<string>) => {
+    if (!cinemaRef.current || !removedNodeIds.size) return;
+    const remainingHostNodeIds = new Set(
+      nodesRef.current.filter((node) => !removedNodeIds.has(node.id)).map((node) => node.id),
+    );
+    setCinema(removeCinemaRecordsForNodes(cinemaRef.current, removedNodeIds, remainingHostNodeIds));
+  }, []);
+
   const undo = useCallback(() => {
     const previous = pastRef.current.pop();
     if (!previous) return;
-    futureRef.current.push(cloneSnapshot(nodesRef.current, edgesRef.current));
+    futureRef.current.push(cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current));
     trimHistory(futureRef.current);
     setNodes(previous.nodes);
     setEdges(previous.edges);
+    setCinema(previous.cinema);
     setSelectedPath(null);
     refreshHistoryState();
   }, [refreshHistoryState]);
@@ -679,19 +708,21 @@ function EditorInner() {
   const redo = useCallback(() => {
     const next = futureRef.current.pop();
     if (!next) return;
-    pastRef.current.push(cloneSnapshot(nodesRef.current, edgesRef.current));
+    pastRef.current.push(cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current));
     trimHistory(pastRef.current);
     setNodes(next.nodes);
     setEdges(next.edges);
+    setCinema(next.cinema);
     setSelectedPath(null);
     refreshHistoryState();
   }, [refreshHistoryState]);
 
   const getCurrentDocument = useCallback((): EditorDocument => ({
-    schemaVersion: 4,
+    schemaVersion: 5,
     title: titleRef.current,
     nodes: nodesRef.current.map((node) => ({ ...node, selected: false })),
     edges: edgesRef.current.map((edge) => ({ ...edge, selected: false })),
+    ...(cinemaRef.current === undefined ? {} : { cinema: cinemaRef.current }),
     updatedAt: Date.now(),
   }), []);
 
@@ -743,6 +774,7 @@ function EditorInner() {
       selected: node.id === 'cine-shot-03',
     })));
     setEdges(mockProposalPreview.document.edges.map((edge) => ({ ...edge, selected: false })));
+    setCinema(structuredClone(MOCK_CINEMA_PROJECT_DATA));
     setMockProposalPreview(null);
     setMockProposalStage('idle');
     setPreviewSelectedNodeId(null);
@@ -779,6 +811,7 @@ function EditorInner() {
         setNodes(document.nodes.map((node) => ({ ...node, selected: false })));
         setEdges(document.edges.map((edge) => ({ ...edge, selected: false })));
         setTitle(document.title);
+        setCinema(document.cinema);
       })
       .catch(() => {
         setSaveState('error');
@@ -831,11 +864,17 @@ function EditorInner() {
           && !selectedChange) setPreviewSelectedNodeId(null);
         return;
       }
-      if (changes.some((change) => change.type === 'remove')) recordHistory();
+      const removedNodeIds = new Set(changes
+        .filter((change): change is Extract<NodeChange<EditorNode>, { type: 'remove' }> => change.type === 'remove')
+        .map((change) => change.id));
+      if (removedNodeIds.size) {
+        recordHistory();
+        removeCinemaForNodeIds(removedNodeIds);
+      }
       setNodes((current) => applyNodeChanges(changes, current));
       if (changes.some((change) => change.type === 'remove')) setSelectedPath(null);
     },
-    [mockProposalPreview, previewSelectedNodeId, recordHistory],
+    [mockProposalPreview, previewSelectedNodeId, recordHistory, removeCinemaForNodeIds],
   );
 
   const handleEdgesChange = useCallback(
@@ -1427,10 +1466,11 @@ function EditorInner() {
     const ids = new Set(nodesRef.current.filter((node) => node.selected && !node.data.locked).map((node) => node.id));
     if (!ids.size) return;
     recordHistory();
+    removeCinemaForNodeIds(ids);
     const next = removeNodesAndConnections(nodesRef.current, edgesRef.current, ids);
     setNodes(next.nodes);
     setEdges(next.edges);
-  }, [recordHistory]);
+  }, [recordHistory, removeCinemaForNodeIds]);
 
   const tidyDiagram = useCallback(() => {
     const positions = tidyGraphPositions(nodesRef.current, edgesRef.current);
@@ -1450,7 +1490,7 @@ function EditorInner() {
     if (conceptEditOriginRef.current) {
       recordHistory(conceptEditOriginRef.current);
     }
-    conceptEditOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current);
+    conceptEditOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current);
     setNodes((current) => current.map((item) => item.id === id ? {
       ...item,
       style: {
@@ -1599,7 +1639,7 @@ function EditorInner() {
 
   const beginFieldEdit = useCallback(() => {
     if (!fieldOriginRef.current) {
-      fieldOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current);
+      fieldOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current);
     }
   }, []);
 
@@ -1783,6 +1823,7 @@ function EditorInner() {
     const selected = nodesRef.current.find((node) => node.id === selectedNodeId);
     if (!selected || selected.data.locked) return;
     recordHistory();
+    removeCinemaForNodeIds(new Set([selected.id]));
     setNodes((current) => current.filter((node) => node.id !== selected.id));
     setEdges((current) =>
       current.filter((edge) => edge.source !== selected.id && edge.target !== selected.id),
@@ -1814,6 +1855,7 @@ function EditorInner() {
       setNodes(structuredClone(initialDocument.nodes));
       setEdges(structuredClone(initialDocument.edges));
       setTitle(initialDocument.title);
+      setCinema(initialDocument.cinema);
       setSelectedPath(null);
       setMockProposalPreview(null);
       setMockProposalStage('idle');
@@ -1856,6 +1898,7 @@ function EditorInner() {
     setNodes(restored.nodes);
     setEdges(restored.edges);
     setTitle(restored.title);
+    setCinema(restored.cinema);
     setSelectedPath(null);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
@@ -1887,6 +1930,7 @@ function EditorInner() {
       setNodes(restored.nodes);
       setEdges(restored.edges);
       setTitle(restored.title);
+      setCinema(restored.cinema);
       setSelectedPath(null);
       setMockProposalPreview(null);
       setMockProposalStage('idle');
@@ -1941,7 +1985,7 @@ function EditorInner() {
       addConceptRelative,
       recordResizeStart: () => {
         if (!resizeOriginRef.current) {
-          resizeOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current);
+          resizeOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current);
         }
       },
       recordResize: (id, dimensions) => {
@@ -2436,7 +2480,7 @@ function EditorInner() {
             isValidConnection={isValidConnection}
             onNodeDragStart={() => {
               if (mockProposalPreview) return;
-              dragOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current);
+              dragOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current);
             }}
             onNodeDragStop={() => {
               if (mockProposalPreview) return;
