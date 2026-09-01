@@ -41,7 +41,7 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 
 Fixture mode uses no external requests. Live research cards link to their normalized sources. Generation prices remain visibly illustrative in both modes.
 
-See the [implementation plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
+See the [current-feature audit](docs/FEATURE_AUDIT.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
 
 ## Local development
 
