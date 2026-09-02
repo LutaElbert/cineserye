@@ -9,6 +9,13 @@ import { ProviderError } from './provider-errors';
 const PARALLEL_SEARCH_URL = 'https://api.parallel.ai/v1/search';
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_SOURCES = 8;
+const MAX_EXCERPT_CHARACTERS = 16_000;
+const MAX_QUERY_WORDS = 6;
+const MAX_QUERY_CHARACTERS = 200;
+
+const QUERY_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'at', 'by', 'for', 'from', 'in', 'of', 'on', 'or', 'the', 'to', 'with',
+]);
 
 type Fetch = typeof fetch;
 
@@ -71,14 +78,43 @@ function normalizeSources(payload: unknown, runId: string): CinemaResearchSource
   }).slice(0, MAX_SOURCES);
 }
 
-function searchQueries(request: ResearchProviderRequest) {
+function queryKeywords(value: string, limit: number): string[] {
+  const words = value
+    .normalize('NFKC')
+    .match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu) ?? [];
+  return words
+    .map((word) => word.slice(0, 30))
+    .filter((word) => !QUERY_STOP_WORDS.has(word.toLowerCase()))
+    .slice(0, limit);
+}
+
+function keywordQuery(subject: string, suffix: string[]): string {
+  const words = [...queryKeywords(subject, 3), ...suffix]
+    .filter((word, index, all) => all.findIndex((entry) => entry.toLowerCase() === word.toLowerCase()) === index)
+    .slice(0, MAX_QUERY_WORDS);
+  while (words.length < 3) words.push('cinema');
+  return words.join(' ').slice(0, MAX_QUERY_CHARACTERS);
+}
+
+function searchQueries(request: ResearchProviderRequest): string[] {
   const { brief } = request;
   return [
-    `${brief.locationPeriod} production design props material culture visual reference`,
-    `${brief.genreTone} cinematography lighting camera coverage visual storytelling reference`,
-    `${brief.aspectRatio} ${brief.targetPlatform} staging composition short scene ${brief.locationPeriod}`,
-    `${brief.sceneText.slice(0, 500)} practical filmmaking reference`,
+    keywordQuery(brief.locationPeriod, ['production', 'design']),
+    keywordQuery(brief.genreTone, ['cinematography', 'lighting']),
+    keywordQuery(`${brief.aspectRatio.replace(':', 'x')} ${brief.targetPlatform}`, ['shot', 'composition']),
   ];
+}
+
+function researchObjective(request: ResearchProviderRequest): string {
+  const { brief } = request;
+  return [
+    `Find concise, credible filmmaking references for planning one ${brief.targetDurationSeconds}-second ${brief.creationMode} scene.`,
+    `Scene: ${brief.sceneText}`,
+    `Setting: ${brief.locationPeriod}.`,
+    `Tone: ${brief.genreTone}.`,
+    `Format: ${brief.aspectRatio} for ${brief.targetPlatform}.`,
+    'Prioritize cinematography, production design, props, spatial continuity, and budget-aware shot coverage.',
+  ].join(' ').slice(0, 5_000);
 }
 
 export class ParallelResearchProvider implements ResearchProvider {
@@ -99,9 +135,14 @@ export class ParallelResearchProvider implements ResearchProvider {
           'x-api-key': this.apiKey,
         },
         body: JSON.stringify({
-          objective: `Find concise, credible references that help plan one ${request.brief.targetDurationSeconds}-second ${request.brief.creationMode} scene while respecting its tone, setting, physical-production constraints, and available equipment.`,
+          objective: researchObjective(request),
           search_queries: searchQueries(request),
-          max_results: MAX_SOURCES,
+          mode: 'basic',
+          max_chars_total: MAX_EXCERPT_CHARACTERS,
+          session_id: `cineserye_${request.runId}`.slice(0, 1_000),
+          advanced_settings: {
+            max_results: MAX_SOURCES,
+          },
         }),
         signal: request.signal,
       });
@@ -115,10 +156,19 @@ export class ParallelResearchProvider implements ResearchProvider {
     if (response.status === 429) {
       throw new ProviderError('RATE_LIMITED', 'Parallel research is temporarily rate limited.', true);
     }
+    if (response.status === 408) {
+      throw new ProviderError('TIMEOUT', 'Parallel research timed out.', true);
+    }
+    if (response.status === 400 || response.status === 422) {
+      throw new ProviderError(
+        'UNEXPECTED_RESPONSE',
+        `Parallel rejected the research request (HTTP ${response.status}).`,
+      );
+    }
     if (!response.ok) {
       throw new ProviderError(
         'PROVIDER_UNAVAILABLE',
-        'Parallel research could not complete this request.',
+        `Parallel research could not complete this request (HTTP ${response.status}).`,
         response.status >= 500,
       );
     }

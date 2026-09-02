@@ -20,7 +20,7 @@ const productionHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['@google/adk'],
+  serverExternalPackages: ['@google/adk', '@google/genai'],
   async headers() {
     return [
       {

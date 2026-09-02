@@ -71,7 +71,7 @@ export async function runCinemaPlanningWorkflow(
           research,
           signal: attemptSignal,
         }),
-        { signal, timeoutMs: 30_000, maxAttempts: 2 },
+        { signal, timeoutMs: 75_000, maxAttempts: 2 },
       ),
       (result) => ({ provider: result.provider, model: result.model, resultCount: Object.keys(result.cinema.shots).length }),
     );

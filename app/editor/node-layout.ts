@@ -7,9 +7,18 @@ export const CONCEPT_EDIT_MIN_WIDTH = 250;
 export const CONCEPT_EDIT_MIN_HEIGHT = 150;
 export const CONCEPT_BRANCH_GAP = 44;
 export const CONCEPT_LEVEL_GAP = 92;
+export const LAYOUT_VERTICAL_GAP = 24;
+export const LAYOUT_COLUMN_GAP = 100;
 
 export type NodeDimensions = { width: number; height: number };
 export type NodePosition = { x: number; y: number };
+export type NodeRectangle = NodePosition & NodeDimensions;
+
+export type VerticalNodeLane = {
+  positions: Map<string, NodePosition>;
+  width: number;
+  height: number;
+};
 
 function positiveNumber(value: unknown) {
   const number = Number(value);
@@ -27,6 +36,50 @@ export function editorNodeDimensions(node: EditorNode): NodeDimensions {
   return {
     width: styledWidth || measuredWidth || fallback.width,
     height: Math.max(styledHeight, measuredHeight, fallback.height),
+  };
+}
+
+export function nodeRectangle(node: EditorNode): NodeRectangle {
+  return { ...node.position, ...editorNodeDimensions(node) };
+}
+
+export function rectanglesOverlap(
+  left: NodeRectangle,
+  right: NodeRectangle,
+  gap = 0,
+): boolean {
+  return left.x < right.x + right.width + gap
+    && left.x + left.width + gap > right.x
+    && left.y < right.y + right.height + gap
+    && left.y + left.height + gap > right.y;
+}
+
+/** Packs an ordered set of nodes into one vertical lane using their real sizes. */
+export function verticalNodeLane(
+  nodes: EditorNode[],
+  orderedIds: string[],
+  x: number,
+  startY: number,
+  gap = LAYOUT_VERTICAL_GAP,
+): VerticalNodeLane {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const positions = new Map<string, NodePosition>();
+  let cursorY = startY;
+  let width = 0;
+
+  for (const id of orderedIds) {
+    const node = nodeById.get(id);
+    if (!node || node.hidden) continue;
+    const dimensions = editorNodeDimensions(node);
+    positions.set(id, { x, y: cursorY });
+    width = Math.max(width, dimensions.width);
+    cursorY += dimensions.height + gap;
+  }
+
+  return {
+    positions,
+    width,
+    height: positions.size ? cursorY - startY - gap : 0,
   };
 }
 

@@ -1,4 +1,11 @@
 import type { EditorEdge, EditorNode } from './types';
+import {
+  editorNodeDimensions,
+  LAYOUT_COLUMN_GAP,
+  LAYOUT_VERTICAL_GAP,
+  nodeRectangle,
+  rectanglesOverlap,
+} from './node-layout';
 
 export type ConnectionCandidate = {
   source?: string | null;
@@ -158,8 +165,41 @@ export function tidyGraphPositions(
     const depth = depths.get(node.id) ?? 0;
     rows.set(depth, [...(rows.get(depth) ?? []), node.id]);
   }
-  for (const [depth, ids] of rows) {
-    ids.forEach((id, index) => positions.set(id, { x: 110 + depth * 310, y: 90 + index * 150 }));
+
+  const nodeById = new Map(visibleNodes.map((node) => [node.id, node]));
+  const lockedRectangles = visibleNodes.filter((node) => node.data.locked).map(nodeRectangle);
+  let columnX = 110;
+  for (const depth of [...rows.keys()].sort((left, right) => left - right)) {
+    const ids = rows.get(depth) ?? [];
+    const columnWidth = Math.max(
+      0,
+      ...ids.map((id) => editorNodeDimensions(nodeById.get(id)!).width),
+    );
+    let cursorY = 90;
+    for (const id of ids) {
+      const node = nodeById.get(id)!;
+      const dimensions = editorNodeDimensions(node);
+      if (node.data.locked) {
+        positions.set(id, { ...node.position });
+        continue;
+      }
+
+      let y = cursorY;
+      let candidate = { x: columnX, y, ...dimensions };
+      for (let pass = 0; pass <= lockedRectangles.length; pass += 1) {
+        const collisions = lockedRectangles.filter((rectangle) => (
+          rectanglesOverlap(candidate, rectangle, LAYOUT_VERTICAL_GAP)
+        ));
+        if (!collisions.length) break;
+        y = Math.max(...collisions.map((rectangle) => (
+          rectangle.y + rectangle.height + LAYOUT_VERTICAL_GAP
+        )));
+        candidate = { ...candidate, y };
+      }
+      positions.set(id, { x: columnX, y });
+      cursorY = y + dimensions.height + LAYOUT_VERTICAL_GAP;
+    }
+    columnX += columnWidth + LAYOUT_COLUMN_GAP;
   }
   return positions;
 }

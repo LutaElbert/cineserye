@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { waitForSaved } from './helpers';
 
 async function chooseStartScene(page: Page) {
-  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible({ timeout: 10_000 });
   const chooser = page.getByRole('dialog', { name: /Start with your scene/ });
   await expect(chooser).toBeVisible();
   await chooser.getByRole('button', { name: /Start a scene/ }).click();
@@ -15,6 +15,38 @@ async function editSceneText(page: Page, text: string) {
   await page.locator('.concept-body-editor').fill(text);
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
   await scene.click();
+}
+
+async function overlappingVisibleNodePairs(page: Page) {
+  return page.locator('.react-flow__node').evaluateAll((elements) => {
+    const nodes = elements
+      .filter((element) => {
+        const style = window.getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+      })
+      .map((element) => ({
+        label: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 80) ?? 'Unnamed node',
+        rectangle: element.getBoundingClientRect(),
+      }));
+    const overlaps: string[] = [];
+    for (let left = 0; left < nodes.length; left += 1) {
+      for (let right = left + 1; right < nodes.length; right += 1) {
+        const a = nodes[left];
+        const b = nodes[right];
+        if (
+          a.rectangle.left < b.rectangle.right
+          && a.rectangle.right > b.rectangle.left
+          && a.rectangle.top < b.rectangle.bottom
+          && a.rectangle.bottom > b.rectangle.top
+        ) overlaps.push(`${a.label} <> ${b.label}`);
+      }
+    }
+    return overlaps;
+  });
+}
+
+async function expectVisibleNodesNotToOverlap(page: Page) {
+  await expect.poll(() => overlappingVisibleNodePairs(page), { timeout: 5_000 }).toEqual([]);
 }
 
 test('offers a clean start or a deterministic local sample only on genuine first launch', async ({ page, baseURL }) => {
@@ -81,6 +113,7 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
 
   const review = page.getByRole('region', { name: 'Shot proposal review' });
   await expect(review).toBeVisible();
+  await expectVisibleNodesNotToOverlap(page);
   await expect(page.getByRole('button', { name: 'Review shot plan' })).toBeVisible();
   const outline = page.getByRole('navigation', { name: 'Project outline' });
   await expect(outline).toContainText('6 shots · 42s');
@@ -104,11 +137,13 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
 
   await review.getByRole('button', { name: 'Accept plan' }).click();
   await expect(review).toHaveCount(0);
+  await expectVisibleNodesNotToOverlap(page);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(page.getByRole('button', { name: 'Shot 01', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Redo' }).click();
   await expect(page.getByRole('button', { name: '06 · The Figure Moves Closer', exact: true })).toBeVisible();
+  await expectVisibleNodesNotToOverlap(page);
 
   await waitForSaved(page);
   const storedCinema = await page.evaluate(() => new Promise<{
@@ -150,6 +185,7 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await expectVisibleNodesNotToOverlap(page);
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'New', exact: true }).click();

@@ -70,6 +70,27 @@ function statusFromError(error: unknown): number | null {
   return typeof status === 'number' ? status : null;
 }
 
+function providerErrorFromAdkEvent(errorCode: string, errorMessage?: string): ProviderError {
+  const normalized = errorCode.trim().toUpperCase();
+  if (normalized === '401' || normalized === '403' || normalized.includes('UNAUTHENTICATED')) {
+    return new ProviderError('UNAUTHORIZED', 'Vertex planning authorization failed.');
+  }
+  if (normalized === '429' || normalized.includes('RESOURCE_EXHAUSTED')) {
+    return new ProviderError('RATE_LIMITED', 'Vertex planning is temporarily rate limited.', true);
+  }
+  const retryable = normalized === 'UNKNOWN_ERROR'
+    || /^5\d\d$/.test(normalized)
+    || normalized.includes('INTERNAL')
+    || normalized.includes('TIMEOUT')
+    || normalized.includes('UNAVAILABLE');
+  return new ProviderError(
+    'PROVIDER_UNAVAILABLE',
+    `Vertex planning failed (${errorCode}).`,
+    retryable,
+    errorMessage ? { cause: new Error(errorMessage) } : undefined,
+  );
+}
+
 export class VertexAdkShotPlannerProvider implements ShotPlannerProvider {
   readonly id = 'vertex-adk';
   private readonly runAgent: AgentRunner;
@@ -122,12 +143,7 @@ export class VertexAdkShotPlannerProvider implements ShotPlannerProvider {
       abortSignal: signal,
     })) {
       if (event.errorCode) {
-        throw new ProviderError(
-          'PROVIDER_UNAVAILABLE',
-          `Vertex planning failed (${event.errorCode}).`,
-          event.errorCode === '429' || event.errorCode.toLocaleLowerCase().includes('unavailable'),
-          event.errorMessage ? { cause: new Error(event.errorMessage) } : undefined,
-        );
+        throw providerErrorFromAdkEvent(event.errorCode, event.errorMessage);
       }
       if (event.output !== undefined) structuredOutput = event.output;
       if (isFinalResponse(event)) finalText = stringifyContent(event);

@@ -88,7 +88,9 @@ export class FixtureStoryboardProvider implements StoryboardProvider {
   async generate(request: GenerateStoryboardRequest, signal: AbortSignal): Promise<StoryboardProviderResult> {
     if (signal.aborted) throw new ProviderError('CANCELLED', 'Storyboard generation was cancelled.');
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, 120);
+      // Keep the deterministic fixture visibly cancellable even when the local
+      // server and browser are running on a fast machine.
+      const timer = setTimeout(resolve, 350);
       signal.addEventListener('abort', () => {
         clearTimeout(timer);
         reject(new ProviderError('CANCELLED', 'Storyboard generation was cancelled.'));

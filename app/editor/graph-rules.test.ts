@@ -8,6 +8,7 @@ import {
   removeNodesAndConnections,
   tidyGraphPositions,
 } from './graph-rules';
+import { nodeRectangle, rectanglesOverlap } from './node-layout';
 import type { EditorEdge, EditorNode } from './types';
 
 function fixture() {
@@ -119,5 +120,39 @@ describe('graph integrity', () => {
     const document = fixture();
     document.nodes[1].hidden = true;
     expect(tidyGraphPositions(document.nodes, document.edges).has('scene-01')).toBe(false);
+  });
+
+  it('packs mixed-height siblings without overlap', () => {
+    const document = fixture();
+    document.nodes[1].style = { width: 250, height: 190 };
+    const sibling = structuredClone(document.nodes[1]);
+    sibling.id = 'scene-sibling';
+    sibling.style = { width: 250, height: 86 };
+    document.nodes.push(sibling);
+    document.edges.push(edge('story-sibling', 'story-premise', sibling.id));
+    const positions = tidyGraphPositions(document.nodes, document.edges);
+    const scene = { ...document.nodes[1], position: positions.get('scene-01')! };
+    const next = { ...sibling, position: positions.get(sibling.id)! };
+
+    expect(rectanglesOverlap(nodeRectangle(scene), nodeRectangle(next), 24)).toBe(false);
+  });
+
+  it('keeps locked nodes fixed and places movable siblings around them', () => {
+    const document = fixture();
+    const scene = document.nodes[1];
+    scene.data.locked = true;
+    scene.position = { x: 420, y: 90 };
+    scene.style = { width: 250, height: 180 };
+    const sibling = structuredClone(scene);
+    sibling.id = 'movable-sibling';
+    sibling.data.locked = false;
+    sibling.style = { width: 250, height: 90 };
+    document.nodes.push(sibling);
+    document.edges.push(edge('story-movable-sibling', 'story-premise', sibling.id));
+    const positions = tidyGraphPositions(document.nodes, document.edges);
+    const moved = { ...sibling, position: positions.get(sibling.id)! };
+
+    expect(positions.get(scene.id)).toEqual(scene.position);
+    expect(rectanglesOverlap(nodeRectangle(scene), nodeRectangle(moved), 24)).toBe(false);
   });
 });

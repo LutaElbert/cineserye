@@ -78,8 +78,10 @@ test('S3-A11Y-01 and S4-A11Y-01 expose the visual workflow without serious viola
   await page.getByRole('button', { name: '03 · The Impossible Film', exact: true }).click();
   await page.getByRole('tab', { name: 'Visuals' }).click();
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
+  await expect(panel.getByText('Prompt v1')).toBeVisible();
+  await panel.getByRole('button', { name: /approved refs?/ }).click();
   await expect(panel.getByLabel('Search reference deck')).toBeVisible();
-  await expect(panel.getByLabel('Variants')).toHaveValue('3');
+  await expect(panel.getByRole('button', { name: '3 storyboard variants' })).toHaveAttribute('aria-pressed', 'true');
   const results = await new AxeBuilder({ page })
     .include('.visual-preproduction')
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

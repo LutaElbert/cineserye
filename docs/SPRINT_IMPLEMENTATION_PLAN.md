@@ -2,32 +2,36 @@
 
 **Plan date:** 2026-09-01
 
+**Last reconciled:** 2026-09-02
+
 **Starting baseline:** `f315cf0209b474810d0faebe8e8c632980f53555`
 
 **Source documents:** [current-feature audit](FEATURE_AUDIT.md), [architecture guide](ARCHITECTURE.md), and [initial vertical-slice plan](IMPLEMENTATION_PLAN.md)
 
-**Scope:** seven remaining product sprints, from one-scene workflow closure through multi-scene microdrama planning
+**Scope:** a seven-sprint local product roadmap, from one-scene workflow closure through multi-scene microdrama planning
 
-**Execution status (2026-09-01):** Sprints 1–4 complete and verified. Gate B—the visual pre-production MVP—is the current product boundary. Sprints 5–7 remain intentionally unstarted.
+**Execution status (2026-09-02):** Sprints 1–4 are complete and verified. Gate B—the visual pre-production MVP—is the current product boundary. Post-Sprint-4 layout, live-provider resilience, and Visuals-workflow refinements are implemented and verified as closure work. Sprints 5–7 remain intentionally unstarted.
 
 | Sprint | Status | Acceptance evidence |
 | --- | --- | --- |
 | 1 — Trustworthy First Plan | Complete | Fixture/live planning boundary, cited proposal review, cost semantics, atomic accept/reject, and regression suite |
 | 2 — Revision and Recovery | Complete | Immutable revisions, restore-as-new, accepted-shot edits, pending-proposal recovery, cancellation, traces, and evaluation assets |
 | 3 — Rights-Aware Reference Deck | Complete | Explicit rights/use approval, upload/canvas/link origins, SHA-256 dedupe, shot/prompt usage, safe cleanup, media-inclusive backup/restore, policy and accessibility tests |
-| 4 — One-Shot Storyboard Frame | Complete | Offline fixture and opt-in Vertex adapter, accepted-plan/reference validation, 1–4 variants, spend caps, cancel/retry, immutable provenance, one approved anchor, reload/restore, and accessibility tests |
+| 4 — One-Shot Storyboard Frame | Complete | Offline fixture and opt-in Vertex adapter, accepted-plan/reference validation, 1–4 variants, spend caps, cancel/retry, immutable provenance, one approved anchor, reload/restore, dimension-aware canvas layout, workbench-first Visuals UI, and accessibility tests |
 | 5–7 | Not started | Outside the requested Sprint 4 stop point |
 
 ### Sprint 4 close evidence
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).
 - Static validation: TypeScript, ESLint, and the server/client provider-boundary check pass.
-- Unit/integration: **128 passed, 2 opt-in live tests skipped** across 28 files.
-- Browser regression: **154 passed, 2 skipped** across Chromium, Firefox, and WebKit, including accessibility and the 500-layer/800-connector stress case.
+- Unit/integration: **138 passed, 2 opt-in live tests skipped** across 29 files.
+- Focused browser closure: **33 passed** across Chromium, Firefox, and WebKit for visual pre-production and accessibility, plus a three-browser layout regression proving the five inspector tabs stay on one row. The sprint-close full-suite command remains mandatory before the closure commit.
 - Production build: complete, with the storyboard route included and no deployment performed.
 - Dependency audit: no high or critical findings at the configured high-severity gate; 13 moderate transitive findings remain in Google ADK/OpenTelemetry and `gaxios`/`uuid`. Their available full fix would introduce a breaking ADK downgrade, so it was not applied silently.
 - Provider safety: all automated and UI acceptance runs used the deterministic offline fixture. The opt-in live smoke test was intentionally not run, so no provider credits were spent.
 - WebKit portability: local binary media is stored as raw bytes and reconstructed as browser blobs, avoiding WebKit's direct-Blob IndexedDB limitation while preserving SHA-256 deduplication and portable backups.
+- Canvas layout: generated context and shot lanes use measured node dimensions, deterministic vertical packing, and explicit column gaps. Existing accepted fixed-height plans migrate on reload without moving the creator's Story or Scene anchors; generic Tidy also respects mixed heights and locked-node obstacles.
+- Visual workflow: the selected-shot Storyboard Workbench appears before a collapsed scene Reference Deck, variants are direct 1–4 controls, Model and Estimate remain readable at the 340px inspector width, and the confirmation/generation footer remains reachable. Browser measurement confirmed a single tab row and no control truncation.
 
 ## 1. Outcome and implementation posture
 
@@ -749,6 +753,7 @@ Make the accepted plan useful for a real solo pre-production workflow beyond the
 ### In scope
 
 - shot table and storyboard view;
+- optional directed storyboard alternatives—production-safe, emotion-first, visually experimental, and budget-conscious—without changing the one-shot approval boundary;
 - narrative order and production order;
 - camera/lighting/location setup groups;
 - continuity matrix and affected-shot analysis;
@@ -764,6 +769,13 @@ Make the accepted plan useful for a real solo pre-production workflow beyond the
 - Add table/board/canvas view switching without duplicating domain state.
 - Expose configurable columns for shot, beat, description, framing, angle, movement, lens, duration, audio, continuity, risk, cost, and status.
 - Route edits/reorder through Sprint 2 domain commands.
+
+#### S5-WP1A — Directed storyboard alternatives (optional, bounded)
+
+- Let the creator request explicit alternative intents such as production-safe, emotion-first, visually experimental, or budget-conscious rather than relying only on stochastic samples of one prompt.
+- Record the selected intent, prompt version, references, provider/model, and settings with every generated frame.
+- Preserve the current one-shot scope, 1–4 output cap, explicit confirmation, spend guard, and single approved anchor.
+- Do not add video generation, automatic approval, or an autonomous prompt loop.
 
 #### S5-WP2 — Production setups and order
 
@@ -795,6 +807,7 @@ Make the accepted plan useful for a real solo pre-production workflow beyond the
 - Narrative order remains stable when production order changes.
 - Continuity conflicts are visible before export.
 - Every export passes schema/content and visual layout verification.
+- When directed alternatives are enabled, every candidate exposes its declared intent and remains independently reviewable and unapproved.
 
 ### Sprint 5 test cases
 
@@ -804,6 +817,7 @@ Make the accepted plan useful for a real solo pre-production workflow beyond the
 | S5-UT-02 | Unit | Setup moves preserve every shot exactly once. |
 | S5-UT-03 | Unit | Continuity matrix detects missing and conflicting dependencies. |
 | S5-UT-04 | Unit | CSV/JSON/Markdown exports escape formulas, markup, and unsafe URLs. |
+| S5-UT-05 | Unit | Directed storyboard intents remain bounded, provenance-complete, and separate from approval state. |
 | S5-IT-01 | Integration | Batch table edits produce one undoable synchronized transaction. |
 | S5-IT-02 | Integration | All exports round-trip or validate against their documented contract. |
 | S5-E2E-01 | Browser | Switch among canvas, table, and board without losing selection or edits. |
@@ -1169,15 +1183,14 @@ Each sprint is complete only when:
 
 ## 18. Recommended immediate start
 
-Begin with Sprint 1 work package 1, then work package 5 before deeper UI expansion. That ordering delivers immediate discoverability while retiring the highest trust risk—fallback citations—early enough to prevent it from contaminating later revision and visual-reference data.
+Close the verified Sprint 4 working tree before beginning another product increment:
 
-The first implementation slice should therefore be:
+1. reconcile README, architecture, audit, privacy, evaluation, and sprint evidence;
+2. run the sprint-close full gate, including the complete three-browser suite and client-boundary scan;
+3. record the moderate transitive dependency findings without forcing a breaking ADK downgrade;
+4. optionally run one bounded live storyboard smoke only after explicitly reviewing credit spend and content transfer;
+5. commit and push the closure to `main` without deploying.
 
-```text
-canonical Generate shot plan language
-  + visible Fixture/Live mode
-  + mobile project-action access
-  + strict no-fallback citation relationships
-```
+Then begin **S5-WP1 — Shot table and board projection**. It delivers the highest-value professional surface while preserving the accepted cinema sidecar as the only source of truth. The optional directed-storyboard package may follow WP1, but it must not delay synchronized editing, production order, continuity review, and reliable handoff exports.
 
-After that slice passes its focused tests, implement first-run choice and Scene Brief V2.
+Sprints 6 and 7 remain gated. Do not begin video generation or multi-scene migration until Sprint 5 acceptance evidence is complete and the user explicitly approves the expanded scope.

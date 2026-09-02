@@ -1088,7 +1088,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .cinema-selection-summary strong { overflow: hidden; color: #30323a; font-size: 12px; line-height: 1.35; text-overflow: ellipsis; }
 .cinema-selection-summary small { color: var(--muted); font-size: 8px; }
 .demo-data-note { display: flex; align-items: center; gap: 7px; margin: 0 16px 11px; padding: 8px 9px; border: 1px solid #e5ddbb; border-radius: 9px; background: #fffbee; color: #7d6528; font-size: 8px; line-height: 1.4; }
-.inspector-tabs { display: grid; grid-template-columns: repeat(4, 1fr); padding-inline: 12px; border-block: 1px solid var(--line); background: #f8f8fa; }
+.inspector-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding-inline: 12px; border-block: 1px solid var(--line); background: #f8f8fa; }
 .inspector-tabs button { position: relative; min-block-size: 38px; padding: 0 3px; border: 0; border-block-end: 2px solid transparent; background: transparent; color: #797d86; font-size: 8px; font-weight: 680; cursor: pointer; }
 .inspector-tabs button[aria-selected='true'] { border-block-end-color: var(--accent); color: var(--accent); }
 .inspector-tabs button span { display: inline-grid; place-items: center; min-inline-size: 15px; min-block-size: 15px; margin-inline-start: 3px; border-radius: 999px; background: var(--accent-soft); font-size: 7px; }
@@ -1661,7 +1661,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .layers-panel, .inspector-panel, .react-flow__viewport, .react-flow__handle { transition: none !important; }
 }
 
-.visual-preproduction { display: grid; gap: 18px; padding-block-end: 28px; }
+.visual-preproduction { display: grid; gap: 18px; padding: 16px 16px 28px; }
 .reference-deck, .storyboard-workbench { display: grid; gap: 12px; }
 .reference-deck > header, .storyboard-workbench > header, .reference-card > header {
   display: flex;
@@ -1690,6 +1690,40 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   line-height: 1.45;
 }
 .visual-policy-note svg { flex: 0 0 auto; margin-block-start: 2px; }
+.reference-deck { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.reference-deck-toggle, .storyboard-reference-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-block-size: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #656a75;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reference-deck-toggle:hover, .storyboard-reference-button:hover { border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); color: var(--accent); }
+.reference-deck-toggle svg { transition: rotate 140ms ease; }
+.reference-deck-toggle[aria-expanded='true'] svg { rotate: 180deg; }
+.reference-manager { display: grid; gap: 12px; }
+.reference-policy {
+  padding: 8px 9px;
+  border: 1px solid #d8e9e2;
+  border-radius: 9px;
+  background: #f1faf6;
+  color: #26604d;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.reference-policy summary { display: flex; align-items: center; gap: 6px; font-weight: 700; cursor: pointer; list-style: none; }
+.reference-policy summary::-webkit-details-marker { display: none; }
+.reference-policy p { margin: 7px 0 0 19px; color: #467565; }
 .reference-tools { display: grid; grid-template-columns: minmax(0, 1fr) 112px; gap: 7px; }
 .reference-tools input, .reference-tools select, .reference-link-row input, .reference-fields select, .storyboard-settings select {
   min-inline-size: 0;
@@ -1706,7 +1740,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .reference-upload input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; pointer-events: none; }
 .canvas-reference-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
 .canvas-reference-row select { min-inline-size: 0; block-size: 34px; border: 1px solid var(--line); border-radius: 9px; background: #fff; padding-inline: 9px; font: inherit; font-size: 11px; }
-.reference-cleanup { justify-content: center; }
+.reference-cleanup { justify-self: center; padding: 3px 5px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 9px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.reference-cleanup:hover { color: var(--ink); }
 .reference-link-row { display: grid; grid-template-columns: .8fr 1.2fr auto; gap: 6px; }
 .reference-list { display: grid; gap: 9px; }
 .reference-card {
@@ -1727,14 +1762,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .reference-actions, .storyboard-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .reference-actions .secondary-button { min-block-size: 30px; padding-inline: 9px; font-size: 10px; }
 .visual-empty { margin: 0; padding: 16px 12px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); font-size: 11px; line-height: 1.5; text-align: center; }
-.storyboard-workbench { padding-block-start: 16px; border-block-start: 1px solid var(--line); }
+.storyboard-workbench { min-inline-size: 0; }
 .storyboard-prompt-summary { display: grid; gap: 6px; padding: 10px; border-radius: 10px; background: #f6f5ff; }
 .storyboard-prompt-summary span { color: var(--accent); font-size: 10px; font-weight: 750; text-transform: uppercase; }
 .storyboard-prompt-summary p { display: -webkit-box; overflow: hidden; margin: 0; color: #4d4d5b; font-size: 11px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
-.storyboard-settings { display: grid; grid-template-columns: .75fr 1.4fr 1.3fr; gap: 7px; }
+.storyboard-reference-guidance { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.storyboard-reference-guidance button { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
+.storyboard-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .storyboard-settings > div { display: grid; align-content: center; gap: 4px; min-inline-size: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; }
 .storyboard-settings strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.storyboard-variant-picker { grid-column: 1 / -1; }
+.storyboard-variant-picker > div { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.storyboard-variant-picker button { min-block-size: 27px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #60646e; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
+.storyboard-variant-picker button[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.storyboard-variant-picker button:disabled { cursor: not-allowed; opacity: .55; }
+.storyboard-generation-footer { position: sticky; inset-block-end: -1px; z-index: 4; display: grid; gap: 8px; margin-inline: -16px; padding: 10px 16px 12px; border-block-start: 1px solid var(--line); background: rgb(255 255 255 / 96%); box-shadow: 0 -8px 18px rgb(32 35 42 / 5%); backdrop-filter: blur(10px); }
 .storyboard-actions { justify-content: flex-end; }
+.storyboard-actions > small { margin-inline-end: auto; color: var(--muted); font-size: 9px; }
 .storyboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .storyboard-frame { overflow: hidden; display: grid; gap: 7px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
 .storyboard-frame.frame-approved { border-color: #62b696; box-shadow: 0 0 0 2px #dcf5e9; }
@@ -1746,5 +1790,5 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .storyboard-frame footer .secondary-button { justify-content: center; min-block-size: 29px; padding-inline: 6px; font-size: 9px; }
 
 @media (max-width: 720px) {
-  .reference-link-row, .reference-fields, .storyboard-settings { grid-template-columns: 1fr; }
+  .reference-link-row, .reference-fields { grid-template-columns: 1fr; }
 }

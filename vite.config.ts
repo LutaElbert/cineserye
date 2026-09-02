@@ -6,7 +6,7 @@ import { defineConfig } from 'vite';
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= 'false';
@@ -20,9 +20,11 @@ export default defineConfig(() => {
       : undefined,
     plugins: [
       vinext(),
-      cloudflare({
-        viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-      }),
+      ...(command === 'build'
+        ? [cloudflare({
+            viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
+          })]
+        : []),
     ],
   };
 });

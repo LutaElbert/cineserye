@@ -2,12 +2,12 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-The visual pre-production MVP is now implemented through Sprint 4: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references and generate one to four storyboard still variants for a selected accepted shot. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills use an environment-selected Vertex image model. Cineserye still contains no authentication, cloud project store, video generation, or deployment.
+The visual pre-production MVP is now implemented through Sprint 4: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references and generate one to four storyboard still variants for a selected accepted shot. Generated plans use dimension-aware, non-overlapping context and shot lanes, and the selected-shot Visuals tab prioritizes prompt review and generation while keeping the scene Reference Deck available on demand. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills use an environment-selected Vertex image model. Cineserye still contains no authentication, cloud project store, video generation, or deployment.
 
 ## Foundation
 
 - React Flow canvas with selection, pan, zoom, minimap, connectors, drag, resize, ordering, visibility, and locking.
-- Rich concept titles and notes, raster images, editable vector layers, automatic layout, and branch workflows.
+- Rich concept titles and notes, raster images, editable vector layers, measured dimension-aware layout, locked-node-aware Tidy, and branch workflows.
 - Undo/redo, IndexedDB autosave, local checkpoints, strict restore validation, portable `.cineserye` backups, and editable SVG export.
 - Keyboard workflows, reduced-motion support, responsive panels, accessible labels, and automated accessibility checks.
 - Unit, browser, compatibility, type, lint, build, and dependency-audit gates.
@@ -20,7 +20,7 @@ The visual pre-production MVP is now implemented through Sprint 4: one selected 
 - A guarded empty-canvas state with same-session undo, a persisted last-non-empty recovery copy, clean scene bootstrap, backup restore, and an explicit sample choice.
 - A scene-level Reference Deck for validated local uploads, existing canvas images, and non-fetched external inspiration links, with explicit provenance, rights, allowed-use, approval, pinning, search, filtering, and shot usage.
 - Content-addressed local media storage with SHA-256 deduplication, safe orphan cleanup, and version-6 `.cineserye` backups that embed and verify required media.
-- A one-shot Storyboard Workbench with an offline fixture, an opt-in Vertex adapter, explicit preflight confirmation, server output/spend caps, cancellation, three-variant review, exact provenance, and one approved shot anchor.
+- A workbench-first one-shot Storyboard experience with direct 1–4 variant controls, a collapsible scene Reference Deck, an offline fixture, an opt-in Vertex adapter, explicit preflight confirmation, server output/spend caps, cancellation, exact provenance, and one approved shot anchor.
 
 The initial story canvas is a linear fixture:
 
@@ -47,10 +47,10 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 
 ## Visual pre-production walkthrough
 
-1. Select an accepted scene or shot and open **Visuals**.
-2. Upload a PNG/JPEG/WebP image, attach an existing raster canvas layer, or add an HTTPS inspiration link. External links are never fetched automatically.
+1. Select an accepted shot and open **Visuals**. The Storyboard Workbench appears first with the inherited prompt, approved-reference count, direct 1–4 variant controls, model, and estimate.
+2. If visual continuity is needed, choose **Manage references** to expand the scene Reference Deck. Upload a PNG/JPEG/WebP image, attach an existing raster canvas layer, or add an HTTPS inspiration link. External links are never fetched automatically.
 3. Categorize the reference, confirm its rights, enable image-generation use where permitted, approve it, and attach it to the selected shot. Inspiration-only items remain visible but are excluded from provider payloads.
-4. Review the inherited storyboard prompt, output count, model profile, approved references, and estimate. Changing the output count clears the confirmation.
+4. Recheck the prompt, approved references, output count, model profile, and estimate. Changing the output count clears the confirmation.
 5. Confirm and generate one to four still variants. Fixture mode is offline and costs $0; live mode requires server-side pricing and a maximum estimated-spend setting before it can run.
 6. Compare, reject, regenerate, or approve one frame as the shot anchor. The accepted shot and plan revision remain unchanged.
 7. Download a `.cineserye` backup to carry the validated media and provenance to another browser profile.

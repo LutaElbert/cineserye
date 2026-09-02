@@ -7,6 +7,8 @@ import { prepareCinemaPlanProposal } from '../../editor/cinema-plan-proposal';
 import { ParallelResearchProvider } from './parallel-research-provider';
 import { compileCinemaCanvasProposal } from './proposal-compiler';
 import type { ResearchProviderResult, ShotPlannerProviderRequest } from './provider-contracts';
+import { ProviderError } from './provider-errors';
+import { runProviderOperation } from './provider-resilience';
 import { VertexAdkShotPlannerProvider } from './vertex-adk-shot-planner';
 
 const sceneBrief: ScenePlanningBrief = {
@@ -146,7 +148,25 @@ describe('ParallelResearchProvider', () => {
     const [, init] = vi.mocked(fetchMock).mock.calls[0];
     expect(new Headers(init?.headers).get('x-api-key')).toBe('server-secret');
     const body = JSON.parse(String(init?.body));
-    expect(body.search_queries).toHaveLength(4);
+    expect(body.search_queries).toHaveLength(3);
+    expect(body.search_queries).toEqual([
+      'Contemporary Manila jeepney production design',
+      'Intimate speculative suspense cinematography lighting',
+      '9x16 short-form shot composition',
+    ]);
+    expect(body.search_queries.every((query: string) => query.length <= 200)).toBe(true);
+    expect(body.search_queries.every((query: string) => {
+      const wordCount = query.trim().split(/\s+/).length;
+      return wordCount >= 3 && wordCount <= 6;
+    })).toBe(true);
+    expect(body).toMatchObject({
+      mode: 'basic',
+      max_chars_total: 16_000,
+      session_id: 'cineserye_run-1',
+      advanced_settings: { max_results: 8 },
+    });
+    expect(body).not.toHaveProperty('max_results');
+    expect(body.objective).toContain(sceneBrief.sceneText);
     expect(JSON.stringify(result)).not.toContain('server-secret');
   });
 
@@ -156,6 +176,31 @@ describe('ParallelResearchProvider', () => {
     await expect(provider.research({
       runId: 'run-1', brief: sceneBrief, signal: new AbortController().signal,
     })).rejects.toMatchObject({ code: 'RATE_LIMITED', retryable: true });
+  });
+
+  it('reports provider request validation failures without retrying them', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      type: 'error', error: { message: 'Request validation error' },
+    }), { status: 422 })) as unknown as typeof fetch;
+    const provider = new ParallelResearchProvider('server-secret', fetchMock);
+    const controller = new AbortController();
+    await expect(runProviderOperation(
+      (signal) => provider.research({ runId: 'run-1', brief: sceneBrief, signal }),
+      { signal: controller.signal, timeoutMs: 1_000, maxAttempts: 2 },
+    )).rejects.toMatchObject({
+      code: 'UNEXPECTED_RESPONSE',
+      message: 'Parallel rejected the research request (HTTP 422).',
+      retryable: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps transient Parallel server failures retryable', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 503 })) as unknown as typeof fetch;
+    const provider = new ParallelResearchProvider('server-secret', fetchMock);
+    await expect(provider.research({
+      runId: 'run-1', brief: sceneBrief, signal: new AbortController().signal,
+    })).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE', retryable: true });
   });
 });
 
@@ -222,5 +267,42 @@ describe('VertexAdkShotPlannerProvider', () => {
     expect(result.cinema.prompts['prompt-cine-character-01-reference'].researchSourceIds).toEqual([]);
     expect(result.cinema.prompts['prompt-cine-asset-01-reference'].researchSourceIds).toEqual([]);
     expect(result.cinema.prompts['prompt-cine-shot-01-storyboard'].researchSourceIds).toEqual([]);
+  });
+
+  it('allows the resilience boundary to retry a transient ADK provider event once', async () => {
+    const runAgent = vi.fn()
+      .mockRejectedValueOnce(new ProviderError(
+        'PROVIDER_UNAVAILABLE',
+        'Vertex planning failed (UNKNOWN_ERROR).',
+        true,
+      ))
+      .mockResolvedValueOnce(generatedPlan());
+    const provider = new VertexAdkShotPlannerProvider(
+      'cineserye', 'global', 'gemini-3.7-flash', runAgent,
+    );
+    const controller = new AbortController();
+    const result = await runProviderOperation(
+      (signal) => provider.plan({ ...request, signal }),
+      { signal: controller.signal, timeoutMs: 1_000, maxAttempts: 2 },
+    );
+    expect(runAgent).toHaveBeenCalledTimes(2);
+    expect(Object.keys(result.cinema.shots)).toHaveLength(3);
+  });
+
+  it('does not retry a terminal ADK provider event', async () => {
+    const runAgent = vi.fn().mockRejectedValue(new ProviderError(
+      'PROVIDER_UNAVAILABLE',
+      'Vertex planning failed (SAFETY).',
+      false,
+    ));
+    const provider = new VertexAdkShotPlannerProvider(
+      'cineserye', 'global', 'gemini-3.7-flash', runAgent,
+    );
+    const controller = new AbortController();
+    await expect(runProviderOperation(
+      (signal) => provider.plan({ ...request, signal }),
+      { signal: controller.signal, timeoutMs: 1_000, maxAttempts: 2 },
+    )).rejects.toMatchObject({ retryable: false });
+    expect(runAgent).toHaveBeenCalledTimes(1);
   });
 });

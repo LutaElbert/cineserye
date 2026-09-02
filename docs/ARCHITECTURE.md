@@ -30,7 +30,7 @@ accepted shot + approved local references
 
 ## Generic editor foundation
 
-`app/editor` owns selection, viewport behavior, drag, resize, connections, ordering, undo/redo, graph integrity, IndexedDB persistence, checkpoints, backup/restore, SVG export, keyboard support, responsive panels, accessibility, and security limits.
+`app/editor` owns selection, viewport behavior, drag, resize, connections, ordering, undo/redo, graph integrity, IndexedDB persistence, checkpoints, backup/restore, SVG export, keyboard support, responsive panels, accessibility, and security limits. `node-layout.ts` exposes provider-neutral node rectangles and lane packing, while `graph-rules.ts` uses measured dimensions and locked nodes as collision obstacles for deterministic Tidy. Cinema proposal layout consumes those generic primitives without teaching the editor what a shot or character means.
 
 Provider prompts, credentials, model SDKs, research logic, and cinema business rules do not belong in this layer. Generic canvas fixes should remain reusable independently of Cineserye's product decisions.
 
@@ -77,6 +77,10 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 
 `app/server/cinema/storyboard-provider.ts` defines the still-image provider contract. The fixture emits deterministic safe SVG storyboards without networking. The opt-in Vertex adapter defaults to the current recommended `gemini-2.5-flash-image` model but remains environment-selectable. The route validates accepted-plan intent, prompt purpose, approved reference payloads, output count, safety, response dimensions, provider provenance, current unit pricing, and maximum estimated spend before returning pixels. The browser validates raster signatures again before local storage.
 
+`app/editor/cinema-plan-proposal.ts` projects accepted cinema records into two dimension-aware generated lanes: context records and chronological shots. It estimates safe initial heights, refines them from rendered DOM measurements, persists the refined proposal on acceptance, and migrates legacy fixed-height accepted plans on reload. Story and Scene anchors remain creator-owned and are not repositioned by this migration.
+
+`app/features/storyboard/VisualPreproductionPanel.tsx` is a projection over the visual-pre-production sidecar, not another source of truth. The selected-shot workbench appears first; the scene Reference Deck is collapsed until requested; changing the 1–4 output selection invalidates confirmation; and reference, frame, and plan approvals remain separate domain operations.
+
 Portable backup version 6 embeds only media hashes referenced by the current project. Restore verifies size and SHA-256 before writing any blob, never fetches external inspiration links, and remains compatible with text-only backup versions 1–5.
 
 ## Review and persistence sequence
@@ -106,4 +110,4 @@ The browser retains at most 50 content-free run traces in the local `agent-trace
 - automatic proposal acceptance or background autonomy;
 - A2A exposure, deployment, or provisioned observability infrastructure.
 
-The next implementation phase is Sprint 5 professional planning and handoff. Video generation remains intentionally outside the current boundary.
+The next implementation phase is Sprint 5 professional planning and handoff, beginning with synchronized Shot Table and Board projections. Directed storyboard intents are an optional bounded Sprint 5 extension; they do not change the current one-shot or approval boundaries. Video generation remains intentionally outside the current boundary.

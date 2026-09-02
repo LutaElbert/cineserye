@@ -1,6 +1,6 @@
 'use client';
 
-import { Check, ImagePlus, Link2, LoaderCircle, Pin, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, ImagePlus, Link2, LoaderCircle, Pin, ShieldCheck, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CinemaProjectData, CinemaShotRecord } from '../../domain/cinema/project-data';
 import {
@@ -76,6 +76,7 @@ export function VisualPreproductionPanel({
   const [outputCount, setOutputCount] = useState(3);
   const [confirmed, setConfirmed] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [referencesOpen, setReferencesOpen] = useState(false);
   const [frameUrls, setFrameUrls] = useState<Record<string, string>>({});
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -92,6 +93,12 @@ export function VisualPreproductionPanel({
   const shotFrames = useMemo(() => shot ? Object.values(visual.storyboardFrames)
     .filter((frame) => frame.shotId === shot.id)
     .sort((left, right) => left.variantIndex - right.variantIndex) : [], [shot, visual.storyboardFrames]);
+  const referenceManagerOpen = !shot || referencesOpen;
+
+  const chooseOutputCount = (count: number) => {
+    setOutputCount(count);
+    setConfirmed(false);
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -381,68 +388,37 @@ export function VisualPreproductionPanel({
 
   return (
     <div className="visual-preproduction">
-      <section className="reference-deck" aria-labelledby="reference-deck-title">
-        <header><div><span>Reference deck</span><strong id="reference-deck-title">Scene visual continuity</strong></div><small>{references.length} shown</small></header>
-        <p className="visual-policy-note"><ShieldCheck size={13} /> Uploads stay on this device. Nothing is generation-approved until you confirm rights, permitted use, and approval.</p>
-        <div className="reference-tools">
-          <input aria-label="Search reference deck" placeholder="Search references" value={search} onChange={(event) => setSearch(event.target.value)} />
-          <select aria-label="Filter reference type" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
-            <option value="all">All types</option><option value="character">Character</option><option value="location">Location</option><option value="prop">Prop</option><option value="wardrobe">Wardrobe</option><option value="style">Style</option><option value="composition">Composition</option><option value="other">Other</option>
-          </select>
-        </div>
-        <label className="reference-upload secondary-button">
-          {uploading ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} Upload reference
-          <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void uploadReference(file);
-            event.target.value = '';
-          }} />
-        </label>
-        {canvasImages.length ? <div className="canvas-reference-row">
-          <select aria-label="Canvas image to attach" value={canvasImageId} onChange={(event) => setCanvasImageId(event.target.value)}>
-            <option value="">Choose a canvas image…</option>
-            {canvasImages.map((image) => <option key={image.nodeId} value={image.nodeId}>{image.name}</option>)}
-          </select>
-          <button type="button" className="secondary-button" disabled={!canvasImageId || uploading} onClick={() => void addCanvasImage()}>Attach canvas image</button>
-        </div> : null}
-        <div className="reference-link-row">
-          <input aria-label="Reference link title" placeholder="Link title" value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} />
-          <input aria-label="HTTPS inspiration link" placeholder="https://…" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} />
-          <button type="button" className="secondary-button" onClick={addLink} disabled={!linkUrl.trim()}><Link2 size={13} /> Add link</button>
-        </div>
-        {references.length ? <div className="reference-list">{references.map((reference) => {
-          const eligible = isReferenceEligibleForImageGeneration(reference);
-          const attached = Boolean(shot?.id && reference.shotIds.includes(shot.id));
-          return <article key={reference.id} className={`reference-card ${eligible ? 'reference-eligible' : ''}`}>
-            <header><div><span>{reference.type} · {reference.origin.replace('-', ' ')}</span><strong>{reference.title}</strong></div><button type="button" className="icon-button" aria-label={`${reference.pinned ? 'Unpin' : 'Pin'} ${reference.title}`} onClick={() => setReference(reference.id, { pinned: !reference.pinned })}><Pin size={13} fill={reference.pinned ? 'currentColor' : 'none'} /></button></header>
-            <small>{formatBytes(reference.byteSize)} · {reference.approvalStatus} · {eligible ? 'Image generation ready' : 'Inspiration only'} · Attached to {reference.shotIds.length} {reference.shotIds.length === 1 ? 'shot' : 'shots'}</small>
-            <div className="reference-fields">
-              <label><span>Type</span><select value={reference.type} onChange={(event) => setReference(reference.id, { type: event.target.value as CinemaReferenceType })}><option value="character">Character</option><option value="location">Location</option><option value="prop">Prop</option><option value="wardrobe">Wardrobe</option><option value="style">Style</option><option value="composition">Composition</option><option value="other">Other</option></select></label>
-              <label><span>Rights</span><select value={reference.rightsStatus} onChange={(event) => setReference(reference.id, { rightsStatus: event.target.value as CinemaReferenceRight, approvalStatus: 'pending' })}><option value="unknown">Unknown</option><option value="creator-owned">Creator owned</option><option value="licensed">Licensed</option><option value="public-domain">Public domain</option></select></label>
-            </div>
-            <label className="reference-check"><input type="checkbox" checked={reference.allowedUses.includes('image-generation')} disabled={!reference.blobHash || reference.rightsStatus === 'unknown'} onChange={(event) => setReference(reference.id, { allowedUses: (event.target.checked ? [...new Set([...reference.allowedUses, 'image-generation' as CinemaReferenceUse])] : reference.allowedUses.filter((use) => use !== 'image-generation')), approvalStatus: 'pending' })} /> Allow for image generation</label>
-            <div className="reference-actions">
-              <button type="button" className="secondary-button" disabled={reference.rightsStatus === 'unknown' || !reference.allowedUses.includes('image-generation')} onClick={() => setReference(reference.id, { approvalStatus: reference.approvalStatus === 'approved' ? 'revoked' : 'approved' })}>{reference.approvalStatus === 'approved' ? <><X size={12} /> Revoke</> : <><Check size={12} /> Approve</>}</button>
-              {shot ? <button type="button" className="secondary-button" onClick={() => setReference(reference.id, { shotIds: attached ? reference.shotIds.filter((id) => id !== shot.id) : [...reference.shotIds, shot.id] })}>{attached ? 'Detach from shot' : 'Attach to shot'}</button> : null}
-              <button type="button" className="icon-button" aria-label={`Delete ${reference.title}`} onClick={() => { try { onUpdate((current) => removeCinemaReference(current, reference.id)); } catch (error) { onNotice(error instanceof Error ? error.message : 'The reference could not be deleted.', 'error'); } }}><Trash2 size={13} /></button>
-            </div>
-          </article>;
-        })}</div> : <p className="visual-empty">Upload an owned image or save an inspiration link. External links remain research-only.</p>}
-        <button type="button" className="secondary-button reference-cleanup" onClick={() => void onCleanupMedia()}>Clean unused local media</button>
-      </section>
-
       {shot ? <section className="storyboard-workbench" aria-labelledby="storyboard-workbench-title">
-        <header><div><span>Storyboard workbench</span><strong id="storyboard-workbench-title">{shot.title}</strong></div><small>{eligibleReferences.length} approved refs</small></header>
+        <header>
+          <div><span>Storyboard workbench</span><strong id="storyboard-workbench-title">{shot.title}</strong></div>
+          <button
+            type="button"
+            className="storyboard-reference-button"
+            aria-expanded={referenceManagerOpen}
+            aria-controls="scene-reference-manager"
+            onClick={() => setReferencesOpen((current) => !current)}
+          >
+            {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'ref' : 'refs'}
+          </button>
+        </header>
         {!accepted || !cinema.activeRevisionId ? <p className="visual-empty">Accept the shot-plan proposal before generating storyboard frames.</p> : !storyboardPrompt ? <p className="visual-empty">This shot has no storyboard prompt.</p> : <>
           <div className="storyboard-prompt-summary"><span>Prompt v{storyboardPrompt.version}</span><p>{storyboardPrompt.generatedText}</p></div>
+          {!eligibleReferences.length ? <p className="storyboard-reference-guidance">No approved references. You can generate from the prompt alone, but character and prop consistency may vary. <button type="button" aria-expanded={referenceManagerOpen} aria-controls="scene-reference-manager" onClick={() => setReferencesOpen(true)}>Manage references</button></p> : null}
           {shotReferences.some((reference) => !isReferenceEligibleForImageGeneration(reference)) ? <p className="visual-policy-note">Inspiration-only references are excluded automatically. Approve rights and image use to include them.</p> : null}
           <div className="storyboard-settings">
-            <label><span>Variants</span><select value={outputCount} disabled={generating} onChange={(event) => { setOutputCount(Number(event.target.value)); setConfirmed(false); }}><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
-            <div><span>Model</span><strong>{providerMode === 'live' ? 'Vertex · env selected' : 'Offline fixture'}</strong></div>
-            <div><span>Estimate</span><strong>{providerMode === 'live' ? 'Shown after configured pricing' : '$0.00 fixture'}</strong></div>
+            <div className="storyboard-variant-picker">
+              <span>Variants</span>
+              <div role="group" aria-label="Storyboard variants">
+                {[1, 2, 3, 4].map((count) => <button key={count} type="button" aria-pressed={outputCount === count} aria-label={`${count} storyboard ${count === 1 ? 'variant' : 'variants'}`} disabled={generating} onClick={() => chooseOutputCount(count)}>{count}</button>)}
+              </div>
+            </div>
+            <div><span>Image model</span><strong>{providerMode === 'live' ? 'Vertex AI' : 'Offline fixture'}</strong></div>
+            <div><span>Estimate</span><strong>{providerMode === 'live' ? 'After generation' : '$0.00 fixture'}</strong></div>
           </div>
-          <label className="storyboard-consent"><input type="checkbox" checked={confirmed} disabled={generating} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm this prompt, {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'reference' : 'references'}, and {outputCount} {outputCount === 1 ? 'output' : 'outputs'}.</label>
-          <div className="storyboard-actions">{generating ? <button type="button" className="secondary-button" onClick={() => controllerRef.current?.abort()}><X size={13} /> Cancel</button> : null}<button type="button" className="primary-button" disabled={!confirmed || generating} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} {generating ? 'Generating…' : shotFrames.length ? 'Regenerate variants' : 'Generate storyboard'}</button></div>
+          <div className="storyboard-generation-footer">
+            <label className="storyboard-consent"><input type="checkbox" checked={confirmed} disabled={generating} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm this prompt, {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'reference' : 'references'}, and {outputCount} {outputCount === 1 ? 'output' : 'outputs'}.</label>
+            <div className="storyboard-actions"><small>{outputCount} {outputCount === 1 ? 'image' : 'images'} · {providerMode === 'live' ? 'cost recorded after generation' : '$0.00 fixture'}</small>{generating ? <button type="button" className="secondary-button" onClick={() => controllerRef.current?.abort()}><X size={13} /> Cancel</button> : null}<button type="button" className="primary-button" disabled={!confirmed || generating} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} {generating ? 'Generating…' : shotFrames.length ? 'Regenerate variants' : 'Generate storyboard'}</button></div>
+          </div>
         </>}
         {shotFrames.length ? <div className="storyboard-grid" aria-label="Storyboard variants">{shotFrames.map((frame) => <article key={frame.id} className={`storyboard-frame frame-${frame.status}`}>
           {/* Local object URLs are intentionally not sent through an image optimizer. */}
@@ -452,6 +428,63 @@ export function VisualPreproductionPanel({
           <footer><button type="button" className="secondary-button" disabled={frame.status === 'approved'} onClick={() => onUpdate((current) => approveStoryboardFrame(current, frame.id))}><Check size={12} /> {frame.status === 'approved' ? 'Approved anchor' : 'Approve'}</button><button type="button" className="icon-button" aria-label={`Reject storyboard variant ${frame.variantIndex + 1}`} onClick={() => onUpdate((current) => rejectStoryboardFrame(current, frame.id))}><X size={13} /></button></footer>
         </article>)}</div> : null}
       </section> : null}
+
+      <section className={`reference-deck ${referenceManagerOpen ? 'reference-deck-open' : ''}`} aria-labelledby="reference-deck-title">
+        <header>
+          <div><span>Reference deck</span><strong id="reference-deck-title">Scene visual continuity</strong></div>
+          {shot ? <button type="button" className="reference-deck-toggle" aria-expanded={referenceManagerOpen} aria-controls="scene-reference-manager" onClick={() => setReferencesOpen((current) => !current)}>
+            <span>{references.length} {references.length === 1 ? 'reference' : 'references'}</span><ChevronDown size={14} aria-hidden="true" />
+          </button> : <small>{references.length} {references.length === 1 ? 'reference' : 'references'}</small>}
+        </header>
+        {referenceManagerOpen ? <div id="scene-reference-manager" className="reference-manager">
+          <details className="reference-policy"><summary><ShieldCheck size={13} /> Local uploads require rights approval</summary><p>Uploads stay on this device. Nothing is generation-approved until you confirm rights, permitted use, and approval.</p></details>
+          <div className="reference-tools">
+            <input aria-label="Search reference deck" placeholder="Search references" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <select aria-label="Filter reference type" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
+              <option value="all">All types</option><option value="character">Character</option><option value="location">Location</option><option value="prop">Prop</option><option value="wardrobe">Wardrobe</option><option value="style">Style</option><option value="composition">Composition</option><option value="other">Other</option>
+            </select>
+          </div>
+          <label className="reference-upload secondary-button">
+            {uploading ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} Upload reference
+            <input type="file" accept="image/png,image/jpeg,image/webp" disabled={uploading} onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadReference(file);
+              event.target.value = '';
+            }} />
+          </label>
+          {canvasImages.length ? <div className="canvas-reference-row">
+            <select aria-label="Canvas image to attach" value={canvasImageId} onChange={(event) => setCanvasImageId(event.target.value)}>
+              <option value="">Choose a canvas image…</option>
+              {canvasImages.map((image) => <option key={image.nodeId} value={image.nodeId}>{image.name}</option>)}
+            </select>
+            <button type="button" className="secondary-button" disabled={!canvasImageId || uploading} onClick={() => void addCanvasImage()}>Attach canvas image</button>
+          </div> : null}
+          <div className="reference-link-row">
+            <input aria-label="Reference link title" placeholder="Link title" value={linkTitle} onChange={(event) => setLinkTitle(event.target.value)} />
+            <input aria-label="HTTPS inspiration link" placeholder="https://…" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} />
+            <button type="button" className="secondary-button" onClick={addLink} disabled={!linkUrl.trim()}><Link2 size={13} /> Add link</button>
+          </div>
+          {references.length ? <div className="reference-list">{references.map((reference) => {
+            const eligible = isReferenceEligibleForImageGeneration(reference);
+            const attached = Boolean(shot?.id && reference.shotIds.includes(shot.id));
+            return <article key={reference.id} className={`reference-card ${eligible ? 'reference-eligible' : ''}`}>
+              <header><div><span>{reference.type} · {reference.origin.replace('-', ' ')}</span><strong>{reference.title}</strong></div><button type="button" className="icon-button" aria-label={`${reference.pinned ? 'Unpin' : 'Pin'} ${reference.title}`} onClick={() => setReference(reference.id, { pinned: !reference.pinned })}><Pin size={13} fill={reference.pinned ? 'currentColor' : 'none'} /></button></header>
+              <small>{formatBytes(reference.byteSize)} · {reference.approvalStatus} · {eligible ? 'Image generation ready' : 'Inspiration only'} · Attached to {reference.shotIds.length} {reference.shotIds.length === 1 ? 'shot' : 'shots'}</small>
+              <div className="reference-fields">
+                <label><span>Type</span><select value={reference.type} onChange={(event) => setReference(reference.id, { type: event.target.value as CinemaReferenceType })}><option value="character">Character</option><option value="location">Location</option><option value="prop">Prop</option><option value="wardrobe">Wardrobe</option><option value="style">Style</option><option value="composition">Composition</option><option value="other">Other</option></select></label>
+                <label><span>Rights</span><select value={reference.rightsStatus} onChange={(event) => setReference(reference.id, { rightsStatus: event.target.value as CinemaReferenceRight, approvalStatus: 'pending' })}><option value="unknown">Unknown</option><option value="creator-owned">Creator owned</option><option value="licensed">Licensed</option><option value="public-domain">Public domain</option></select></label>
+              </div>
+              <label className="reference-check"><input type="checkbox" checked={reference.allowedUses.includes('image-generation')} disabled={!reference.blobHash || reference.rightsStatus === 'unknown'} onChange={(event) => setReference(reference.id, { allowedUses: (event.target.checked ? [...new Set([...reference.allowedUses, 'image-generation' as CinemaReferenceUse])] : reference.allowedUses.filter((use) => use !== 'image-generation')), approvalStatus: 'pending' })} /> Allow for image generation</label>
+              <div className="reference-actions">
+                <button type="button" className="secondary-button" disabled={reference.rightsStatus === 'unknown' || !reference.allowedUses.includes('image-generation')} onClick={() => setReference(reference.id, { approvalStatus: reference.approvalStatus === 'approved' ? 'revoked' : 'approved' })}>{reference.approvalStatus === 'approved' ? <><X size={12} /> Revoke</> : <><Check size={12} /> Approve</>}</button>
+                {shot ? <button type="button" className="secondary-button" onClick={() => setReference(reference.id, { shotIds: attached ? reference.shotIds.filter((id) => id !== shot.id) : [...reference.shotIds, shot.id] })}>{attached ? 'Detach from shot' : 'Attach to shot'}</button> : null}
+                <button type="button" className="icon-button" aria-label={`Delete ${reference.title}`} onClick={() => { try { onUpdate((current) => removeCinemaReference(current, reference.id)); } catch (error) { onNotice(error instanceof Error ? error.message : 'The reference could not be deleted.', 'error'); } }}><Trash2 size={13} /></button>
+              </div>
+            </article>;
+          })}</div> : <p className="visual-empty reference-empty">Upload an owned image or save an inspiration link. External links remain research-only.</p>}
+          <button type="button" className="reference-cleanup" onClick={() => void onCleanupMedia()}>Clean unused local media</button>
+        </div> : null}
+      </section>
     </div>
   );
 }

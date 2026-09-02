@@ -11,6 +11,29 @@ async function openAcceptedSample(page: import('@playwright/test').Page) {
   await page.getByRole('tab', { name: 'Visuals' }).click();
 }
 
+async function openReferenceManager(panel: import('@playwright/test').Locator) {
+  const manager = panel.locator('#scene-reference-manager');
+  if (!await manager.isVisible()) await panel.getByRole('button', { name: /approved refs?/ }).click();
+  await expect(manager).toBeVisible();
+}
+
+test('S4-UX-01 prioritizes the shot workbench, collapses reference management, and keeps five tabs on one row', async ({ page }) => {
+  await openAcceptedSample(page);
+  const panel = page.getByRole('tabpanel', { name: 'Visuals' });
+  await expect(panel.getByText('The Impossible Film', { exact: true })).toBeVisible();
+  await expect(panel.getByText('Prompt v1')).toBeVisible();
+  await expect(panel.locator('#scene-reference-manager')).toBeHidden();
+  await expect(panel.getByRole('button', { name: '3 storyboard variants' })).toHaveAttribute('aria-pressed', 'true');
+
+  const tabTops = await page.locator('.inspector-tabs').getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().top)));
+  expect(new Set(tabTops).size).toBe(1);
+
+  await panel.getByRole('button', { name: /approved refs?/ }).click();
+  await expect(panel.locator('#scene-reference-manager')).toBeVisible();
+  await panel.getByRole('button', { name: /^\d+ references?$/ }).click();
+  await expect(panel.locator('#scene-reference-manager')).toBeHidden();
+});
+
 test('S3-E2E-01 creates a rights-aware reference deck and inherits shot attachments', async ({ page, baseURL }) => {
   const externalRequests: string[] = [];
   const appOrigin = new URL(baseURL ?? page.url()).origin;
@@ -19,6 +42,7 @@ test('S3-E2E-01 creates a rights-aware reference deck and inherits shot attachme
   });
   await openAcceptedSample(page);
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
+  await openReferenceManager(panel);
   await panel.getByLabel('Reference link title').fill('Silent-era composition study');
   await panel.getByLabel('HTTPS inspiration link').fill('https://example.com/inspiration');
   await panel.getByRole('button', { name: 'Add link' }).click();
@@ -38,6 +62,7 @@ test('S3-E2E-02 and S4-E2E-01 upload an approved reference and create three revi
   });
   await openAcceptedSample(page);
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
+  await openReferenceManager(panel);
   await panel.locator('.reference-upload input').setInputFiles({
     name: 'mara-owned-reference.png',
     mimeType: 'image/png',
@@ -66,10 +91,10 @@ test('S3-E2E-02 and S4-E2E-01 upload an approved reference and create three revi
   await reference.getByRole('checkbox', { name: 'Allow for image generation' }).check();
   await reference.getByRole('button', { name: 'Approve' }).click();
   await reference.getByRole('button', { name: 'Attach to shot' }).click();
-  await expect(panel).toContainText('1 approved refs');
+  await expect(panel).toContainText('1 approved ref');
   await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
-  await expect(panel.locator('.storyboard-frame')).toHaveCount(3);
+  await expect(panel.locator('.storyboard-frame')).toHaveCount(3, { timeout: 10_000 });
   await expect(panel).toContainText('fixture-cinematic-board-v1');
   await panel.locator('.storyboard-frame').nth(1).getByRole('button', { name: 'Approve' }).click();
   await expect(panel.locator('.storyboard-frame').nth(1)).toContainText('Approved anchor');
@@ -83,7 +108,7 @@ test('S3-E2E-03 and S4-E2E-02 restore the approved anchor and portable local pix
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
   await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
-  await expect(panel.locator('.storyboard-frame')).toHaveCount(3);
+  await expect(panel.locator('.storyboard-frame')).toHaveCount(3, { timeout: 10_000 });
   await panel.locator('.storyboard-frame').first().getByRole('button', { name: 'Approve' }).click();
   await waitForSaved(page);
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
@@ -113,10 +138,10 @@ test('S4-E2E-03 cancels cleanly and permits an explicit retry', async ({ page })
   await openAcceptedSample(page);
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
   await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
-  await panel.getByLabel('Variants').selectOption('4');
+  await panel.getByRole('button', { name: '4 storyboard variants' }).click();
   await expect(panel.getByRole('checkbox', { name: /I confirm this prompt/ })).not.toBeChecked();
   await expect(panel.getByRole('button', { name: 'Generate storyboard' })).toBeDisabled();
-  await panel.getByLabel('Variants').selectOption('3');
+  await panel.getByRole('button', { name: '3 storyboard variants' }).click();
   await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
   await panel.getByRole('button', { name: 'Cancel' }).click();

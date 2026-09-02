@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { relativeConceptLayout } from './node-layout';
+import {
+  nodeRectangle,
+  rectanglesOverlap,
+  relativeConceptLayout,
+  verticalNodeLane,
+} from './node-layout';
 import { conceptTitleFromPlainText } from './rich-text';
 import type { EditorEdge, EditorNode } from './types';
 
@@ -103,5 +108,32 @@ describe('relativeConceptLayout', () => {
     expect(result.parentId).toBe('parent');
     expect(result.positions.get('image')).toEqual({ x: -82, y: 240 });
     expect(result.positions.get('new')).toEqual({ x: 282, y: 240 });
+  });
+});
+
+describe('dimension-aware canvas layout', () => {
+  it('packs mixed-height nodes vertically with a stable gap', () => {
+    const nodes = [
+      concept('short', 0, 0, 250, 88),
+      concept('long', 0, 0, 250, 164),
+      concept('final', 0, 0, 250, 104),
+    ];
+    const lane = verticalNodeLane(nodes, ['short', 'long', 'final'], 740, 20);
+
+    expect(lane.positions.get('short')).toEqual({ x: 740, y: 20 });
+    expect(lane.positions.get('long')).toEqual({ x: 740, y: 132 });
+    expect(lane.positions.get('final')).toEqual({ x: 740, y: 320 });
+    expect(lane.height).toBe(404);
+  });
+
+  it('uses measured content height and detects intersecting rectangles', () => {
+    const first = concept('first', 10, 20, 220, 68);
+    first.measured = { width: 250, height: 140 };
+    const second = concept('second', 10, 150, 220, 68);
+    const separated = concept('separated', 10, 185, 220, 68);
+
+    expect(nodeRectangle(first)).toEqual({ x: 10, y: 20, width: 220, height: 140 });
+    expect(rectanglesOverlap(nodeRectangle(first), nodeRectangle(second))).toBe(true);
+    expect(rectanglesOverlap(nodeRectangle(first), nodeRectangle(separated), 24)).toBe(false);
   });
 });

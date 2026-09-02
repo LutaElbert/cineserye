@@ -169,7 +169,9 @@ import {
 } from '../domain/cinema/visual-preproduction';
 import {
   cinemaProposalCanvasSource,
+  cinemaPlanNeedsLayoutMigration,
   compileCinemaCanvasProposal,
+  layoutCinemaProposalNodes,
   prepareCinemaPlanProposal,
 } from './cinema-plan-proposal';
 import { cinemaSourceFingerprint } from './document-fingerprint';
@@ -496,6 +498,26 @@ function cloneSnapshot(
   return structuredClone({ nodes, edges, ...(cinema === undefined ? {} : { cinema }) });
 }
 
+function layoutAppliedCinemaProposal(
+  applied: AppliedCanvasCommandProposal,
+  cinema: CinemaProjectData,
+): AppliedCanvasCommandProposal {
+  return {
+    ...applied,
+    document: {
+      ...applied.document,
+      nodes: layoutCinemaProposalNodes(applied.document.nodes, cinema),
+    },
+  };
+}
+
+function nodeDimensionSignature(nodes: EditorNode[]): string {
+  return nodes.map((node) => {
+    const dimensions = editorNodeDimensions(node);
+    return `${node.id}:${Math.round(dimensions.width)}x${Math.round(dimensions.height)}`;
+  }).join('|');
+}
+
 type PersistableEditorState = {
   title: string;
   nodes: EditorNode[];
@@ -675,6 +697,7 @@ function EditorInner() {
   const saveTicketRef = useRef(0);
   const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges, cinema });
   const planningControllerRef = useRef<AbortController | null>(null);
+  const previewLayoutSignatureRef = useRef('');
   const {
     screenToFlowPosition,
     fitView,
@@ -701,6 +724,10 @@ function EditorInner() {
   useEffect(() => () => {
     planningControllerRef.current?.abort('editor-unmounted');
   }, []);
+
+  useEffect(() => {
+    previewLayoutSignatureRef.current = '';
+  }, [pendingProposalId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -855,7 +882,10 @@ function EditorInner() {
       const payload = await response.json() as PlanSceneResponse;
       if (!payload.ok) throw new Error(payload.error.message);
       const preparedProposal = prepareCinemaPlanProposal(sourceDocument, sourceDocument.cinema, payload.proposal);
-      const preview = applyCanvasCommandProposal(cinemaProposalCanvasSource(sourceDocument), preparedProposal);
+      const preview = layoutAppliedCinemaProposal(
+        applyCanvasCommandProposal(cinemaProposalCanvasSource(sourceDocument), preparedProposal),
+        payload.cinema,
+      );
       const selectedShotId = payload.cinema.scenes[brief.sceneNodeId]?.shotIds[2]
         ?? payload.cinema.scenes[brief.sceneNodeId]?.shotIds[0];
       const selectedShotNodeId = selectedShotId ? payload.cinema.shots[selectedShotId]?.nodeId ?? null : null;
@@ -1060,7 +1090,10 @@ function EditorInner() {
         current,
         compileCinemaCanvasProposal(restoreRunId, restoredCinema),
       );
-      const applied = applyCanvasCommandProposal(cinemaProposalCanvasSource(source), proposal);
+      const applied = layoutAppliedCinemaProposal(
+        applyCanvasCommandProposal(cinemaProposalCanvasSource(source), proposal),
+        restoredCinema,
+      );
       const acceptedCinema = acceptCinemaPlanRevision(current, restoredCinema, restoredAt);
       const sceneNodeId = acceptedCinema.activeSceneId
         ? acceptedCinema.scenes[acceptedCinema.activeSceneId]?.nodeId
@@ -1113,14 +1146,20 @@ function EditorInner() {
           setFirstRunOpen(true);
           return;
         }
-        setNodes(document.nodes.map((node) => ({ ...node, selected: false })));
+        const loadedNodes = document.cinema && cinemaPlanNeedsLayoutMigration(document.nodes, document.cinema)
+          ? layoutCinemaProposalNodes(document.nodes, document.cinema)
+          : document.nodes;
+        setNodes(loadedNodes.map((node) => ({ ...node, selected: false })));
         setEdges(document.edges.map((edge) => ({ ...edge, selected: false })));
         setTitle(document.title);
         setCinema(document.cinema);
         if (pending) {
           if (pending.sourceFingerprint === cinemaSourceFingerprint(document)) {
             const prepared = prepareCinemaPlanProposal(document, document.cinema, pending.proposal);
-            const preview = applyCanvasCommandProposal(cinemaProposalCanvasSource(document), prepared);
+            const preview = layoutAppliedCinemaProposal(
+              applyCanvasCommandProposal(cinemaProposalCanvasSource(document), prepared),
+              pending.cinema,
+            );
             setMockProposalPreview(preview);
             setProposalCinema(pending.cinema);
             setProposalMode(pending.mode);
@@ -1208,6 +1247,23 @@ function EditorInner() {
         if (selectedChange?.type === 'select') setPreviewSelectedNodeId(selectedChange.id);
         if (changes.some((change) => change.type === 'select' && !change.selected && change.id === previewSelectedNodeId)
           && !selectedChange) setPreviewSelectedNodeId(null);
+        const dimensionChanges = changes.filter((change) => change.type === 'dimensions');
+        if (dimensionChanges.length && proposalCinema) {
+          setMockProposalPreview((current) => {
+            if (!current) return current;
+            const measuredNodes = applyNodeChanges(dimensionChanges, current.document.nodes);
+            const signature = nodeDimensionSignature(measuredNodes);
+            if (signature === previewLayoutSignatureRef.current) return current;
+            previewLayoutSignatureRef.current = signature;
+            return {
+              ...current,
+              document: {
+                ...current.document,
+                nodes: layoutCinemaProposalNodes(measuredNodes, proposalCinema),
+              },
+            };
+          });
+        }
         return;
       }
       const removedNodeIds = new Set(changes
@@ -1220,7 +1276,7 @@ function EditorInner() {
       setNodes((current) => applyNodeChanges(changes, current));
       if (changes.some((change) => change.type === 'remove')) setSelectedPath(null);
     },
-    [mockProposalPreview, previewSelectedNodeId, recordHistory, removeCinemaForNodeIds],
+    [mockProposalPreview, previewSelectedNodeId, proposalCinema, recordHistory, removeCinemaForNodeIds],
   );
 
   const handleEdgesChange = useCallback(

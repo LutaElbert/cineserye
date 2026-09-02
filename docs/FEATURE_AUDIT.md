@@ -1,6 +1,6 @@
 # Cineserye current-feature audit
 
-> **Status update — 2026-09-01:** the findings that became Sprints 1–4 are now implemented and verified. P0-08’s rights-aware Reference Deck and Increment C’s one-shot storyboard-still workflow are complete. The findings below remain as the decision record; outstanding recommendations begin with Sprint 5 professional planning and handoff.
+> **Status update — 2026-09-02:** the findings that became Sprints 1–4 are implemented and verified. P0-08’s rights-aware Reference Deck and Increment C’s one-shot storyboard-still workflow are complete. Post-Sprint-4 closure also delivered dimension-aware non-overlapping proposal layout, legacy layout migration, live-provider resilience, and a workbench-first Visuals UI. The findings below remain as the audited-baseline decision record; outstanding recommendations begin with Sprint 5 professional planning and handoff.
 
 **Audit date:** 2026-09-01
 
@@ -16,9 +16,9 @@
 
 Cineserye already has a stronger technical foundation than most hackathon prototypes: the canvas engine is reusable, cinema data is versioned separately, provider credentials stay on the server, model output is runtime-validated, proposals are previewed before one atomic mutation, and the local document has serious persistence, backup, accessibility, and test coverage.
 
-The next product risk is not lack of image generation. It is trust and workflow closure. A creator can produce a first shot package, but the current experience makes it difficult to discover the action, establish neutral intent from a blank project, revise an accepted result, safely edit domain data, recover an unaccepted proposal, or prove that every citation genuinely supports the item showing it. Generation-budget language also overlaps with physical-production budgeting.
+At the audited baseline, the next product risk was trust and workflow closure: discovery, neutral first-run intent, safe revisions, sidecar consistency, pending-proposal recovery, citation integrity, and distinct generation-budget semantics. Sprints 1–4 closed that loop and added the approved visual-anchor boundary without replacing the canvas.
 
-**Recommendation:** do one closure sprint before adding storyboard media. Then add a visual-reference approval layer, followed by one approved storyboard frame for one accepted shot. Do not jump directly from a text proposal to multi-shot video generation.
+**Current recommendation:** close and commit the verified Sprint 4 working tree, then begin Sprint 5 with synchronized Shot Table and Board projections. A bounded directed-variant option may make storyboard alternatives more intentional, but professional planning, continuity review, and handoff exports remain higher priority. Do not begin video generation until Sprint 5 acceptance evidence is complete and the user explicitly approves that expanded scope.
 
 ## Scope and method
 
@@ -33,7 +33,7 @@ No live planning request was submitted during this audit. That avoided consuming
 
 ## Maturity scorecard
 
-Scores describe readiness for the approved one-scene product, not feature parity with a full production suite.
+Scores describe the repository at the original audited baseline, not the current post-Sprint-4 implementation and not feature parity with a full production suite. The status update above is authoritative for completed work.
 
 | Area | Score | Assessment |
 | --- | ---: | --- |
@@ -249,7 +249,7 @@ Story order and production order are not the same. Add optional camera/lighting/
 
 ### P1-03 — Support selective revision and variants
 
-After scene-level versions are safe, allow **Revise this shot**, **Generate A/B framing options**, **Keep continuity but change camera**, and **Regenerate prompt only**. Every operation should state what is preserved and what may change.
+After scene-level versions are safe, allow **Revise this shot**, **Generate A/B framing options**, **Keep continuity but change camera**, and **Regenerate prompt only**. Storyboard regeneration may also offer declared intents—production-safe, emotion-first, visually experimental, or budget-conscious—rather than presenting stochastic samples as meaningful creative directions. Every operation should state what is preserved and what may change.
 
 ### P1-04 — Make continuity an inspectable contract
 
@@ -342,6 +342,8 @@ For one selected accepted shot only:
 5. approve one frame or reject all;
 6. do not generate video yet.
 
+**Completion evidence:** delivered through Sprint 4. The current workbench supports one to four bounded candidates, explicit confirmation, approved-reference filtering, cancellation/retry, immutable provenance, one approved anchor, local pixel persistence, and portable restore. The scene Reference Deck is collapsed by default so selected-shot prompt review remains the primary Visuals task.
+
 ### Increment D — Professional planning surfaces
 
 Add the shot table/board, setup grouping, continuity matrix, and production exports.
@@ -367,6 +369,8 @@ Only after approved frames and versioning are reliable, add a one-shot image-to-
 
 ## Definition of readiness for storyboard generation
 
+**Gate status:** passed for the bounded Sprint 4 workflow. The checklist remains as the historical gate contract.
+
 Cineserye is ready to generate its first reference frame when all of the following are true:
 
 - one canonical first-run and plan-generation path works on desktop and mobile;
@@ -382,7 +386,7 @@ Cineserye is ready to generate its first reference frame when all of the followi
 
 ## Bottom line
 
-The foundation should be preserved. The next build should close the one-scene loop, not replace the canvas or rush into a general AI studio. Cineserye's differentiator can be a trustworthy path from creator intent to cited production decisions to approved visual anchors. Its best sequence is:
+The foundation should be preserved. The one-scene visual pre-production loop is now closed; the next build should make that accepted work professionally editable and portable rather than replace the canvas or rush into a general AI studio. Cineserye's differentiator remains a trustworthy path from creator intent to cited production decisions to approved visual anchors. Its product sequence is:
 
 ```text
 intent
@@ -390,6 +394,7 @@ intent
   → editable, versioned shot plan
   → approved continuity references
   → approved storyboard frame
+  → professional planning and handoff
   → optional video generation
 ```
 
