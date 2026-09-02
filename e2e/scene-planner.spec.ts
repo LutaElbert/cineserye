@@ -236,15 +236,26 @@ test('keeps first-run planning and all project actions keyboard-accessible at 39
 
 test('shows live mode before submission and requires explicit transfer consent', async ({ page }) => {
   let planningRequests = 0;
+  let planningBody: Record<string, unknown> | null = null;
   await page.route('**/api/cinema/provider-status', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ mode: 'live', requiresContentTransferConsent: true }),
+      body: JSON.stringify({
+        mode: 'live',
+        requiresContentTransferConsent: true,
+        research: { configured: true, provider: 'parallel' },
+        planning: { configured: true, provider: 'vertex-gemini', model: 'gemini-test' },
+        telemetryPolicy: 'no-content-v1',
+        livePreflight: { ready: true, blockers: [], maxLiveRunCost: 1 },
+      }),
     });
   });
   page.on('request', (request) => {
-    if (request.url().includes('/api/cinema/plan-scene')) planningRequests += 1;
+    if (request.url().includes('/api/cinema/plan-scene')) {
+      planningRequests += 1;
+      planningBody = request.postDataJSON() as Record<string, unknown>;
+    }
   });
 
   await page.goto('/');
@@ -261,6 +272,19 @@ test('shows live mode before submission and requires explicit transfer consent',
   await expect(brief.getByRole('alert')).toContainText('Confirm the live provider content transfer');
   await expect(consent).toBeFocused();
   expect(planningRequests).toBe(0);
+
+  await consent.check();
+  await brief.getByRole('button', { name: 'Generate shot plan' }).click();
+  await expect(page.getByRole('region', { name: 'Shot proposal review' })).toBeVisible();
+  expect(planningRequests).toBe(1);
+  expect(planningBody).toMatchObject({
+    liveProviderConsent: true,
+    liveConsentReceipt: {
+      policyVersion: 1,
+      approvedMaxCost: 1,
+      planningModel: 'gemini-test',
+    },
+  });
 });
 
 test('recovers a pending proposal, edits an accepted shot, and preserves revision history', async ({ page }) => {

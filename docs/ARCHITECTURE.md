@@ -42,6 +42,10 @@ accepted project + reviewed scene outlines
  continuity impact review → explicit acceptance
                 |
  project totals + narrative/production sequence
+                |
+ project / scene / entity audit + source fingerprint
+                |
+ ranked findings → dismiss or one reviewed correction
 ```
 
 ## Generic editor foundation
@@ -86,9 +90,11 @@ Runtime validation resolves every scene, shot, character, asset, prompt, source,
 - `planner-output.ts` applies the strict Zod boundary, resolves zero-based continuity indexes, reconciles durations exactly, computes cost views from a versioned profile, and produces versioned domain records. It accepts only explicit valid source IDs and never invents fallback citations.
 - `provider-resilience.ts` owns cancellation, timeouts, and at most one retry.
 - `telemetry.ts` emits content-free phase events with `scene-planner-v1` and `no-content-v1` identifiers.
+- `live-preflight.ts` fails closed unless the local live switch, `elbertluta@gmail.com`, project/quota project `cineserye`, consent receipt, and per-run ceiling all match.
+- `reliability.ts` owns provider spend reservations, the local kill switch, and the machine-readable supervised-live readiness decision.
 - `proposal-compiler.ts` deterministically compiles the validated sidecar into generic canvas commands. The model never authors editor commands.
 
-Fixture providers remain the default for deterministic UI and pull-request tests. Live mode is enabled only by server environment configuration and requires explicit per-request content-transfer consent in both the UI and API boundary.
+Fixture providers remain the default for deterministic UI and pull-request tests. Live mode is enabled only by server environment configuration and requires explicit per-request content-transfer consent in both the UI and API boundary. Configuration alone is insufficient: the execution preflight also requires an exact account/project/quota match, an operator ceiling, and the local live switch.
 
 `app/domain/cinema/visual-preproduction.ts` is the separate visual domain layer. It validates reference types and usage, enforces conservative generation eligibility, blocks deletion while usages exist, validates storyboard and video provenance, and permits only one approved frame anchor and one approved clip per shot. Existing version-1 visual sidecars gain empty video maps deterministically. `app/editor/persistence.ts` owns a provider-neutral `media-blobs` IndexedDB store keyed by SHA-256; it does not interpret cinema records.
 
@@ -103,6 +109,8 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 `app/features/video/VideoPreproductionPanel.tsx` persists the local operation identity before polling, resumes it after browser reload, stores successful MP4 bytes by SHA-256, and creates a separate candidate clip record only after storage succeeds. Setting changes invalidate confirmation. Failed, timed-out, and cancelled operations keep content-bounded diagnostics and can be retried as linked operations without altering the approved plan or frame.
 
 `app/domain/cinema/multi-scene.ts` owns reviewed scene-boundary proposals, aggregate totals, continuity impact analysis, shared variants/exceptions, and artifact sequence projection. `app/features/project/ProjectProductionWorkspace.tsx` is a projection over those records. Treatment parsing is pure; manual/import acceptance, scene focus/order, sharing, variants, and exceptions all pass through `cinema-domain-commands.ts` and full document validation. Accepting a plan merges only the target scene's generated records and supersedes only that scene's prior active revision.
+
+`app/domain/cinema/continuity-audit.ts` owns a deterministic metadata projection, project fingerprint, five-finding cap, runtime-validated extension records, and fixture analyzer. Audit records use the portable `x-cineserye-audit` extension so older version-2 documents remain valid. The analyzer never receives canvas commands. Dismissal changes only the finding disposition; an accepted intentional exception rechecks the source fingerprint and passes through `cinema-domain-commands.ts` as one history transaction.
 
 Portable backup version 6 embeds referenced images but intentionally excludes MP4 bytes. Video metadata and approval remain in the document, and the UI tells creators to download clips separately. Restore verifies embedded image size and SHA-256 before writing any blob, never fetches external inspiration links or video, and remains compatible with text-only backup versions 1–5.
 
@@ -121,9 +129,9 @@ Portable backup version 6 embeds referenced images but intentionally excludes MP
 
 ## Evaluation and observability
 
-`tests/eval` contains a versioned, Agents CLI–compatible one-scene planning dataset plus a local cross-scene continuity trace/config. The Sprint 7 `cross_scene_impact_contract` executes in-process and verifies complete affected-scene/shot disclosure before acceptance without an LLM or cloud service. `evaluation-adapter.ts` creates a versioned artifact containing the brief, validated result, provider configuration, scoring policy, run ID, and content-free trace. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, and telemetry privacy. `vertex-adk-live.test.ts` is opt-in and proves the real Vertex/ADK contract with local ADC while using a local research fixture.
+`tests/eval` contains a versioned, Agents CLI–compatible one-scene planning dataset, the local Sprint 7 cross-scene contract, and separate Sprint 10 development/holdout traces. The 18-case development set and six-case sealed holdout use the deterministic local `bounded_audit_contract`; no LLM judge or managed service is involved. `evaluation-adapter.ts` creates a versioned artifact containing the brief, validated result, provider configuration, scoring policy, run ID, and content-free trace. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, preflight, spend, soak, and telemetry privacy. Live tests remain opt-in.
 
-The browser retains at most 50 content-free run traces in the local `agent-traces` store. The provider-mode badge exposes safe configuration metadata and trace JSON export; the export never contains scenes, prompts, research findings, citations, or credentials. Cloud trace or completion export is not configured. Prompt/response capture and completion upload are disabled unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately supplied after a retention review.
+The browser retains at most 500 content-free trace events or 30 days in the local `agent-traces` store, whichever comes first. An allowlist strips undeclared content fields before storage/export. The provider-mode badge exposes safe preflight metadata and trace JSON export; the export never contains scenes, prompts, research findings, citations, or credentials. Cloud Trace, managed evaluation, completion upload, and BigQuery analytics are not configured.
 
 ## Deliberately absent
 
@@ -133,4 +141,4 @@ The browser retains at most 50 content-free run traces in the local `agent-trace
 - automatic proposal acceptance or background autonomy;
 - A2A exposure, deployment, or provisioned observability infrastructure.
 
-The recommended next product feature is a continuity-aware copilot audit that proposes one bounded project change, explains affected scenes/shots, and waits for explicit acceptance. It should reuse the verified command and evaluation boundaries; autonomous mutation, authentication, collaboration, and deployment remain separate programs.
+The next operational step is one separately authorized, supervised live text smoke after the preflight proves the intended account/project/quota context and the creator approves the displayed ceiling. The next product feature should deepen manual-revision assistance for duration and budget findings while preserving one bounded proposal and explicit acceptance. Autonomous mutation, authentication, collaboration, and deployment remain separate programs.

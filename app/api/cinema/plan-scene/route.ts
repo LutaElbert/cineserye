@@ -14,6 +14,7 @@ import {
   fixtureWorkflowDependencies,
   runCinemaPlanningWorkflow,
 } from '../../../server/cinema/workflow';
+import { assertCinemaLivePreflight } from '../../../server/cinema/live-preflight';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof runCinemaPlanningWorkflow>>>>();
@@ -42,6 +43,7 @@ export async function POST(request: Request): Promise<Response> {
     const config = readCinemaProviderConfig();
     applyCinemaTelemetryPrivacyBaseline(config);
     assertLiveProviderConsent(config, payload.liveProviderConsent);
+    assertCinemaLivePreflight(config, payload.brief, payload.liveProviderConsent, payload.liveConsentReceipt);
     const dependencies = config.mode === 'live'
       ? (await import('../../../server/cinema/live-workflow')).liveWorkflowDependencies(config)
       : fixtureWorkflowDependencies();

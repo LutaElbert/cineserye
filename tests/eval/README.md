@@ -37,3 +37,19 @@ agents-cli eval grade \
 ```
 
 This custom metric executes locally in-process. It does not call an LLM, use Vertex credits, or send prompt content to a managed evaluation service.
+
+Sprints 8-10 add an 18-case development set and a sealed six-case holdout set for the bounded audit contract. Both use a deterministic local code metric; run the holdout only after the development set and regression suite pass:
+
+```sh
+agents-cli eval grade \
+  --traces tests/eval/datasets/cineserye-agent-readiness-development-traces.json \
+  --config tests/eval/agent_readiness_eval_config.yaml \
+  --output output/eval/sprint10-development
+
+agents-cli eval grade \
+  --traces tests/eval/datasets/cineserye-agent-readiness-holdout-traces.json \
+  --config tests/eval/agent_readiness_eval_config.yaml \
+  --output output/eval/sprint10-holdout
+```
+
+Expected gate: `18/18` and `6/6`, both with mean score `1.0000`. These commands are local-only. Managed evaluation, prompt-response logging, BigQuery analytics, and Cloud Trace remain disabled.

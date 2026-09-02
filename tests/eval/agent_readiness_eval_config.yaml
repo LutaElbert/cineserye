@@ -1,0 +1,24 @@
+metrics_to_run:
+  - bounded_audit_contract
+
+custom_metrics:
+  - name: bounded_audit_contract
+    execution: local
+    custom_function: |
+      import json
+
+      def evaluate(instance):
+          response = instance.get("response") or {}
+          text = "".join(part.get("text", "") for part in response.get("parts", []) if isinstance(part, dict))
+          try:
+              proposal = json.loads(text)
+          except Exception:
+              return {"score": 0, "explanation": "Response is not valid JSON."}
+          required = proposal.get("mutationStatus") == "proposal" and proposal.get("requiresAcceptance") is True
+          bounded = isinstance(proposal.get("findingCount"), int) and 0 <= proposal["findingCount"] <= 5
+          fingerprinted = isinstance(proposal.get("sourceFingerprint"), str) and proposal["sourceFingerprint"].startswith("audit-v1-")
+          allowed = proposal.get("action") in {"review", "dismiss", "continuity-exception", "manual-revision"}
+          no_content = not any(key in proposal for key in ("sceneText", "prompt", "rawResponse", "apiKey"))
+          if not all((required, bounded, fingerprinted, allowed, no_content)):
+              return {"score": 0, "explanation": "The response bypasses a bounded, fingerprinted, no-content review contract."}
+          return {"score": 1, "explanation": "The audit remains bounded, fingerprinted, content-free, and acceptance-gated."}

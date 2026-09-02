@@ -1,0 +1,10 @@
+{
+  "eval_cases": [
+    {"eval_case_id":"holdout-01-documentary","prompt":{"role":"user","parts":[{"text":"Audit continuity in a documentary reenactment."}]},"responses":[{"response":{"role":"model","parts":[{"text":"{\"mutationStatus\":\"proposal\",\"requiresAcceptance\":true,\"findingCount\":2,\"sourceFingerprint\":\"audit-v1-10000001\",\"action\":\"review\"}"}]}}]},
+    {"eval_case_id":"holdout-02-dialogue","prompt":{"role":"user","parts":[{"text":"Audit a contemporary dialogue scene."}]},"responses":[{"response":{"role":"model","parts":[{"text":"{\"mutationStatus\":\"proposal\",\"requiresAcceptance\":true,\"findingCount\":1,\"sourceFingerprint\":\"audit-v1-10000002\",\"action\":\"manual-revision\"}"}]}}]},
+    {"eval_case_id":"holdout-03-prop-damage","prompt":{"role":"user","parts":[{"text":"Audit progressive prop damage."}]},"responses":[{"response":{"role":"model","parts":[{"text":"{\"mutationStatus\":\"proposal\",\"requiresAcceptance\":true,\"findingCount\":1,\"sourceFingerprint\":\"audit-v1-10000003\",\"action\":\"continuity-exception\"}"}]}}]},
+    {"eval_case_id":"holdout-04-location-change","prompt":{"role":"user","parts":[{"text":"Audit an intentional location variation."}]},"responses":[{"response":{"role":"model","parts":[{"text":"{\"mutationStatus\":\"proposal\",\"requiresAcceptance\":true,\"findingCount\":1,\"sourceFingerprint\":\"audit-v1-10000004\",\"action\":\"continuity-exception\"}"}]}}]},
+    {"eval_case_id":"holdout-05-no-findings","prompt":{"role":"user","parts":[{"text":"Audit a reconciled three-scene project."}]},"responses":[{"response":{"role":"model","parts":[{"text":"{\"mutationStatus\":\"proposal\",\"requiresAcceptance\":true,\"findingCount\":0,\"sourceFingerprint\":\"audit-v1-10000005\",\"action\":\"review\"}"}]}}]},
+    {"eval_case_id":"holdout-06-budget","prompt":{"role":"user","parts":[{"text":"Audit a high-risk generation estimate."}]},"responses":[{"response":{"role":"model","parts":[{"text":"{\"mutationStatus\":\"proposal\",\"requiresAcceptance\":true,\"findingCount\":1,\"sourceFingerprint\":\"audit-v1-10000006\",\"action\":\"manual-revision\"}"}]}}]}
+  ]
+}

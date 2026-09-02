@@ -195,6 +195,7 @@ import type {
   PlanSceneRequest,
   PlanSceneResponse,
 } from '../features/scene-planner/plan-scene-api';
+import { createCinemaConsentReceipt } from '../domain/cinema/live-consent';
 import { planningLabel, type PlanningUiState } from '../features/scene-planner/planning-labels';
 import { FirstRunChooser } from '../features/onboarding/FirstRunChooser';
 import { ProjectActionsMenu } from '../features/project-actions/ProjectActionsMenu';
@@ -754,6 +755,14 @@ function EditorInner() {
           research: status.research ?? { configured: false, provider: 'Parallel Search' },
           planning: status.planning ?? { configured: false, provider: 'Vertex AI', model: null },
           telemetryPolicy: status.telemetryPolicy ?? 'no-content-v1',
+          // Fail closed if an older server or cached test double does not yet
+          // expose the Sprint 9 preflight contract. Diagnostics must never
+          // crash the local editor merely because live execution is blocked.
+          livePreflight: status.livePreflight ?? {
+            ready: false,
+            blockers: ['Live provider preflight status is unavailable.'],
+            maxLiveRunCost: null,
+          },
         });
       })
       .catch(() => {
@@ -887,6 +896,16 @@ function EditorInner() {
           idempotencyKey,
           brief,
           liveProviderConsent,
+          liveConsentReceipt: liveProviderConsent
+            && configuredProviderStatus?.livePreflight.maxLiveRunCost
+            && configuredProviderStatus.planning.model
+            ? createCinemaConsentReceipt(
+              brief,
+              configuredProviderStatus.livePreflight.maxLiveRunCost,
+              new Date().toISOString(),
+              configuredProviderStatus.planning.model,
+            )
+            : null,
         } satisfies PlanSceneRequest),
         signal: controller.signal,
       });
@@ -939,7 +958,7 @@ function EditorInner() {
     } finally {
       if (planningControllerRef.current === controller) planningControllerRef.current = null;
     }
-  }, [announce, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage]);
+  }, [announce, configuredProviderStatus, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage]);
 
   const planMockScene = useCallback(() => {
     if (mockProposalStage !== 'idle' || mockProposalPreview || sceneBriefDefaults) return;
@@ -3578,6 +3597,7 @@ function EditorInner() {
           <SceneBriefDialog
             defaults={sceneBriefDefaults}
             providerMode={configuredProviderMode === 'live' ? 'live' : 'fixture'}
+            livePreflight={configuredProviderStatus?.livePreflight ?? null}
             onCancel={closeSceneBrief}
             onSubmit={(brief, liveProviderConsent) => {
               setSceneBriefDefaults(null);
@@ -3612,12 +3632,13 @@ function EditorInner() {
               <div><dt>Mode</dt><dd>{configuredProviderMode === 'loading' ? 'Unavailable' : configuredProviderMode}</dd></div>
               <div><dt>Research</dt><dd>{configuredProviderStatus ? `${configuredProviderStatus.research.provider} · ${configuredProviderStatus.research.configured ? 'ready' : 'not configured'}` : 'Unavailable'}</dd></div>
               <div><dt>Planning</dt><dd>{configuredProviderStatus ? `${configuredProviderStatus.planning.provider}${configuredProviderStatus.planning.model ? ` · ${configuredProviderStatus.planning.model}` : ''} · ${configuredProviderStatus.planning.configured ? 'ready' : 'not configured'}` : 'Unavailable'}</dd></div>
+              <div><dt>Live preflight</dt><dd>{configuredProviderStatus ? (configuredProviderStatus.livePreflight.ready ? `ready · ceiling ${configuredProviderStatus.livePreflight.maxLiveRunCost ?? 'missing'}` : configuredProviderStatus.livePreflight.blockers[0] ?? 'blocked') : 'Unavailable'}</dd></div>
               <div><dt>Telemetry</dt><dd>{configuredProviderStatus?.telemetryPolicy ?? 'no-content-v1'}</dd></div>
             </dl>
             <section className="trace-section" aria-labelledby="local-traces-title">
               <div className="trace-heading">
                 <div><span className="eyebrow">On this device</span><h3 id="local-traces-title">Recent agent runs</h3></div>
-                <span>{localCinemaTraces.length}/50</span>
+                <span>{localCinemaTraces.length}/500</span>
               </div>
               {localCinemaTraces.length ? (
                 <ul className="trace-list">

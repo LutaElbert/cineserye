@@ -1,6 +1,7 @@
 import type { CinemaProjectData } from '../../domain/cinema/project-data';
 import type { CanvasCommandProposal } from '../../editor/canvas-commands';
 import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
+import type { CinemaConsentReceipt } from '../../domain/cinema/live-consent';
 
 export type ProviderErrorCode =
   | 'CANCELLED'
@@ -17,6 +18,7 @@ export type PlanSceneRequest = {
   idempotencyKey: string;
   brief: ScenePlanningBrief;
   liveProviderConsent: boolean;
+  liveConsentReceipt: CinemaConsentReceipt | null;
 };
 
 export type CinemaProviderStatus = {
@@ -25,6 +27,7 @@ export type CinemaProviderStatus = {
   research: { configured: boolean; provider: string };
   planning: { configured: boolean; provider: string; model: string | null };
   telemetryPolicy: 'no-content-v1';
+  livePreflight: { ready: boolean; blockers: string[]; maxLiveRunCost: number | null };
 };
 
 export type PlanSceneSuccess = {

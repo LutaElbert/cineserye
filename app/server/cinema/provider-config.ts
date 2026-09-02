@@ -9,6 +9,11 @@ export type CinemaProviderConfig = {
   googleCloudLocation: string;
   vertexModel: string;
   cloudTelemetryEnabled: boolean;
+  expectedGoogleAccount: 'elbertluta@gmail.com';
+  activeGoogleAccount: string | null;
+  adcQuotaProject: string | null;
+  liveExecutionEnabled: boolean;
+  maxLiveRunCost: number | null;
 };
 
 type Environment = Record<string, string | undefined>;
@@ -20,6 +25,11 @@ export function readCinemaProviderConfig(environment: Environment = process.env)
   if (mode !== 'fixture' && mode !== 'live') {
     throw new ProviderError('INVALID_CONFIGURATION', 'Cineserye provider mode is invalid.');
   }
+  const configuredMaxCost = environment.CINESERYE_LIVE_MAX_RUN_COST?.trim();
+  const maxLiveRunCost = configuredMaxCost ? Number(configuredMaxCost) : null;
+  if (maxLiveRunCost !== null && (!Number.isFinite(maxLiveRunCost) || maxLiveRunCost <= 0)) {
+    throw new ProviderError('INVALID_CONFIGURATION', 'The live provider run ceiling is invalid.');
+  }
   const config: CinemaProviderConfig = {
     mode,
     parallelApiKey: environment.PARALLEL_API_KEY?.trim() || null,
@@ -27,6 +37,11 @@ export function readCinemaProviderConfig(environment: Environment = process.env)
     googleCloudLocation: environment.GOOGLE_CLOUD_LOCATION?.trim() || 'global',
     vertexModel: environment.CINESERYE_VERTEX_MODEL?.trim() || 'gemini-3.7-flash',
     cloudTelemetryEnabled: environment.CINESERYE_ENABLE_CLOUD_TELEMETRY === 'true',
+    expectedGoogleAccount: 'elbertluta@gmail.com',
+    activeGoogleAccount: environment.CINESERYE_GCLOUD_ACTIVE_ACCOUNT?.trim() || null,
+    adcQuotaProject: environment.GOOGLE_CLOUD_QUOTA_PROJECT?.trim() || null,
+    liveExecutionEnabled: environment.CINESERYE_LIVE_ENABLED === 'true',
+    maxLiveRunCost,
   };
   if (mode === 'live') {
     if (!config.parallelApiKey) {

@@ -18,11 +18,13 @@ function lines(value: string) {
 export function SceneBriefDialog({
   defaults,
   providerMode,
+  livePreflight,
   onCancel,
   onSubmit,
 }: {
   defaults: SceneBriefDefaults;
   providerMode: 'fixture' | 'live';
+  livePreflight: { ready: boolean; blockers: string[]; maxLiveRunCost: number | null } | null;
   onCancel: () => void;
   onSubmit: (brief: ScenePlanningBrief, liveProviderConsent: boolean) => void;
 }) {
@@ -76,6 +78,11 @@ export function SceneBriefDialog({
     try {
       if (providerMode === 'live' && !liveProviderConsent) {
         setErrors({ liveProviderConsent: 'Confirm the live provider content transfer to continue.' });
+        window.requestAnimationFrame(() => document.getElementById('scene-brief-liveProviderConsent')?.focus());
+        return;
+      }
+      if (providerMode === 'live' && !livePreflight?.ready) {
+        setErrors({ liveProviderConsent: livePreflight?.blockers[0] ?? 'Live provider preflight is not ready.' });
         window.requestAnimationFrame(() => document.getElementById('scene-brief-liveProviderConsent')?.focus());
         return;
       }
@@ -304,9 +311,10 @@ export function SceneBriefDialog({
             <strong>Live research and planning</strong>
             <label>
               <input id="scene-brief-liveProviderConsent" type="checkbox" checked={liveProviderConsent} onChange={(event) => setLiveProviderConsent(event.target.checked)} aria-invalid={Boolean(errors.liveProviderConsent)} aria-describedby={errors.liveProviderConsent ? 'scene-brief-live-consent-error' : 'scene-brief-live-consent-help'} />
-              <span>Send this scene brief and constraints to Parallel and Google Vertex AI.</span>
+              <span>Send this scene brief and constraints to Parallel and Google Vertex AI{livePreflight?.maxLiveRunCost ? `, with an operator ceiling of ${livePreflight.maxLiveRunCost} per run` : ''}.</span>
             </label>
             <small id="scene-brief-live-consent-help">Cineserye sends only the selected scene brief, normalized research, and planning constraints. It never sends API keys or the full project file.</small>
+            {!livePreflight?.ready ? <small role="status">Preflight blocked: {livePreflight?.blockers.join(' ') || 'Provider status is unavailable.'}</small> : null}
             {errors.liveProviderConsent ? <span id="scene-brief-live-consent-error" role="alert">{errors.liveProviderConsent}</span> : null}
           </div>
         ) : null}

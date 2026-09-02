@@ -7,6 +7,9 @@ import {
 import { ProviderError, publicProviderError } from './provider-errors';
 import { runProviderOperation } from './provider-resilience';
 import { traceCinemaPhase, type CinemaTraceEvent } from './telemetry';
+import { assertCinemaLivePreflight, buildCinemaLivePreflight } from './live-preflight';
+import { createCinemaConsentReceipt } from '../../domain/cinema/live-consent';
+import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 
 describe('cinema provider infrastructure', () => {
   it('defaults to deterministic fixture mode without credentials', () => {
@@ -17,7 +20,46 @@ describe('cinema provider infrastructure', () => {
       googleCloudLocation: 'global',
       vertexModel: 'gemini-3.7-flash',
       cloudTelemetryEnabled: false,
+      expectedGoogleAccount: 'elbertluta@gmail.com',
+      activeGoogleAccount: null,
+      adcQuotaProject: null,
+      liveExecutionEnabled: false,
+      maxLiveRunCost: null,
     });
+  });
+
+  it('S9-SEC-01 fails closed until the exact account, project, quota project, ceiling, and kill switch match', () => {
+    const blocked = readCinemaProviderConfig({ CINESERYE_PROVIDER_MODE: 'live', PARALLEL_API_KEY: 'test-key' });
+    expect(buildCinemaLivePreflight(blocked)).toMatchObject({ ready: false, killSwitchEnabled: false });
+    expect(buildCinemaLivePreflight(blocked).blockers).toContain('Active Google account must be elbertluta@gmail.com.');
+
+    const ready = readCinemaProviderConfig({
+      CINESERYE_PROVIDER_MODE: 'live', PARALLEL_API_KEY: 'test-key',
+      CINESERYE_GCLOUD_ACTIVE_ACCOUNT: 'elbertluta@gmail.com',
+      GOOGLE_CLOUD_PROJECT: 'cineserye', GOOGLE_CLOUD_QUOTA_PROJECT: 'cineserye',
+      CINESERYE_LIVE_ENABLED: 'true', CINESERYE_LIVE_MAX_RUN_COST: '2.5',
+    });
+    expect(buildCinemaLivePreflight(ready)).toMatchObject({ ready: true, maxLiveRunCost: 2.5 });
+  });
+
+  it('S9-IT-01 binds consent to the exact brief and rejects stale or over-ceiling receipts', () => {
+    const config = readCinemaProviderConfig({
+      CINESERYE_PROVIDER_MODE: 'live', PARALLEL_API_KEY: 'test-key',
+      CINESERYE_GCLOUD_ACTIVE_ACCOUNT: 'elbertluta@gmail.com', GOOGLE_CLOUD_PROJECT: 'cineserye',
+      GOOGLE_CLOUD_QUOTA_PROJECT: 'cineserye', CINESERYE_LIVE_ENABLED: 'true', CINESERYE_LIVE_MAX_RUN_COST: '3',
+    });
+    const brief: ScenePlanningBrief = {
+      version: 2, sceneNodeId: 'scene-01', sceneText: 'Mara enters.', creationMode: 'ai-generated', aspectRatio: '9:16',
+      targetPlatform: 'short-form', genreTone: 'Suspense', locationPeriod: 'Manila, 1988', dialogueAudioIntent: 'mixed',
+      targetDurationSeconds: 12, requiredBeats: [], mustInclude: [], mustAvoid: [],
+      generationBudget: { pricingMode: 'unpriced', currency: null, ceiling: null, maxAttempts: 1 },
+      productionConstraints: { budgetBand: 'micro', currency: 'PHP', budgetCeiling: 1_000, availableEquipment: [] },
+    };
+    const receipt = createCinemaConsentReceipt(brief, 3, '2026-09-02T08:00:00.000Z', config.vertexModel);
+    expect(() => assertCinemaLivePreflight(config, brief, true, receipt)).not.toThrow();
+    expect(() => assertCinemaLivePreflight(config, { ...brief, sceneText: 'Changed.' }, true, receipt)).toThrow('does not match');
+    expect(() => assertCinemaLivePreflight(config, brief, true, { ...receipt, approvedMaxCost: 4 })).toThrow();
+    expect(() => assertCinemaLivePreflight(config, brief, true, { ...receipt, planningModel: 'different-model' })).toThrow('does not match');
   });
 
   it('disables content capture and completion upload unless cloud telemetry is explicitly enabled', () => {

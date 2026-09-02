@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "preflight:gcloud": "node scripts/check-cineserye-gcloud.mjs",
     "check:client-boundary": "node scripts/check-client-boundary.mjs",
     "start": "vinext start",
     "check": "vinext check",

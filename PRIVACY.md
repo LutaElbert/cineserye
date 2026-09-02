@@ -8,7 +8,7 @@ Fixture mode is the default and makes no external provider requests. Its researc
 
 ## Optional live planning
 
-Live mode is server-configured and requires explicit consent in the one-scene preflight before each request. It transfers:
+Live mode is server-configured and requires explicit consent in the one-scene preflight before each request. It remains blocked unless the local live switch, required `elbertluta@gmail.com` account assertion, project and ADC quota project `cineserye`, and a positive operator per-run ceiling all match. Consent is bound to a digest of the exact selected scene payload and ceiling. It transfers:
 
 - the selected scene text and the confirmed one-scene brief—including creation mode, format, tone, location, duration, beats, content constraints, generation budget, production band, and equipment—to Parallel Search;
 - that scene brief plus normalized research titles, URLs, findings, and query purpose to Gemini on Google Vertex AI.
@@ -31,11 +31,11 @@ The server blocks unsupported formats and settings before provider work and requ
 
 ## Telemetry and logs
 
-Default Cineserye telemetry records only run identifiers, agent/policy versions, phase, duration, provider/model names, result counts, status, and safe error codes. It excludes raw scene text, full prompts, provider payloads, credentials, research excerpts, and source URLs. The browser keeps at most 50 of these local traces. The diagnostics panel and its optional JSON export use the same `no-content-v1` contract.
+Default Cineserye telemetry records only run identifiers, agent/policy versions, phase, duration, provider/model names, result counts, status, and safe error codes. It excludes raw scene text, full prompts, provider payloads, credentials, research excerpts, and source URLs. An allowlist removes undeclared fields. The browser keeps at most 500 trace events or 30 days, whichever limit is reached first. The diagnostics panel and its optional JSON export use the same `no-content-v1` contract.
 
 ADK prompt/response capture and completion upload are disabled by default. Cloud telemetry is opt-in through `CINESERYE_ENABLE_CLOUD_TELEMETRY=true`; enabling it requires a separate content handling, access, retention, and cost review. The application has not been deployed and no analytics SDK is installed.
 
-The Sprint 7 Agents CLI continuity evaluation uses hand-authored fixture traces and a local in-process code metric. It sends no prompt, scene, or project content to Vertex Evaluation Service, invokes no judge model, and spends no provider credits.
+The Sprint 7 and Sprint 10 Agents CLI evaluations use hand-authored synthetic traces and local in-process code metrics. The Sprint 10 corpus separates 18 development cases from six sealed holdouts. These grades send no prompt, scene, or project content to Vertex Evaluation Service, invoke no judge model, and spend no provider credits. Cloud Trace, completion upload, and BigQuery Agent Analytics are not enabled.
 
 ## User control and limits
 
@@ -45,6 +45,7 @@ The Sprint 7 Agents CLI continuity evaluation uses hand-authored fixture traces 
 - Restoring an accepted revision is an entirely local operation. It does not contact Parallel, Vertex AI, or another provider; the selected immutable snapshot is re-scoped into a new local revision after explicit confirmation.
 - Treatment import parses local text into editable scene-boundary proposals. It creates no scene, calls no provider, and mutates no accepted project until the creator explicitly accepts the review.
 - Sharing a character or asset first displays the locally derived affected scenes and shots. Scoped variants and continuity exceptions are stored only after explicit acceptance through the validated command boundary.
+- A continuity audit reads only the selected project/scene/entity metadata projection, returns at most five findings, and makes no provider call in Fixture mode. Dismissal does not alter continuity records; accepting an intentional exception rechecks the project fingerprint and is one undoable command.
 - Source pins, support states, and removals made during review affect only the pending preview until acceptance.
 - Reference uploads default to unknown rights, research-only use, and pending approval. None of those states is inferred from a filename, URL, or upload action.
 - External inspiration links are stored as creator-provided metadata and are never fetched automatically.

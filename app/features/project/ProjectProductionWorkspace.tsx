@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Film, Link2, Plus, Search, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Film, Link2, Plus, Search, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import {
   analyzeContinuityImpact,
@@ -11,6 +11,7 @@ import {
   type CinemaSceneBoundaryProposal,
 } from '../../domain/cinema/multi-scene';
 import type { CinemaProjectData } from '../../domain/cinema/project-data';
+import { readCinemaAuditData, type CinemaAuditScope } from '../../domain/cinema/continuity-audit';
 import type { CinemaDomainCommand } from '../../editor/cinema-domain-commands';
 
 type Notice = (message: string, tone?: 'info' | 'success' | 'error') => void;
@@ -51,6 +52,7 @@ export function ProjectProductionWorkspace({
   const [pendingImpact, setPendingImpact] = useState<CinemaContinuityImpact | null>(null);
   const [variantDraft, setVariantDraft] = useState<{ entityNodeId: string; sceneId: string; wardrobe: string; notes: string } | null>(null);
   const [exceptionDraft, setExceptionDraft] = useState<{ entityNodeId: string; sceneId: string; rationale: string } | null>(null);
+  const [auditScopeKey, setAuditScopeKey] = useState('project');
   const totals = useMemo(() => calculateProjectTotals(cinema), [cinema]);
   const sequence = useMemo(() => buildProjectSequence(cinema), [cinema]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -59,6 +61,15 @@ export function ProjectProductionWorkspace({
     .filter((scene) => !normalizedQuery || `${scene.title} ${scene.synopsis}`.toLocaleLowerCase().includes(normalizedQuery));
   const entities = [...Object.values(cinema.characters), ...Object.values(cinema.assets)]
     .sort((left, right) => left.title.localeCompare(right.title));
+  const audit = useMemo(() => readCinemaAuditData(cinema), [cinema]);
+  const latestAudit = Object.values(audit.runs).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null;
+  const auditFindings = latestAudit?.findingIds.map((findingId) => audit.findings[findingId]).filter(Boolean) ?? [];
+
+  const selectedAuditScope = (): CinemaAuditScope => {
+    if (auditScopeKey === 'project') return { kind: 'project', id: null };
+    const [kind, ...idParts] = auditScopeKey.split(':');
+    return { kind: kind as 'scene' | 'entity', id: idParts.join(':') };
+  };
 
   const addManualScene = () => {
     if (!title.trim()) return;
@@ -94,7 +105,7 @@ export function ProjectProductionWorkspace({
   return <section className="project-production-workspace" aria-label="Multi-scene project workspace">
     <header className="project-production-header">
       <div><span className="eyebrow">Microdrama project</span><h2>Production overview</h2><p>Plan each scene independently while continuity, cost, and sequence remain project-aware.</p></div>
-      <button type="button" className="primary-button" onClick={() => setShowAddScene((current) => !current)}><Plus size={14} /> Add scene</button>
+      <div className="project-header-actions"><button type="button" className="secondary-button" onClick={() => onCommand({ type: 'run-continuity-audit', scope: selectedAuditScope(), createdAt: new Date().toISOString() }, 'Continuity audit completed. Review each finding before applying a correction.')}><ShieldCheck size={14} /> Audit project</button><button type="button" className="primary-button" onClick={() => setShowAddScene((current) => !current)}><Plus size={14} /> Add scene</button></div>
     </header>
 
     <dl className="project-totals" aria-label="Project totals">
@@ -104,6 +115,11 @@ export function ProjectProductionWorkspace({
       <div><dt>Expected generation</dt><dd>{projectExpectedCostLabel(cinema, totals.expectedCost)}</dd></div>
       <div><dt>Approved outputs</dt><dd>{totals.storyboardFrames} frames · {totals.approvedClips} clips</dd></div>
     </dl>
+
+    <section className="project-panel project-audit-panel" aria-labelledby="project-audit-heading">
+      <div className="project-panel-heading"><div><span className="eyebrow">Bounded copilot review</span><h3 id="project-audit-heading">Continuity audit</h3></div><label className="audit-scope"><span>Scope</span><select value={auditScopeKey} onChange={(event) => setAuditScopeKey(event.target.value)}><option value="project">Entire project</option>{cinema.sceneOrder.map((sceneId) => <option key={sceneId} value={`scene:${sceneId}`}>Scene · {cinema.scenes[sceneId].title}</option>)}{entities.map((entity) => <option key={entity.nodeId} value={`entity:${entity.nodeId}`}>Entity · {entity.title}</option>)}</select></label></div>
+      {!latestAudit ? <p className="project-empty">Run the fixture audit to inspect continuity, duration, and budget without making an AI or cloud call.</p> : <><p className="audit-summary">{auditFindings.length ? `${auditFindings.filter((finding) => finding.disposition === 'open').length} open of ${auditFindings.length} ranked findings` : 'No bounded issues found'} · source {latestAudit.sourceFingerprint}</p><div className="audit-finding-list">{auditFindings.map((finding) => <article key={finding.id} className={`audit-finding severity-${finding.severity}`}><div className="audit-finding-copy"><span className="audit-severity"><AlertTriangle size={12} /> {finding.severity} · {finding.category.replace('-', ' ')}</span><h4>{finding.title}</h4><p>{finding.explanation}</p><small>{finding.affectedSceneIds.length} scenes · {finding.affectedShotIds.length} shots · {finding.confidence}</small></div><div className="audit-actions">{finding.disposition === 'open' ? <><button type="button" className="text-button" onClick={() => onCommand({ type: 'dismiss-continuity-audit-finding', findingId: finding.id }, 'Audit finding dismissed without changing the project.')}><X size={12} /> Dismiss</button>{finding.correction ? <button type="button" className="secondary-button" onClick={() => onCommand({ type: 'accept-continuity-audit-correction', findingId: finding.id, sourceFingerprint: latestAudit.sourceFingerprint }, 'Continuity exception accepted as one undoable change.')}><Check size={12} /> Record as intentional</button> : <span>Manual revision required</span>}</> : <span className={`audit-disposition disposition-${finding.disposition}`}>{finding.disposition}</span>}</div></article>)}</div></>}
+    </section>
 
     {showAddScene ? <form className="project-inline-form" onSubmit={(event) => { event.preventDefault(); addManualScene(); }}>
       <div><span className="eyebrow">Manual outline</span><h3>Add one scene</h3></div>

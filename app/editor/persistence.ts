@@ -4,6 +4,7 @@ import { APP_CONFIG } from './config';
 import type { CanvasCommandProposal } from './canvas-commands';
 import type { CinemaProjectData } from '../domain/cinema/project-data';
 import type { CinemaClientTraceEvent } from '../features/scene-planner/plan-scene-api';
+import { pruneCinemaTraceRecords } from '../server/cinema/telemetry';
 
 const DATABASE_NAME = APP_CONFIG.storage.databaseName;
 const STORE_NAME = 'documents';
@@ -15,7 +16,6 @@ const DOCUMENT_ID = 'current';
 const RECOVERY_DOCUMENT_ID = 'last-non-empty';
 const DATABASE_VERSION = 6;
 const MAX_CHECKPOINTS = 20;
-const MAX_LOCAL_TRACES = 50;
 
 type StoredDocument = EditorDocument & { id: string };
 
@@ -224,7 +224,8 @@ export async function saveLocalCinemaTrace(trace: LocalCinemaTrace): Promise<voi
     database.close();
   }
   const stored = await listLocalCinemaTraces();
-  await Promise.all(stored.slice(MAX_LOCAL_TRACES).map((entry) => deleteLocalCinemaTrace(entry.id)));
+  const retained = new Set(pruneCinemaTraceRecords(stored).map((entry) => entry.id));
+  await Promise.all(stored.filter((entry) => !retained.has(entry.id)).map((entry) => deleteLocalCinemaTrace(entry.id)));
 }
 
 export async function listLocalCinemaTraces(): Promise<LocalCinemaTrace[]> {
@@ -236,7 +237,7 @@ export async function listLocalCinemaTraces(): Promise<LocalCinemaTrace[]> {
       request.onsuccess = () => resolve(request.result as LocalCinemaTrace[]);
       request.onerror = () => reject(request.error);
     });
-    return traces.sort((left, right) => right.createdAt - left.createdAt);
+    return pruneCinemaTraceRecords(traces);
   } finally {
     database.close();
   }

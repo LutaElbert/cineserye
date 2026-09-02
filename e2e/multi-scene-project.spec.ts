@@ -99,3 +99,33 @@ test('S7-E2E-03 shows aggregate totals plus explicit narrative, production, and 
   await expect(sequence).toContainText('unplanned');
   await expect(sequence).toContainText('missing');
 });
+
+test('S8-E2E-01 audits a scoped continuity change, records the decision, and undoes it', async ({ page }) => {
+  await openAcceptedSample(page);
+  const workspace = await importTwoScenes(page);
+  const firstEntity = workspace.locator('.shared-entity-list article').first();
+
+  await firstEntity.getByRole('button', { name: 'Review impact' }).click();
+  await workspace.getByRole('dialog', { name: /Share .* across every scene/ })
+    .getByRole('button', { name: 'Accept continuity change' })
+    .click();
+  await firstEntity.getByRole('button', { name: 'Add scene variant' }).click();
+  const variant = workspace.getByRole('form', { name: 'Scene continuity variant' });
+  await variant.getByLabel('Scene').selectOption({ label: 'The Warning' });
+  await variant.getByLabel('Wardrobe or visual change').fill('Rain-soaked jacket');
+  await variant.getByRole('button', { name: 'Save variant' }).click();
+
+  await workspace.getByRole('button', { name: 'Audit project' }).click();
+  const audit = workspace.getByRole('region', { name: 'Continuity audit' });
+  await expect(audit).toContainText(/1 open of \d+ ranked findings/);
+  const finding = audit.locator('.audit-finding').filter({ hasText: /Review .* in The Warning/ });
+  await expect(finding).toContainText('warning · wardrobe condition');
+  await expect(finding).toContainText(/1 scenes · \d+ shots · deterministic/);
+  await finding.getByRole('button', { name: 'Record as intentional' }).click();
+  await expect(finding).toContainText('accepted');
+  await expect(firstEntity).toContainText('1 exceptions');
+
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(finding.getByRole('button', { name: 'Record as intentional' })).toBeVisible();
+  await expect(firstEntity).toContainText('0 exceptions');
+});

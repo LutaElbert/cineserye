@@ -2,7 +2,7 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-The local project foundation is now implemented through Sprint 7: each selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can build and independently plan a small multi-scene microdrama, curate rights-aware references, generate one to four directed storyboard variants, manage synchronized Canvas, Project, Shot table, and Board views, and turn one approved frame into one separately reviewed clip. Shared continuity, scoped variants/exceptions, production order, setups, sequence readiness, and local handoff remain explicit. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills and the one-clip experiment use environment-selected Vertex models. Cineserye still contains no authentication, cloud project store, automatic timeline assembly, autonomous copilot, or deployment.
+The local project foundation is now implemented through Sprint 10: each selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can build and independently plan a small multi-scene microdrama, curate rights-aware references, generate one to four directed storyboard variants, manage synchronized Canvas, Project, Shot table, and Board views, and turn one approved frame into one separately reviewed clip. A fixture-first continuity audit now ranks at most five project, scene, or entity findings and can only record one explicit, fingerprint-checked correction at a time. Deterministic fixture mode remains the default. Live planning is fail-closed behind the exact Google account/project/quota contract, consent receipt, per-run ceiling, and local kill switch. Cineserye still contains no authentication, cloud project store, automatic timeline assembly, autonomous mutation, or deployment.
 
 ## Foundation
 
@@ -25,6 +25,8 @@ The local project foundation is now implemented through Sprint 7: each selected 
 - A deterministic local handoff ZIP containing a revision-specific shot-list CSV and PDF, prompt and source/provenance Markdown, illustrative-cost CSV, and JSON manifest.
 - A one-shot Motion Workbench with a current Veo 3.1 capability profile, approved-frame gate, one silent 4/6/8-second clip, server spend ceiling, reload-safe polling, cancel/retry states, content-addressed local MP4 storage, metadata download, and independent clip approval.
 - A multi-scene Project workspace with reviewed treatment import, manual/duplicate outlines, independent scene revisions, explicit narrative and production sequence status, aggregate duration/cost/output totals, shared continuity impact review, scoped variants, and rationale-backed exceptions.
+- A bounded continuity audit for project, scene, or entity scope, with deterministic evidence, complete affected-record disclosure, dismiss/intentional outcomes, and stale-result protection.
+- Local-only quality closure with 18 development and six sealed-holdout cases, metadata-only 30-day/500-event diagnostics, a 100-run fixture soak, spend reservations, and a local kill switch.
 
 The initial story canvas is a linear fixture:
 
@@ -89,6 +91,7 @@ After accepting a plan, switch among **Canvas**, **Project**, **Shot table**, an
 4. Under **Characters and assets**, review the complete affected-scene and affected-shot list before sharing an entity. Accept explicitly, then add a scene-scoped wardrobe/condition variant or a rationale-backed continuity exception.
 5. Use **Project sequence** to compare narrative shot order with production order and see approved clip, approved frame, failed, missing, and unplanned status without loading every media blob.
 6. Project totals are derived from scene records; a failure or revision in one scene does not replace another scene's accepted plan.
+7. Choose **Audit project**, select project/scene/entity scope, and inspect the ranked findings. Dismiss an advisory without changing the project, or record an intentional continuity exception through one undoable command. A changed source fingerprint blocks stale acceptance.
 
 The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 
@@ -111,17 +114,23 @@ Open `http://localhost:3000`.
 
 ### Optional live providers
 
-Authenticate local Vertex access with Application Default Credentials, then start Cineserye with server-only environment variables:
+Credential login and project selection are explicit operator actions; the app never changes them automatically. After any required setup, run the repository-owned read-only preflight, then start Cineserye with server-only environment variables:
 
 ```sh
 gcloud auth application-default login
 gcloud config set project cineserye
+npm run preflight:gcloud
 
 export CINESERYE_PROVIDER_MODE=live
 export PARALLEL_API_KEY='set-this-outside-git'
+export CINESERYE_GCLOUD_ACTIVE_ACCOUNT='elbertluta@gmail.com'
 export GOOGLE_CLOUD_PROJECT=cineserye
+export GOOGLE_CLOUD_QUOTA_PROJECT=cineserye
 export GOOGLE_CLOUD_LOCATION=global
 export CINESERYE_VERTEX_MODEL=gemini-3.7-flash
+# Live text calls remain blocked unless both safeguards are deliberately set.
+export CINESERYE_LIVE_ENABLED=true
+export CINESERYE_LIVE_MAX_RUN_COST='set-a-small-positive-per-run-limit'
 # Storyboard stills remain blocked until both values are configured.
 export CINESERYE_VERTEX_IMAGE_MODEL=gemini-2.5-flash-image
 export CINESERYE_STORYBOARD_USD_PER_IMAGE='set-current-provider-price'
@@ -134,6 +143,8 @@ export CINESERYE_VIDEO_USD_PER_SECOND='set-current-provider-price'
 export CINESERYE_VIDEO_MAX_ESTIMATED_USD='set-a-small-per-request-limit'
 npm run dev
 ```
+
+`npm run preflight:gcloud` verifies the active CLI account, configured project, ADC presence/quota project, and Vertex API availability without changing gcloud configuration or printing tokens. The environment assertions consumed by the app must match that verified result; they are not a substitute for this check.
 
 Do not prefix provider variables with `NEXT_PUBLIC_`. Cloud telemetry and full prompt/response logging remain off unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately set after a content-retention review.
 
@@ -177,6 +188,15 @@ agents-cli eval grade \
   --config tests/eval/cross_scene_eval_config.yaml \
   --output output/eval/sprint7
 ```
+
+The Sprint 10 development and sealed-holdout grades are also deterministic and local-only:
+
+```sh
+agents-cli eval grade --traces tests/eval/datasets/cineserye-agent-readiness-development-traces.json --config tests/eval/agent_readiness_eval_config.yaml --output output/eval/sprint10-development
+agents-cli eval grade --traces tests/eval/datasets/cineserye-agent-readiness-holdout-traces.json --config tests/eval/agent_readiness_eval_config.yaml --output output/eval/sprint10-holdout
+```
+
+No live Parallel, Vertex, storyboard, video, managed-evaluation, or Cloud Trace command is part of the ordinary verification gate.
 
 CI builds the application and runs Playwright against the local production Cloudflare Worker in Chromium, Firefox, and WebKit. Verification does not deploy the Worker.
 

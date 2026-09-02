@@ -31,4 +31,17 @@ describe('Agents CLI evaluation assets', () => {
       expect(item.rubric_groups.production_rubrics.rubrics).toHaveLength(3);
     }
   });
+
+  it('S10-EVAL-01 keeps 18 development cases and six sealed holdout cases separate', () => {
+    const load = (name: string) => JSON.parse(readFileSync(
+      resolve(process.cwd(), `tests/eval/datasets/${name}`),
+      'utf8',
+    )) as EvalDataset;
+    const development = load('cineserye-agent-readiness-development-traces.json');
+    const holdout = load('cineserye-agent-readiness-holdout-traces.json');
+    expect(development.eval_cases).toHaveLength(18);
+    expect(holdout.eval_cases).toHaveLength(6);
+    const allIds = [...development.eval_cases, ...holdout.eval_cases].map((item) => item.eval_case_id);
+    expect(new Set(allIds).size).toBe(24);
+  });
 });

@@ -13,6 +13,14 @@ import {
   type CinemaSharedEntityVariantRecord,
 } from '../domain/cinema/multi-scene';
 import {
+  cinemaAuditFingerprint,
+  readCinemaAuditData,
+  runFixtureContinuityAudit,
+  storeCinemaAuditResult,
+  writeCinemaAuditData,
+  type CinemaAuditScope,
+} from '../domain/cinema/continuity-audit';
+import {
   assignShotsToSetup,
   reconcileProfessionalPlanningData,
   reorderProductionShot,
@@ -35,6 +43,9 @@ export type CinemaDomainCommand =
   | { type: 'set-shared-entity-scenes'; entityNodeId: string; sceneIds: string[] }
   | { type: 'upsert-shared-entity-variant'; variant: CinemaSharedEntityVariantRecord }
   | { type: 'add-project-continuity-exception'; exception: CinemaProjectContinuityException }
+  | { type: 'run-continuity-audit'; scope: CinemaAuditScope; createdAt: string }
+  | { type: 'dismiss-continuity-audit-finding'; findingId: string }
+  | { type: 'accept-continuity-audit-correction'; findingId: string; sourceFingerprint: string }
   | { type: 'update-shot'; shotId: string; patch: CinemaShotPatch }
   | { type: 'batch-update-shots'; updates: Array<{ shotId: string; patch: CinemaShotPatch }> }
   | { type: 'reorder-shot'; shotId: string; toIndex: number }
@@ -179,6 +190,38 @@ export function applyCinemaDomainCommand(
     cinema.multiScene = upsertSharedEntityVariant(cinema.multiScene, command.variant);
   } else if (command.type === 'add-project-continuity-exception') {
     cinema.multiScene.continuityExceptions[command.exception.id] = structuredClone(command.exception);
+  } else if (command.type === 'run-continuity-audit') {
+    storeCinemaAuditResult(cinema, runFixtureContinuityAudit(cinema, command.scope, command.createdAt));
+  } else if (command.type === 'dismiss-continuity-audit-finding') {
+    const audit = readCinemaAuditData(cinema);
+    const finding = audit.findings[command.findingId];
+    if (!finding) throw new Error('Continuity audit finding is missing.');
+    finding.disposition = 'dismissed';
+    writeCinemaAuditData(cinema, audit);
+  } else if (command.type === 'accept-continuity-audit-correction') {
+    const audit = readCinemaAuditData(cinema);
+    const finding = audit.findings[command.findingId];
+    const run = Object.values(audit.runs).find((candidate) => candidate.findingIds.includes(command.findingId));
+    if (!finding || !run || !finding.correction) throw new Error('Continuity audit correction is unavailable.');
+    if (run.sourceFingerprint !== command.sourceFingerprint
+      || cinemaAuditFingerprint(cinema, run.scope) !== command.sourceFingerprint) {
+      throw new Error('This audit is stale. Run it again before accepting a correction.');
+    }
+    if (!cinema.scenes[finding.correction.sceneId]) throw new Error('Continuity audit scene is missing.');
+    const entityExists = [...Object.values(cinema.characters), ...Object.values(cinema.assets)]
+      .some((entity) => entity.nodeId === finding.correction?.entityNodeId);
+    if (!entityExists || finding.correction.shotIds.some((shotId) => cinema.shots[shotId]?.sceneId !== finding.correction?.sceneId)) {
+      throw new Error('Continuity audit correction references are invalid.');
+    }
+    cinema.multiScene.continuityExceptions[`audit-exception-${finding.id}`] = {
+      id: `audit-exception-${finding.id}`,
+      entityNodeId: finding.correction.entityNodeId,
+      sceneId: finding.correction.sceneId,
+      shotIds: [...finding.correction.shotIds],
+      rationale: boundedText(finding.correction.rationale, 'Audit correction rationale', 4_000),
+    };
+    finding.disposition = 'accepted';
+    writeCinemaAuditData(cinema, audit);
   } else if (command.type === 'update-shot') {
     const shot = cinema.shots[command.shotId];
     if (!shot) throw new Error(`Shot ${command.shotId} is missing.`);
