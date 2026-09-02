@@ -24,6 +24,31 @@ function distributeDuration(target: number): number[] {
 
 function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectData {
   const cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
+  const fixtureSceneId = 'scene-01';
+  const sceneId = request.brief.sceneNodeId;
+  if (sceneId !== fixtureSceneId) {
+    const scene = cinema.scenes[fixtureSceneId];
+    delete cinema.scenes[fixtureSceneId];
+    cinema.scenes[sceneId] = { ...scene, id: sceneId, nodeId: sceneId };
+    cinema.sceneOrder = [sceneId];
+    cinema.activeSceneId = sceneId;
+    for (const shot of Object.values(cinema.shots)) shot.sceneId = sceneId;
+    for (const character of Object.values(cinema.characters)) character.sceneIds = [sceneId];
+    for (const asset of Object.values(cinema.assets)) asset.sceneIds = [sceneId];
+    for (const run of Object.values(cinema.agentRuns)) run.sceneId = sceneId;
+    for (const cost of Object.values(cinema.costs)) cost.sceneId = sceneId;
+    for (const setup of Object.values(cinema.professionalPlanning?.setups ?? {})) setup.sceneId = sceneId;
+    for (const exception of Object.values(cinema.professionalPlanning?.continuityExceptions ?? {})) exception.sceneId = sceneId;
+    for (const prompt of Object.values(cinema.prompts)) {
+      if (prompt.ownerNodeId === fixtureSceneId) prompt.ownerNodeId = sceneId;
+    }
+    cinema.multiScene = {
+      version: 1,
+      sceneOrder: [sceneId],
+      sharedEntityVariants: {},
+      continuityExceptions: {},
+    };
+  }
   const baseRun = cinema.agentRuns['cine-agent-plan'];
   delete cinema.agentRuns['cine-agent-plan'];
   cinema.agentRuns[request.runId] = {
@@ -34,8 +59,8 @@ function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectData {
     startedAt: new Date().toISOString(),
     completedAt: null,
   };
-  cinema.scenes['scene-01'].synopsis = request.brief.sceneText;
-  cinema.scenes['scene-01'].brief = {
+  cinema.scenes[sceneId].synopsis = request.brief.sceneText;
+  cinema.scenes[sceneId].brief = {
     version: 2,
     creationMode: request.brief.creationMode,
     aspectRatio: request.brief.aspectRatio,
@@ -52,7 +77,7 @@ function fixtureCinema(request: ShotPlannerProviderRequest): CinemaProjectData {
   };
 
   const durations = distributeDuration(request.brief.targetDurationSeconds);
-  cinema.scenes['scene-01'].shotIds.forEach((shotId, index) => {
+  cinema.scenes[sceneId].shotIds.forEach((shotId, index) => {
     cinema.shots[shotId].durationSeconds = durations[index];
   });
   for (const prompt of Object.values(cinema.prompts)) {

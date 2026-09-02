@@ -1,3 +1,4 @@
+import { MarkerType } from '@xyflow/react';
 import type {
   CinemaAssetRecord,
   CinemaCharacterRecord,
@@ -5,6 +6,12 @@ import type {
   CinemaSceneRecord,
   CinemaShotRecord,
 } from '../domain/cinema/project-data';
+import {
+  createDefaultMultiSceneData,
+  upsertSharedEntityVariant,
+  type CinemaProjectContinuityException,
+  type CinemaSharedEntityVariantRecord,
+} from '../domain/cinema/multi-scene';
 import {
   assignShotsToSetup,
   reconcileProfessionalPlanningData,
@@ -22,6 +29,12 @@ export type CinemaShotPatch = Partial<Pick<CinemaShotRecord,
   | 'durationSeconds' | 'audio' | 'risk' | 'continuityNodeIds'>>;
 
 export type CinemaDomainCommand =
+  | { type: 'add-scenes'; scenes: Array<{ id: string; title: string; synopsis: string; dramaticPurpose: string }> }
+  | { type: 'set-active-scene'; sceneId: string }
+  | { type: 'reorder-scene'; sceneId: string; toIndex: number }
+  | { type: 'set-shared-entity-scenes'; entityNodeId: string; sceneIds: string[] }
+  | { type: 'upsert-shared-entity-variant'; variant: CinemaSharedEntityVariantRecord }
+  | { type: 'add-project-continuity-exception'; exception: CinemaProjectContinuityException }
   | { type: 'update-shot'; shotId: string; patch: CinemaShotPatch }
   | { type: 'batch-update-shots'; updates: Array<{ shotId: string; patch: CinemaShotPatch }> }
   | { type: 'reorder-shot'; shotId: string; toIndex: number }
@@ -82,8 +95,91 @@ export function applyCinemaDomainCommand(
   const cinema = next.cinema;
   if (!cinema) throw new Error('Cinema project data is missing.');
   cinema.professionalPlanning = reconcileProfessionalPlanningData(cinema, cinema.professionalPlanning);
+  cinema.multiScene ??= createDefaultMultiSceneData(cinema);
 
-  if (command.type === 'update-shot') {
+  if (command.type === 'add-scenes') {
+    if (!command.scenes.length || command.scenes.length > 100 || cinema.sceneOrder.length + command.scenes.length > 100) {
+      throw new Error('Scene addition must contain between 1 and 100 scenes.');
+    }
+    const ids = command.scenes.map((scene) => scene.id);
+    if (new Set(ids).size !== ids.length || ids.some((sceneId) => cinema.scenes[sceneId] || next.nodes.some((node) => node.id === sceneId))) {
+      throw new Error('Scene ids must be unique.');
+    }
+    const storyNodeId = cinema.projectNodeId ?? next.nodes.find((node) => node.data.kind === 'concept' && node.data.domainType === 'cinema.story')?.id ?? null;
+    const sceneNodes = next.nodes.filter((node) => node.data.kind === 'concept' && node.data.domainType === 'cinema.scene');
+    const maxY = Math.max(0, ...sceneNodes.map((node) => node.position.y));
+    command.scenes.forEach((proposal, index) => {
+      const title = boundedText(proposal.title.trim(), 'Scene title', 500);
+      if (!title) throw new Error('Scene title is required.');
+      const synopsis = boundedText(proposal.synopsis, 'Scene synopsis');
+      const dramaticPurpose = boundedText(proposal.dramaticPurpose, 'Scene dramatic purpose');
+      cinema.scenes[proposal.id] = {
+        id: proposal.id,
+        nodeId: proposal.id,
+        title,
+        synopsis,
+        dramaticPurpose,
+        status: 'outline',
+        continuityNotes: '',
+        brief: null,
+        shotIds: [],
+      };
+      cinema.sceneOrder.push(proposal.id);
+      cinema.multiScene!.sceneOrder.push(proposal.id);
+      next.nodes.push({
+        id: proposal.id,
+        type: 'concept',
+        position: { x: 450, y: maxY + 220 * (index + 1) },
+        style: { width: 250, height: 140 },
+        draggable: true,
+        deletable: true,
+        selected: false,
+        data: {
+          kind: 'concept', domainType: 'cinema.scene', name: title, label: title,
+          title: conceptTitleFromPlainText(title), body: richTextFromPlainText(synopsis),
+          eyebrow: 'Scene', tone: 'ink', collapsed: false, horizontalAlign: 'left',
+          verticalAlign: 'top', opacity: 1, locked: false,
+        },
+      });
+      if (storyNodeId) next.edges.push({
+        id: `${storyNodeId}-${proposal.id}`,
+        source: storyNodeId,
+        target: proposal.id,
+        type: 'smoothstep',
+        animated: false,
+        style: { stroke: '#a9adb7', strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed },
+        data: { label: '', kind: 'default' },
+      });
+    });
+  } else if (command.type === 'set-active-scene') {
+    if (!cinema.scenes[command.sceneId]) throw new Error('Active scene is missing.');
+    cinema.activeSceneId = command.sceneId;
+    cinema.activeRevisionId = Object.values(cinema.revisions).find(
+      (revision) => revision.sceneId === command.sceneId && revision.status === 'active',
+    )?.id ?? null;
+  } else if (command.type === 'reorder-scene') {
+    if (!cinema.scenes[command.sceneId] || !Number.isInteger(command.toIndex)
+      || command.toIndex < 0 || command.toIndex >= cinema.sceneOrder.length) {
+      throw new Error('Scene reorder command is invalid.');
+    }
+    const ordered = cinema.sceneOrder.filter((sceneId) => sceneId !== command.sceneId);
+    ordered.splice(command.toIndex, 0, command.sceneId);
+    cinema.sceneOrder = ordered;
+    cinema.multiScene.sceneOrder = [...ordered];
+  } else if (command.type === 'set-shared-entity-scenes') {
+    const entity = [...Object.values(cinema.characters), ...Object.values(cinema.assets)]
+      .find((candidate) => candidate.nodeId === command.entityNodeId);
+    if (!entity || !command.sceneIds.length || new Set(command.sceneIds).size !== command.sceneIds.length
+      || command.sceneIds.some((sceneId) => !cinema.scenes[sceneId])) {
+      throw new Error('Shared continuity scene assignment is invalid.');
+    }
+    entity.sceneIds = [...command.sceneIds];
+  } else if (command.type === 'upsert-shared-entity-variant') {
+    cinema.multiScene = upsertSharedEntityVariant(cinema.multiScene, command.variant);
+  } else if (command.type === 'add-project-continuity-exception') {
+    cinema.multiScene.continuityExceptions[command.exception.id] = structuredClone(command.exception);
+  } else if (command.type === 'update-shot') {
     const shot = cinema.shots[command.shotId];
     if (!shot) throw new Error(`Shot ${command.shotId} is missing.`);
     assertKnownKeys(command.patch, [
@@ -198,6 +294,7 @@ export function applyCinemaDomainCommand(
     assertKnownKeys(command.patch, configuration.keys, 'Cinema patch');
     Object.assign(record, structuredClone(command.patch));
   }
+  cinema.professionalPlanning = reconcileProfessionalPlanningData(cinema, cinema.professionalPlanning);
   next.updatedAt = Date.now();
   return validateEditorDocument(next);
 }

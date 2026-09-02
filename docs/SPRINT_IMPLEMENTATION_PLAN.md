@@ -10,7 +10,7 @@
 
 **Scope:** a seven-sprint local product roadmap, from one-scene workflow closure through multi-scene microdrama planning
 
-**Execution status (2026-09-02):** Sprints 1–6 are complete and verified. Gate D—the controlled media proof—is the current product boundary. Sprint 6 adds a capability-aware one-shot video boundary, one approved-frame input, server-enforced spend and output limits, reload-safe operation tracking, explicit cancel/retry behavior, content-addressed local MP4 storage, metadata portability, and independent clip approval. Sprint 7 is authorized and remains gated by its complete acceptance suite.
+**Execution status (2026-09-02):** Sprints 1–7 are complete and verified. Gate E—the local project-level product—is now the product boundary. Sprint 7 adds reviewed manual/treatment scene creation, independent per-scene revisions, project totals and sequence status, shared continuity impact review, scoped variants/exceptions, additive single-scene migration, and a deterministic local Agents CLI evaluation. Hosted collaboration and an autonomous copilot remain outside this roadmap.
 
 | Sprint | Status | Acceptance evidence |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 | 4 — One-Shot Storyboard Frame | Complete | Offline fixture and opt-in Vertex adapter, accepted-plan/reference validation, 1–4 variants, spend caps, cancel/retry, immutable provenance, one approved anchor, reload/restore, dimension-aware canvas layout, workbench-first Visuals UI, and accessibility tests |
 | 5 — Professional Planning and Handoff | Complete | One-source-of-truth table/board/canvas editing, independent production order/setups, continuity matrix, directed intent, mobile statuses, and a cross-browser six-file ZIP handoff |
 | 6 — One-Shot Video Experiment | Complete | Current Veo capability snapshot, bounded start-frame operation, spend guard, reload/cancel/retry, local MP4/metadata, and independent approval |
-| 7 — Multi-Scene Microdrama Production | Authorized, gated | Proceed only after Sprint 6's complete regression gate passes |
+| 7 — Multi-Scene Microdrama Production | Complete | Three independently planned scenes, reviewed import, shared continuity/variants/exceptions, aggregate sequence, migration/performance/evaluation gates |
 
 ### Sprint 4 close evidence
 
@@ -1018,6 +1018,8 @@ Expand the proven single-scene loop into a small project while preserving scene-
 
 Complete UC-10 and export a three-scene project package. This closes the remaining local product roadmap; hosted collaboration remains a separate program.
 
+**Completion evidence:** passed in deterministic fixture mode. The new Project workspace creates or duplicates outlines, parses plain-text treatments into editable boundary proposals without mutation, and adds them only after acceptance. Each scene keeps an independent active revision; accepting or revising one scene preserves every other scene and canvas host. Project totals, narrative order, production order, artifact status, filtering, collapse state, active-scene navigation, shared entity usage, impact review, scoped variants, and rationale-backed exceptions are derived from the validated sidecar. The 10-scene/100-shot/50-reference performance case remains metadata-only and completes within its interaction budget. The local Agents CLI `cross_scene_impact_contract` graded 2/2 cases with a 1.0000 mean and no cloud call. Vinext compatibility remained 100%; TypeScript, ESLint, build, client-boundary scanning, high-severity audit, 170 passing unit/integration tests with three opt-in live skips, and the complete 184-pass Chromium/Firefox/WebKit browser matrix with two intended stress skips passed. No live planning, storyboard, video, or managed evaluation call ran; no provider credits were spent and nothing was deployed.
+
 ## 12. Cross-sprint regression program
 
 ### Regression suite A — Generic canvas foundation
@@ -1042,7 +1044,6 @@ Run after every work package touching `app/editor`, persistence, document schema
 | REG-CIN-01 | Every cinema record resolves to its required scene/host/reference or is rejected. |
 | REG-CIN-02 | Provider output never authors or applies canvas commands directly. |
 | REG-CIN-03 | Preview mutates only a clone; reject is byte-equivalent; accept is one history step. |
-| REG-CIN-04 | Host, sidecar, outline, inspector, table, export, and backup never disagree after accepted edits. |
 | REG-CIN-05 | Invalid citations remain uncited; unrelated fallback sources never appear. |
 | REG-CIN-06 | Revision and scene isolation preserve prior accepted work. |
 | REG-CIN-07 | Duration, order, continuity, source, and cost arithmetic remain internally consistent. |

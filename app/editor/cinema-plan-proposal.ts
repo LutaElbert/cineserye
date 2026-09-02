@@ -311,12 +311,13 @@ export function compileCinemaCanvasProposal(
 }
 
 function activePlanHostIds(cinema: CinemaProjectData | undefined): string[] {
-  if (!cinema) return [];
+  if (!cinema?.activeSceneId) return [];
+  const sceneId = cinema.activeSceneId;
   return [
-    ...Object.values(cinema.shots).map((record) => record.nodeId),
-    ...Object.values(cinema.characters).map((record) => record.nodeId),
-    ...Object.values(cinema.assets).map((record) => record.nodeId),
-    ...Object.values(cinema.agentRuns).map((record) => record.nodeId),
+    ...Object.values(cinema.shots).filter((record) => record.sceneId === sceneId).map((record) => record.nodeId),
+    ...Object.values(cinema.characters).filter((record) => record.sceneIds.length === 1 && record.sceneIds[0] === sceneId).map((record) => record.nodeId),
+    ...Object.values(cinema.assets).filter((record) => record.sceneIds.length === 1 && record.sceneIds[0] === sceneId).map((record) => record.nodeId),
+    ...Object.values(cinema.agentRuns).filter((record) => record.sceneId === sceneId).map((record) => record.nodeId),
   ];
 }
 

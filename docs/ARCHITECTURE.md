@@ -34,6 +34,14 @@ compare variants → approve one shot anchor
   queued → running → finalizing → local MP4
                 |
         review → approve one clip
+
+accepted project + reviewed scene outlines
+                |
+ independent scene revisions + shared entities
+                |
+ continuity impact review → explicit acceptance
+                |
+ project totals + narrative/production sequence
 ```
 
 ## Generic editor foundation
@@ -60,8 +68,9 @@ Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the dest
 - prompt records;
 - research-source records with supported, needs-verification, or irrelevant review state plus creator pinning and usage relationships;
 - illustrative, credits-based, or explicitly unpriced cost records with a versioned profile and visible assumptions.
-- immutable accepted-plan revision snapshots with predecessor links and one active revision.
+- immutable accepted-plan revision snapshots with predecessor links and at most one active revision per scene; `activeRevisionId` follows the currently focused scene.
 - visual pre-production records for typed references, explicit rights/allowed-use/approval, storyboard runs, immutable frame provenance, long-running video operations, and immutable clip provenance.
+- additive multi-scene records for project order, scene-scoped shared-entity variants, and rationale-backed continuity exceptions.
 
 Runtime validation resolves every scene, shot, character, asset, prompt, source, cost, run, and host canvas node relationship. The sidecar participates in document migrations, IndexedDB autosave, checkpoints, `.cineserye` backup/restore, and undo/redo.
 
@@ -93,6 +102,8 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 
 `app/features/video/VideoPreproductionPanel.tsx` persists the local operation identity before polling, resumes it after browser reload, stores successful MP4 bytes by SHA-256, and creates a separate candidate clip record only after storage succeeds. Setting changes invalidate confirmation. Failed, timed-out, and cancelled operations keep content-bounded diagnostics and can be retried as linked operations without altering the approved plan or frame.
 
+`app/domain/cinema/multi-scene.ts` owns reviewed scene-boundary proposals, aggregate totals, continuity impact analysis, shared variants/exceptions, and artifact sequence projection. `app/features/project/ProjectProductionWorkspace.tsx` is a projection over those records. Treatment parsing is pure; manual/import acceptance, scene focus/order, sharing, variants, and exceptions all pass through `cinema-domain-commands.ts` and full document validation. Accepting a plan merges only the target scene's generated records and supersedes only that scene's prior active revision.
+
 Portable backup version 6 embeds referenced images but intentionally excludes MP4 bytes. Video metadata and approval remain in the document, and the UI tells creators to download clips separately. Restore verifies embedded image size and SHA-256 before writing any blob, never fetches external inspiration links or video, and remains compatible with text-only backup versions 1–5.
 
 ## Review and persistence sequence
@@ -110,7 +121,7 @@ Portable backup version 6 embeds referenced images but intentionally excludes MP
 
 ## Evaluation and observability
 
-`tests/eval` contains a versioned, Agents CLI–compatible three-case dataset and scoring configuration. `evaluation-adapter.ts` creates a versioned artifact containing the brief, validated result, provider configuration, scoring policy, run ID, and content-free trace. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, and telemetry privacy. `vertex-adk-live.test.ts` is opt-in and proves the real Vertex/ADK contract with local ADC while using a local research fixture.
+`tests/eval` contains a versioned, Agents CLI–compatible one-scene planning dataset plus a local cross-scene continuity trace/config. The Sprint 7 `cross_scene_impact_contract` executes in-process and verifies complete affected-scene/shot disclosure before acceptance without an LLM or cloud service. `evaluation-adapter.ts` creates a versioned artifact containing the brief, validated result, provider configuration, scoring policy, run ID, and content-free trace. Vitest is the deterministic gate for schemas, citations, duration, continuity, costs, mutation safety, and telemetry privacy. `vertex-adk-live.test.ts` is opt-in and proves the real Vertex/ADK contract with local ADC while using a local research fixture.
 
 The browser retains at most 50 content-free run traces in the local `agent-traces` store. The provider-mode badge exposes safe configuration metadata and trace JSON export; the export never contains scenes, prompts, research findings, citations, or credentials. Cloud trace or completion export is not configured. Prompt/response capture and completion upload are disabled unless `CINESERYE_ENABLE_CLOUD_TELEMETRY=true` is deliberately supplied after a retention review.
 
@@ -122,4 +133,4 @@ The browser retains at most 50 content-free run traces in the local `agent-trace
 - automatic proposal acceptance or background autonomy;
 - A2A exposure, deployment, or provisioned observability infrastructure.
 
-The next implementation phase is Sprint 7 multi-scene microdrama production. It must preserve the verified one-scene approval and storage boundaries and must not make video generation a prerequisite for planning or sequence review.
+The recommended next product feature is a continuity-aware copilot audit that proposes one bounded project change, explains affected scenes/shots, and waits for explicit acceptance. It should reuse the verified command and evaluation boundaries; autonomous mutation, authentication, collaboration, and deployment remain separate programs.

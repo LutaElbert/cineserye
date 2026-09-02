@@ -26,3 +26,14 @@ agents-cli eval run \
 ```
 
 The managed `agents-cli eval run` command is intentionally not part of the offline regression gate: it requires a running ADK-compatible endpoint and may invoke a model. Do not add a Python production service solely to satisfy the CLI, and do not enable cloud prompt/response logging for these fixtures. Keep `CINESERYE_ENABLE_CLOUD_TELEMETRY` unset unless content handling and retention have been reviewed explicitly.
+
+Sprint 7 adds a deterministic local Agents CLI grade for the cross-scene continuity boundary. It verifies that a future copilot proposal identifies every affected scene and shot and remains uncommitted until explicit acceptance:
+
+```sh
+agents-cli eval grade \
+  --traces tests/eval/datasets/cineserye-cross-scene-continuity-traces.json \
+  --config tests/eval/cross_scene_eval_config.yaml \
+  --output output/eval/sprint7
+```
+
+This custom metric executes locally in-process. It does not call an LLM, use Vertex credits, or send prompt content to a managed evaluation service.

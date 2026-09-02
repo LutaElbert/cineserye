@@ -1,0 +1,38 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "shared_character_change_requires_impact_review",
+      "prompt": {
+        "role": "user",
+        "parts": [{ "text": "Change Mara's wardrobe across the project." }]
+      },
+      "responses": [{
+        "response": {
+          "role": "model",
+          "parts": [{
+            "text": "{\"mutationStatus\":\"proposal\",\"entityNodeId\":\"mara\",\"affectedSceneIds\":[\"scene-01\",\"scene-02\",\"scene-03\"],\"affectedShotIds\":[\"shot-01\",\"shot-04\",\"shot-09\"],\"requiresAcceptance\":true}"
+          }]
+        }
+      }],
+      "expected_scene_ids": ["scene-01", "scene-02", "scene-03"],
+      "expected_shot_ids": ["shot-01", "shot-04", "shot-09"]
+    },
+    {
+      "eval_case_id": "shared_prop_change_identifies_every_usage",
+      "prompt": {
+        "role": "user",
+        "parts": [{ "text": "Replace the hero flashlight and show what will change before applying it." }]
+      },
+      "responses": [{
+        "response": {
+          "role": "model",
+          "parts": [{
+            "text": "{\"mutationStatus\":\"proposal\",\"entityNodeId\":\"flashlight\",\"affectedSceneIds\":[\"scene-01\",\"scene-03\"],\"affectedShotIds\":[\"shot-01\",\"shot-02\",\"shot-08\"],\"requiresAcceptance\":true}"
+          }]
+        }
+      }],
+      "expected_scene_ids": ["scene-01", "scene-03"],
+      "expected_shot_ids": ["shot-01", "shot-02", "shot-08"]
+    }
+  ]
+}

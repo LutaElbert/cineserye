@@ -1,6 +1,6 @@
 # Cineserye privacy baseline
 
-Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, reference rights/usage records, content-addressed reference/storyboard/video blobs, illustrative cost profiles, checkpoints, pending proposal reviews, content-free agent traces, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups, SVG exports, trace JSON exports, clip MP4 downloads, and clip metadata exports are created only when the creator asks for a download. Version-6 project backups embed the local images required by reference and storyboard records and verify every SHA-256 hash during restore; video metadata is portable, but MP4 bytes are intentionally excluded to avoid silently huge backups.
+Cineserye is local-first. The editable canvas, multi-scene order, scoped continuity variants/exceptions, cinema sidecar, accepted prompts, normalized research sources, source-curation state, reference rights/usage records, content-addressed reference/storyboard/video blobs, illustrative cost profiles, checkpoints, pending proposal reviews, content-free agent traces, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups, SVG exports, trace JSON exports, clip MP4 downloads, and clip metadata exports are created only when the creator asks for a download. Version-6 project backups embed the local images required by reference and storyboard records and verify every SHA-256 hash during restore; video metadata is portable, but MP4 bytes are intentionally excluded to avoid silently huge backups.
 
 ## Fixture mode
 
@@ -35,12 +35,16 @@ Default Cineserye telemetry records only run identifiers, agent/policy versions,
 
 ADK prompt/response capture and completion upload are disabled by default. Cloud telemetry is opt-in through `CINESERYE_ENABLE_CLOUD_TELEMETRY=true`; enabling it requires a separate content handling, access, retention, and cost review. The application has not been deployed and no analytics SDK is installed.
 
+The Sprint 7 Agents CLI continuity evaluation uses hand-authored fixture traces and a local in-process code metric. It sends no prompt, scene, or project content to Vertex Evaluation Service, invokes no judge model, and spends no provider credits.
+
 ## User control and limits
 
 - Cancelling, timing out, failing, or rejecting creates no canvas history entry.
 - A ready proposal is a locked ghost preview until explicit acceptance.
 - A ready proposal is saved locally before review so a reload does not repeat a provider call. It contains generated planning content and is restored only when its source-document fingerprint still matches; pending reviews are not included in SVG or `.cineserye` backup exports.
 - Restoring an accepted revision is an entirely local operation. It does not contact Parallel, Vertex AI, or another provider; the selected immutable snapshot is re-scoped into a new local revision after explicit confirmation.
+- Treatment import parses local text into editable scene-boundary proposals. It creates no scene, calls no provider, and mutates no accepted project until the creator explicitly accepts the review.
+- Sharing a character or asset first displays the locally derived affected scenes and shots. Scoped variants and continuity exceptions are stored only after explicit acceptance through the validated command boundary.
 - Source pins, support states, and removals made during review affect only the pending preview until acceptance.
 - Reference uploads default to unknown rights, research-only use, and pending approval. None of those states is inferred from a filename, URL, or upload action.
 - External inspiration links are stored as creator-provided metadata and are never fetched automatically.
@@ -54,6 +58,6 @@ ADK prompt/response capture and completion upload are disabled by default. Cloud
 - Deleting the final unlocked layers requires confirmation. Before applying it, Cineserye stores one local last-non-empty recovery document; restoring it does not contact a provider.
 - The recovery document is overwritten by the next confirmed full-canvas deletion and removed after a successful recovery. It is not a substitute for a portable backup.
 - Clearing browser site data removes the local working copy; a downloaded `.cineserye` file is the recovery mechanism.
-- No authentication, collaboration cloud, multi-shot video generation, automatic timeline assembly, or automatic deployment is implemented. Storyboard stills and one approved-frame-to-clip experiment are the bounded media exceptions described above.
+- No authentication, collaboration cloud, autonomous copilot, multi-shot video generation, automatic timeline assembly, or automatic deployment is implemented. Storyboard stills and one approved-frame-to-clip experiment are the bounded media exceptions described above.
 
 If Cineserye is deployed later, the host may process normal HTTP delivery metadata such as IP address, user agent, URL, timing, and status. Application logs must continue to exclude canvas and screenplay content. This technical baseline is not a complete privacy policy for a deployed product.

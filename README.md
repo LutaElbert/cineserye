@@ -2,7 +2,7 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-The controlled-media foundation is now implemented through Sprint 6: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references, generate one to four directed storyboard still variants, manage the accepted plan through synchronized Canvas, Shot table, and Board views, and turn one approved frame into one separately reviewed clip. Production order, camera/lighting setups, continuity state, status, and a six-file local handoff remain separate from narrative order. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills and the one-clip experiment use environment-selected Vertex models. Cineserye still contains no authentication, cloud project store, multi-shot timeline generation, or deployment.
+The local project foundation is now implemented through Sprint 7: each selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can build and independently plan a small multi-scene microdrama, curate rights-aware references, generate one to four directed storyboard variants, manage synchronized Canvas, Project, Shot table, and Board views, and turn one approved frame into one separately reviewed clip. Shared continuity, scoped variants/exceptions, production order, setups, sequence readiness, and local handoff remain explicit. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills and the one-clip experiment use environment-selected Vertex models. Cineserye still contains no authentication, cloud project store, automatic timeline assembly, autonomous copilot, or deployment.
 
 ## Foundation
 
@@ -24,6 +24,7 @@ The controlled-media foundation is now implemented through Sprint 6: one selecte
 - Synchronized Canvas, editable Shot table, and production Board projections over one validated cinema sidecar, with independent production order, camera/lighting setups, continuity matrix, planned/ready/captured/skipped status, and directed storyboard intent.
 - A deterministic local handoff ZIP containing a revision-specific shot-list CSV and PDF, prompt and source/provenance Markdown, illustrative-cost CSV, and JSON manifest.
 - A one-shot Motion Workbench with a current Veo 3.1 capability profile, approved-frame gate, one silent 4/6/8-second clip, server spend ceiling, reload-safe polling, cancel/retry states, content-addressed local MP4 storage, metadata download, and independent clip approval.
+- A multi-scene Project workspace with reviewed treatment import, manual/duplicate outlines, independent scene revisions, explicit narrative and production sequence status, aggregate duration/cost/output totals, shared continuity impact review, scoped variants, and rationale-backed exceptions.
 
 The initial story canvas is a linear fixture:
 
@@ -78,7 +79,16 @@ If every unlocked layer is deleted, Cineserye asks for confirmation and stores t
 
 ## Professional planning and handoff
 
-After accepting a plan, switch among **Canvas**, **Shot table**, and **Board** in the header. Table edits use the same validated domain command boundary as canvas edits. Narrative order remains the story sequence, while production order and setup assignment can be optimized independently for the shoot. Update continuity states before export, mark shots planned/ready/captured/skipped on a phone, then choose **Export handoff** to download one local ZIP containing the six revision-specific deliverables. The export is generated entirely in the browser and clearly labels illustrative costs.
+After accepting a plan, switch among **Canvas**, **Project**, **Shot table**, and **Board** in the header. Table and Project edits use the same validated domain command boundary as canvas edits. Narrative order remains the story sequence, while production order and setup assignment can be optimized independently for the shoot. Update continuity states before export, mark shots planned/ready/captured/skipped on a phone, then choose **Export handoff** to download one local ZIP containing the six revision-specific deliverables. The export is generated entirely in the browser and clearly labels illustrative costs.
+
+## Multi-scene project walkthrough
+
+1. Open **Project** after accepting the first scene plan.
+2. Add one scene manually, duplicate an outline, or paste a treatment. Treatment parsing only proposes editable boundaries; no node or cinema record is added until **Accept scenes**.
+3. Reorder, filter, or collapse scenes. Choose **Open & plan** to focus one outline on the canvas, then use the existing **Generate shot plan** review flow. Every scene keeps its own active revision.
+4. Under **Characters and assets**, review the complete affected-scene and affected-shot list before sharing an entity. Accept explicitly, then add a scene-scoped wardrobe/condition variant or a rationale-backed continuity exception.
+5. Use **Project sequence** to compare narrative shot order with production order and see approved clip, approved frame, failed, missing, and unplanned status without loading every media blob.
+6. Project totals are derived from scene records; a failure or revision in one scene does not replace another scene's accepted plan.
 
 The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 
@@ -157,6 +167,15 @@ The one-clip Veo smoke is also opt-in and can spend credits:
 
 ```sh
 CINESERYE_RUN_VIDEO_SMOKE=1 npx vitest run app/server/cinema/video-live.test.ts --config vitest.config.ts
+```
+
+The Sprint 7 cross-scene continuity evaluation runs locally through Google Agents CLI and spends no credits:
+
+```sh
+agents-cli eval grade \
+  --traces tests/eval/datasets/cineserye-cross-scene-continuity-traces.json \
+  --config tests/eval/cross_scene_eval_config.yaml \
+  --output output/eval/sprint7
 ```
 
 CI builds the application and runs Playwright against the local production Cloudflare Worker in Chromium, Firefox, and WebKit. Verification does not deploy the Worker.

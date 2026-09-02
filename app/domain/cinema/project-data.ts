@@ -215,6 +215,7 @@ export type CinemaProjectData = Omit<CinemaProjectDataV1, 'schemaVersion'> & {
   revisions: Record<string, CinemaPlanRevisionRecord>;
   visualPreproduction?: import('./visual-preproduction').CinemaVisualPreproductionData;
   professionalPlanning?: import('./professional-planning').CinemaProfessionalPlanningData;
+  multiScene?: import('./multi-scene').CinemaMultiSceneData;
 };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -470,6 +471,7 @@ export function createEmptyCinemaProjectData(projectId = 'cineserye-local-projec
       shots: {},
       costs: {},
     }),
+    multiScene: createDefaultMultiSceneData({ sceneOrder: [] }),
   };
 }
 
@@ -844,6 +846,7 @@ function migrateCinemaProjectDataV1(project: CinemaProjectDataV1): CinemaProject
       ...project,
       activeRevisionId: revisionId,
     }),
+    multiScene: createDefaultMultiSceneData(project),
   };
 }
 
@@ -880,8 +883,20 @@ export function validateCinemaProjectData(
     throw new Error('Active plan revision is missing.');
   }
   const activeRevisions = Object.values(revisions).filter((revision) => revision.status === 'active');
-  if (activeRevisionId === null ? activeRevisions.length > 0 : activeRevisions.length !== 1 || activeRevisions[0].id !== activeRevisionId) {
-    throw new Error('Plan revision active status is inconsistent.');
+  const activeRevisionByScene = new Map<string, CinemaPlanRevisionRecord>();
+  for (const revision of activeRevisions) {
+    if (activeRevisionByScene.has(revision.sceneId)) {
+      throw new Error(`Scene ${revision.sceneId} contains more than one active plan revision.`);
+    }
+    activeRevisionByScene.set(revision.sceneId, revision);
+  }
+  if (activeRevisionId !== null) {
+    const activeRevision = revisions[activeRevisionId];
+    if (activeRevision.status !== 'active' || activeRevision.sceneId !== current.activeSceneId) {
+      throw new Error('Active plan revision must belong to the active scene.');
+    }
+  } else if (current.activeSceneId && activeRevisionByScene.has(current.activeSceneId)) {
+    throw new Error('The active scene plan revision is not selected.');
   }
   const numbersByScene = new Set<string>();
   for (const revision of Object.values(revisions)) {
@@ -919,6 +934,7 @@ export function validateCinemaProjectData(
     ...current,
     activeRevisionId,
   });
+  const multiScene = validateMultiSceneData(value.multiScene, current);
   return {
     ...current,
     ...extensions(value),
@@ -928,6 +944,7 @@ export function validateCinemaProjectData(
     revisions,
     visualPreproduction,
     professionalPlanning,
+    multiScene,
   };
 }
 
@@ -940,18 +957,22 @@ export function acceptCinemaPlanRevision(
   if (!sceneId) throw new Error('An accepted plan requires an active scene.');
   const readyRun = Object.values(incoming.agentRuns).find((record) => record.sceneId === sceneId && record.status === 'ready');
   if (!readyRun) throw new Error('An accepted plan requires one ready agent run.');
-  const previous = current?.activeRevisionId ? current.revisions[current.activeRevisionId] : null;
+  const previous = Object.values(current?.revisions ?? {}).find(
+    (revision) => revision.sceneId === sceneId && revision.status === 'active',
+  ) ?? null;
   const previousNumbers = Object.values(current?.revisions ?? {})
     .filter((revision) => revision.sceneId === sceneId)
     .map((revision) => revision.number);
   const number = Math.max(0, ...previousNumbers) + 1;
   const revisionId = `${sceneId}-revision-${number}-${readyRun.id}`;
-  const next = structuredClone(incoming);
+  const next = mergeAcceptedScene(current, incoming, sceneId);
   const run = next.agentRuns[readyRun.id];
   run.status = 'accepted';
   run.completedAt = acceptedAt;
   const revisions = structuredClone(current?.revisions ?? {});
-  for (const revision of Object.values(revisions)) revision.status = 'superseded';
+  for (const revision of Object.values(revisions)) {
+    if (revision.sceneId === sceneId) revision.status = 'superseded';
+  }
   revisions[revisionId] = {
     id: revisionId,
     sceneId,
@@ -976,6 +997,10 @@ export function acceptCinemaPlanRevision(
       { ...next, activeRevisionId: revisionId },
       current?.professionalPlanning ?? incoming.professionalPlanning,
     ),
+    multiScene: validateMultiSceneData(
+      current?.multiScene ?? incoming.multiScene,
+      next,
+    ),
   };
   for (const shot of Object.values(result.shots)) {
     const referenceIds = Object.values(result.visualPreproduction?.references ?? {})
@@ -988,6 +1013,101 @@ export function acceptCinemaPlanRevision(
     }
   }
   return result;
+}
+
+function mergeAcceptedScene(
+  current: CinemaProjectData | undefined,
+  incoming: CinemaProjectData,
+  sceneId: string,
+): CinemaProjectData {
+  if (!current) return structuredClone(incoming);
+  const next = structuredClone(incoming);
+  const previousScene = current.scenes[sceneId];
+  const normalizedTitle = (value: string) => value.trim().toLocaleLowerCase();
+  const continuityHostRemap = new Map<string, string>();
+  for (const [incomingId, character] of Object.entries(next.characters)) {
+    const shared = Object.values(current.characters).find((candidate) => (
+      candidate.sceneIds.includes(sceneId)
+      && candidate.sceneIds.length > 1
+      && normalizedTitle(candidate.title) === normalizedTitle(character.title)
+    ));
+    if (shared) {
+      continuityHostRemap.set(character.nodeId, shared.nodeId);
+      delete next.characters[incomingId];
+    }
+  }
+  for (const [incomingId, asset] of Object.entries(next.assets)) {
+    const shared = Object.values(current.assets).find((candidate) => (
+      candidate.sceneIds.includes(sceneId)
+      && candidate.sceneIds.length > 1
+      && candidate.category === asset.category
+      && normalizedTitle(candidate.title) === normalizedTitle(asset.title)
+    ));
+    if (shared) {
+      continuityHostRemap.set(asset.nodeId, shared.nodeId);
+      delete next.assets[incomingId];
+    }
+  }
+  if (continuityHostRemap.size) {
+    for (const shot of Object.values(next.shots)) {
+      shot.continuityNodeIds = shot.continuityNodeIds.map((nodeId) => continuityHostRemap.get(nodeId) ?? nodeId);
+    }
+    for (const prompt of Object.values(next.prompts)) {
+      prompt.ownerNodeId = continuityHostRemap.get(prompt.ownerNodeId) ?? prompt.ownerNodeId;
+      prompt.continuityNodeIds = prompt.continuityNodeIds.map((nodeId) => continuityHostRemap.get(nodeId) ?? nodeId);
+    }
+  }
+  const previousRunIds = new Set(
+    Object.values(current.agentRuns).filter((run) => run.sceneId === sceneId).map((run) => run.id),
+  );
+  const scenes = structuredClone(current.scenes);
+  scenes[sceneId] = {
+    ...structuredClone(next.scenes[sceneId]),
+    ...(previousScene ? {
+      title: previousScene.title,
+      dramaticPurpose: previousScene.dramaticPurpose,
+      continuityNotes: previousScene.continuityNotes,
+    } : {}),
+  };
+  const sceneOrder = current.sceneOrder.includes(sceneId)
+    ? [...current.sceneOrder]
+    : [...current.sceneOrder, sceneId];
+  const keepOtherSceneRecords = <T extends { sceneId: string }>(records: Record<string, T>) =>
+    Object.fromEntries(Object.entries(records).filter(([, record]) => record.sceneId !== sceneId));
+  const keepOtherRunRecords = <T extends { runId: string }>(records: Record<string, T>) =>
+    Object.fromEntries(Object.entries(records).filter(([, record]) => !previousRunIds.has(record.runId)));
+  const retainSharedEntities = <T extends { sceneIds: string[] }>(records: Record<string, T>) =>
+    Object.fromEntries(Object.entries(records).flatMap(([key, record]) => {
+      if (!record.sceneIds.includes(sceneId) || record.sceneIds.length > 1) {
+        return [[key, structuredClone(record)]];
+      }
+      return [];
+    }));
+  return {
+    ...next,
+    projectId: current.projectId,
+    projectNodeId: current.projectNodeId ?? next.projectNodeId,
+    activeSceneId: sceneId,
+    sceneOrder,
+    scenes,
+    shots: { ...keepOtherSceneRecords(current.shots), ...next.shots },
+    characters: { ...retainSharedEntities(current.characters), ...next.characters },
+    assets: { ...retainSharedEntities(current.assets), ...next.assets },
+    agentRuns: { ...keepOtherSceneRecords(current.agentRuns), ...next.agentRuns },
+    prompts: { ...keepOtherRunRecords(current.prompts), ...next.prompts },
+    sources: { ...keepOtherRunRecords(current.sources), ...next.sources },
+    costs: { ...keepOtherSceneRecords(current.costs), ...next.costs },
+    visualPreproduction: structuredClone(
+      current.visualPreproduction ?? next.visualPreproduction ?? createEmptyVisualPreproductionData(),
+    ),
+    professionalPlanning: structuredClone(
+      current.professionalPlanning ?? next.professionalPlanning,
+    ),
+    multiScene: {
+      ...(structuredClone(current.multiScene) ?? createDefaultMultiSceneData(current)),
+      sceneOrder,
+    },
+  };
 }
 
 export type CinemaRevisionComparison = {
@@ -1106,6 +1226,11 @@ export function removeCinemaRecordsForNodes(
   if (next.activeRevisionId !== null && !next.revisions[next.activeRevisionId]) {
     next.activeRevisionId = null;
   }
+  if (next.activeSceneId) {
+    next.activeRevisionId = Object.values(next.revisions).find(
+      (revision) => revision.sceneId === next.activeSceneId && revision.status === 'active',
+    )?.id ?? null;
+  }
   for (const scene of Object.values(next.scenes)) {
     scene.shotIds = scene.shotIds.filter((shotId) => !removedShotIds.has(shotId));
   }
@@ -1184,6 +1309,22 @@ export function removeCinemaRecordsForNodes(
     }
   }
 
+  if (next.multiScene) {
+    next.multiScene.sceneOrder = [...next.sceneOrder];
+    for (const [variantId, variant] of Object.entries(next.multiScene.sharedEntityVariants)) {
+      if (removedSceneIds.has(variant.sceneId) || removedContinuityNodeIds.has(variant.entityNodeId)) {
+        delete next.multiScene.sharedEntityVariants[variantId];
+      }
+    }
+    for (const [exceptionId, exception] of Object.entries(next.multiScene.continuityExceptions)) {
+      if (removedSceneIds.has(exception.sceneId) || removedContinuityNodeIds.has(exception.entityNodeId)) {
+        delete next.multiScene.continuityExceptions[exceptionId];
+      } else {
+        exception.shotIds = exception.shotIds.filter((shotId) => !removedShotIds.has(shotId));
+      }
+    }
+  }
+
   next.professionalPlanning = reconcileProfessionalPlanningData(next, next.professionalPlanning);
 
   return validateCinemaProjectData(next, remainingHostNodeIds);
@@ -1194,3 +1335,4 @@ import {
   reconcileProfessionalPlanningData,
   validateProfessionalPlanningData,
 } from './professional-planning';
+import { createDefaultMultiSceneData, validateMultiSceneData } from './multi-scene';

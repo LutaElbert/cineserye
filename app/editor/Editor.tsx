@@ -213,12 +213,13 @@ import {
   ProfessionalPlanningWorkspace,
   type ProfessionalWorkspaceView,
 } from '../features/production/ProfessionalPlanningWorkspace';
+import { ProjectProductionWorkspace } from '../features/project/ProjectProductionWorkspace';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
 type SelectionOperation = 'replace' | 'add' | 'subtract';
 type MobilePanel = 'layers' | 'inspector' | null;
-type EditorWorkspaceView = 'canvas' | ProfessionalWorkspaceView;
+type EditorWorkspaceView = 'canvas' | 'project' | ProfessionalWorkspaceView;
 type Toast = { id: number; message: string; tone: 'info' | 'success' | 'error' };
 const MAX_FILES_PER_IMPORT = 12;
 const InlineConceptEditor = lazy(() => import('./InlineConceptEditor'));
@@ -1064,13 +1065,31 @@ function EditorInner() {
 
   const acceptMockProposal = useCallback(() => {
     if (!mockProposalPreview || !proposalCinema) return;
-    recordHistory();
-    setNodes(mockProposalPreview.document.nodes.map((node) => ({
-      ...node,
-      selected: node.id === 'cine-shot-03',
-    })));
-    setEdges(mockProposalPreview.document.edges.map((edge) => ({ ...edge, selected: false })));
     const nextCinema = acceptCinemaPlanRevision(cinemaRef.current, proposalCinema, new Date().toISOString());
+    const referencedNodeIds = new Set([
+      ...(nextCinema.projectNodeId ? [nextCinema.projectNodeId] : []),
+      ...Object.values(nextCinema.scenes).map((scene) => scene.nodeId),
+      ...Object.values(nextCinema.shots).map((shot) => shot.nodeId),
+      ...Object.values(nextCinema.characters).map((character) => character.nodeId),
+      ...Object.values(nextCinema.assets).map((asset) => asset.nodeId),
+      ...Object.values(nextCinema.agentRuns).map((run) => run.nodeId),
+    ]);
+    const orphanedProposalNodeIds = new Set(
+      mockProposalPreview.affectedNodeIds.filter((nodeId) => !referencedNodeIds.has(nodeId)),
+    );
+    recordHistory();
+    setNodes(mockProposalPreview.document.nodes
+      .filter((node) => !orphanedProposalNodeIds.has(node.id))
+      .map((node) => ({
+        ...node,
+        selected: node.id === 'cine-shot-03',
+      })));
+    setEdges(mockProposalPreview.document.edges
+      .filter((edge) => (
+        !orphanedProposalNodeIds.has(edge.source)
+        && !orphanedProposalNodeIds.has(edge.target)
+      ))
+      .map((edge) => ({ ...edge, selected: false })));
     setCinema(nextCinema);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
@@ -1782,6 +1801,23 @@ function EditorInner() {
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
     setMobilePanel('inspector');
   }, []);
+
+  const openProjectScene = useCallback((sceneId: string) => {
+    try {
+      const updated = applyCinemaDomainCommand(getCurrentDocument(), { type: 'set-active-scene', sceneId });
+      const nodeId = updated.cinema?.scenes[sceneId]?.nodeId;
+      recordHistory();
+      setNodes(updated.nodes.map((node) => ({ ...node, selected: node.id === nodeId })));
+      setEdges(updated.edges.map((edge) => ({ ...edge, selected: false })));
+      setCinema(updated.cinema);
+      setWorkspaceView('canvas');
+      setSelectedPath(null);
+      window.setTimeout(() => nodeId && fitView({ nodes: [{ id: nodeId }], duration: 260, padding: 0.7, maxZoom: 1.35 }), 60);
+      announce('Scene opened on the canvas. Review its text, then generate its independent shot plan.', 'success');
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The scene could not be opened.', 'error');
+    }
+  }, [announce, fitView, getCurrentDocument, recordHistory]);
 
   const updateVisualPreproduction = useCallback((
     updater: (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData,
@@ -2855,6 +2891,7 @@ function EditorInner() {
           </label>
           {mockPlanAccepted && !mockProposalPreview ? <div className="editor-view-switch" role="group" aria-label="Workspace view">
             <button type="button" className={workspaceView === 'canvas' ? 'active' : ''} aria-pressed={workspaceView === 'canvas'} onClick={() => setWorkspaceView('canvas')}>Canvas</button>
+            <button type="button" className={workspaceView === 'project' ? 'active' : ''} aria-pressed={workspaceView === 'project'} onClick={() => setWorkspaceView('project')}>Project</button>
             <button type="button" className={workspaceView === 'table' ? 'active' : ''} aria-pressed={workspaceView === 'table'} onClick={() => setWorkspaceView('table')}>Shot table</button>
             <button type="button" className={workspaceView === 'board' ? 'active' : ''} aria-pressed={workspaceView === 'board'} onClick={() => setWorkspaceView('board')}>Board</button>
           </div> : null}
@@ -3161,7 +3198,13 @@ function EditorInner() {
             addConceptAt({ x: event.clientX, y: event.clientY }, true);
           }}
         >
-          {workspaceView !== 'canvas' && cinema && mockPlanAccepted && !mockProposalPreview ? <ProfessionalPlanningWorkspace
+          {workspaceView === 'project' && cinema && mockPlanAccepted && !mockProposalPreview ? <ProjectProductionWorkspace
+            cinema={cinema}
+            onCommand={applyProfessionalPlanningCommand}
+            onOpenScene={openProjectScene}
+            onNotice={announce}
+          /> : null}
+          {(workspaceView === 'table' || workspaceView === 'board') && cinema && mockPlanAccepted && !mockProposalPreview ? <ProfessionalPlanningWorkspace
             cinema={cinema}
             view={workspaceView}
             onViewChange={setWorkspaceView}

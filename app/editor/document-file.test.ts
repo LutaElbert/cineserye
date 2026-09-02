@@ -4,6 +4,7 @@ import {
   MOCK_SHOT_PLAN_PROPOSAL,
 } from '../domain/cinema/mock/reel-knows-tomorrow';
 import { applyCanvasCommandProposal } from './canvas-commands';
+import { applyCinemaDomainCommand } from './cinema-domain-commands';
 import { initialDocument } from './initial-document';
 import {
   parseProjectBackup,
@@ -111,6 +112,28 @@ describe('Cineserye project backups', () => {
     expect(Object.keys(restored.cinema?.shots ?? {})).toHaveLength(6);
     expect(Object.keys(restored.cinema?.prompts ?? {})).toHaveLength(18);
     expect(restored.cinema?.costs['cost-scene-01'].expected).toBe(820);
+  });
+
+  it('S7-UT-01 round-trips additive multi-scene order and continuity metadata', () => {
+    const planned = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
+    planned.cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
+    let project = applyCinemaDomainCommand(planned, {
+      type: 'add-scenes',
+      scenes: [{ id: 'scene-02', title: 'The warning', synopsis: 'A warning appears.', dramaticPurpose: 'Escalate.' }],
+    });
+    const entityNodeId = Object.values(project.cinema!.characters)[0].nodeId;
+    project = applyCinemaDomainCommand(project, {
+      type: 'set-shared-entity-scenes', entityNodeId, sceneIds: ['scene-01', 'scene-02'],
+    });
+    project = applyCinemaDomainCommand(project, {
+      type: 'upsert-shared-entity-variant',
+      variant: { id: 'variant-02', entityNodeId, sceneId: 'scene-02', wardrobe: 'Rain coat', ageOrCondition: '', timeOfDay: 'Night', locationVariant: '', notes: '' },
+    });
+
+    const restored = parseProjectBackup(serializeProjectBackup(project));
+    expect(restored.cinema?.sceneOrder).toEqual(['scene-01', 'scene-02']);
+    expect(restored.cinema?.multiScene?.sharedEntityVariants['variant-02']).toMatchObject({ wardrobe: 'Rain coat' });
+    expect(restored.nodes.some((node) => node.id === 'scene-02')).toBe(true);
   });
 
   it('migrates a version 4 generic document without inventing cinema data', () => {

@@ -1,0 +1,27 @@
+metrics_to_run:
+  - cross_scene_impact_contract
+
+custom_metrics:
+  - name: cross_scene_impact_contract
+    custom_function: |
+      import json
+
+      def evaluate(instance):
+          response = instance.get("response") or {}
+          parts = response.get("parts") or []
+          text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+          try:
+              proposal = json.loads(text)
+          except Exception:
+              return {"score": 0, "explanation": "Impact proposal is not valid JSON."}
+
+          expected_scenes = set(instance.get("expected_scene_ids") or [])
+          expected_shots = set(instance.get("expected_shot_ids") or [])
+          actual_scenes = set(proposal.get("affectedSceneIds") or [])
+          actual_shots = set(proposal.get("affectedShotIds") or [])
+          safe_boundary = proposal.get("mutationStatus") == "proposal" and proposal.get("requiresAcceptance") is True
+          if not safe_boundary:
+              return {"score": 0, "explanation": "The continuity change bypassed proposal review."}
+          if actual_scenes != expected_scenes or actual_shots != expected_shots:
+              return {"score": 0, "explanation": "The proposal omitted or invented an affected scene or shot."}
+          return {"score": 1, "explanation": "All affected scenes and shots are disclosed before acceptance."}
