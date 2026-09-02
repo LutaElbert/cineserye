@@ -1817,6 +1817,7 @@ function EditorInner() {
         return [
           ...Object.values(visual?.references ?? {}).flatMap((reference) => reference.blobHash ? [reference.blobHash] : []),
           ...Object.values(visual?.storyboardFrames ?? {}).map((frame) => frame.blobHash),
+          ...Object.values(visual?.videoClips ?? {}).map((clip) => clip.blobHash),
         ];
       }));
       const unused = (await listLocalMediaBlobs()).filter((entry) => !used.has(entry.hash));
@@ -2515,7 +2516,8 @@ function EditorInner() {
         await serializeProjectBackupWithMedia(document, media),
         safeFileBase(titleRef.current),
       );
-      announce(`Project backup downloaded. Includes ${media.length} local media ${media.length === 1 ? 'item' : 'items'}.`, 'success');
+      const videoClipCount = Object.keys(visual?.videoClips ?? {}).length;
+      announce(`Project backup downloaded. Includes ${media.length} local image ${media.length === 1 ? 'item' : 'items'}${videoClipCount ? `; ${videoClipCount} video ${videoClipCount === 1 ? 'clip is' : 'clips are'} metadata-only and must be downloaded separately` : ''}.`, 'success');
     } catch (error) {
       announce(error instanceof Error ? error.message : 'Project backup failed.', 'error');
     }

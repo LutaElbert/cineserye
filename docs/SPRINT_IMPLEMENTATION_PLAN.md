@@ -10,7 +10,7 @@
 
 **Scope:** a seven-sprint local product roadmap, from one-scene workflow closure through multi-scene microdrama planning
 
-**Execution status (2026-09-02):** Sprints 1–5 are complete and verified. Gate C—the professional solo workflow—is the current product boundary. Sprint 5 adds synchronized table/board views, independent production order and setups, continuity review, directed storyboard intent, mobile set status, and a deterministic six-file local handoff archive. Sprints 6–7 are authorized and remain gated by their own acceptance suites.
+**Execution status (2026-09-02):** Sprints 1–6 are complete and verified. Gate D—the controlled media proof—is the current product boundary. Sprint 6 adds a capability-aware one-shot video boundary, one approved-frame input, server-enforced spend and output limits, reload-safe operation tracking, explicit cancel/retry behavior, content-addressed local MP4 storage, metadata portability, and independent clip approval. Sprint 7 is authorized and remains gated by its complete acceptance suite.
 
 | Sprint | Status | Acceptance evidence |
 | --- | --- | --- |
@@ -19,7 +19,8 @@
 | 3 — Rights-Aware Reference Deck | Complete | Explicit rights/use approval, upload/canvas/link origins, SHA-256 dedupe, shot/prompt usage, safe cleanup, media-inclusive backup/restore, policy and accessibility tests |
 | 4 — One-Shot Storyboard Frame | Complete | Offline fixture and opt-in Vertex adapter, accepted-plan/reference validation, 1–4 variants, spend caps, cancel/retry, immutable provenance, one approved anchor, reload/restore, dimension-aware canvas layout, workbench-first Visuals UI, and accessibility tests |
 | 5 — Professional Planning and Handoff | Complete | One-source-of-truth table/board/canvas editing, independent production order/setups, continuity matrix, directed intent, mobile statuses, and a cross-browser six-file ZIP handoff |
-| 6–7 | Authorized, gated | Proceed only after each preceding sprint's unit, integration, browser, visual, build, and regression gates pass |
+| 6 — One-Shot Video Experiment | Complete | Current Veo capability snapshot, bounded start-frame operation, spend guard, reload/cancel/retry, local MP4/metadata, and independent approval |
+| 7 — Multi-Scene Microdrama Production | Authorized, gated | Proceed only after Sprint 6's complete regression gate passes |
 
 ### Sprint 4 close evidence
 
@@ -922,6 +923,8 @@ Turn one approved storyboard frame into one reviewable clip with strict capabili
 ### Sprint 6 demo gate
 
 Complete UC-09 with a bounded fixture operation and one approved live sample only when credits and content transfer are explicitly reviewed.
+
+**Completion evidence:** passed in deterministic fixture mode. The accepted frame-to-clip workflow now uses a provider-neutral asynchronous contract and a dated, environment-selectable Veo 3.1 profile. Unsupported frame formats, reference-image combinations, duration, aspect, resolution, audio, and sample counts are rejected before provider work; live mode additionally requires a current per-second price and per-request ceiling. Operations persist queued/running/finalizing/ready/failed/cancelled/timed-out state and retry lineage, survive browser reload while the local server owns the provider handle, and never alter the accepted plan or frame. Valid fixture MP4 bytes are content-addressed locally only after successful persistence; quota failure creates no clip record. Candidates retain exact revision/prompt/frame/provider/settings/cost provenance and remain unapproved until review. MP4 and JSON metadata downloads are explicit, while `.cineserye` backups clearly preserve metadata only. Vinext compatibility, TypeScript, ESLint, 162 passing unit/integration tests with three opt-in live skips, build, client-boundary scanning, high-severity dependency audit, and the full 175-scenario Chromium/Firefox/WebKit browser regression suite passed with two intended stress skips. The opt-in live Veo smoke was intentionally skipped, so no provider credits or external content transfer occurred.
 
 ## 11. Sprint 7 — Multi-Scene Microdrama Production
 

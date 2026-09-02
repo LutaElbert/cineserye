@@ -1,6 +1,6 @@
 # Cineserye privacy baseline
 
-Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, reference rights/usage records, content-addressed reference and storyboard blobs, illustrative cost profiles, checkpoints, pending proposal reviews, content-free agent traces, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups, SVG exports, and trace JSON exports are created only when the creator asks for a download. Version-6 project backups embed the local media required by reference and storyboard records and verify every SHA-256 hash during restore.
+Cineserye is local-first. The editable canvas, cinema sidecar, accepted prompts, normalized research sources, source-curation state, reference rights/usage records, content-addressed reference/storyboard/video blobs, illustrative cost profiles, checkpoints, pending proposal reviews, content-free agent traces, and last-non-empty recovery copy are stored in the browser's `cineserye-local` IndexedDB database. Session undo/redo remains in memory. `.cineserye` backups, SVG exports, trace JSON exports, clip MP4 downloads, and clip metadata exports are created only when the creator asks for a download. Version-6 project backups embed the local images required by reference and storyboard records and verify every SHA-256 hash during restore; video metadata is portable, but MP4 bytes are intentionally excluded to avoid silently huge backups.
 
 ## Fixture mode
 
@@ -23,6 +23,12 @@ Storyboard generation is a separate approval and spend boundary available only f
 
 Live storyboard mode sends the confirmed prompt and approved reference pixels to Google Vertex AI. It does not send unrelated project nodes, rejected references, backups, API keys, or browser storage. The server refuses live storyboard calls until a unit-price snapshot, maximum estimated spend, and maximum output count are configured. Ordinary tests use the offline fixture; the live smoke is opt-in and bounded to one non-confidential image.
 
+## Optional one-shot live video
+
+Video is a separate approval, content-transfer, and spend boundary available only after one storyboard frame is approved. The preflight shows the exact motion prompt, negative constraints, approved start frame, model capability, duration, aspect ratio, resolution, silent-audio setting, one-output ceiling, and estimated spend. Live mode sends only that confirmed prompt and approved start/end frame pixels to the environment-selected Vertex Veo model. Separate reference images are not sent in the start-frame workflow, and unrelated nodes, rejected frames, browser storage, API keys, and Google credentials remain excluded.
+
+The server blocks unsupported formats and settings before provider work and requires current per-second pricing plus a per-request spend ceiling. A clip is stored locally by content hash and remains a candidate until explicit approval. Cancelling fixture mode stops local work without cost. The current Google GenAI TypeScript SDK exposes Veo polling but no service-side cancellation method; cancelling live mode therefore stops local tracking and warns that provider processing and billing may continue. Ordinary tests never call Veo, and the live smoke is an explicit one-output opt-in.
+
 ## Telemetry and logs
 
 Default Cineserye telemetry records only run identifiers, agent/policy versions, phase, duration, provider/model names, result counts, status, and safe error codes. It excludes raw scene text, full prompts, provider payloads, credentials, research excerpts, and source URLs. The browser keeps at most 50 of these local traces. The diagnostics panel and its optional JSON export use the same `no-content-v1` contract.
@@ -40,12 +46,14 @@ ADK prompt/response capture and completion upload are disabled by default. Cloud
 - External inspiration links are stored as creator-provided metadata and are never fetched automatically.
 - Cancelling or failing storyboard generation records a content-free run state but stores no incomplete frame. A provider safety rejection produces no approvable artifact.
 - Only one storyboard frame can be the approved anchor for a shot at a time; approving another candidate demotes the previous anchor without changing the accepted shot plan.
+- Every video operation records its shot, revision, exact prompt version, start/end frame identities, provider/model capability snapshot, settings, estimate, timestamps, status, and retry link. A completed clip remains unapproved until creator review.
+- Video bytes stay in local IndexedDB and are protected from orphan cleanup while referenced. `.cineserye` backups preserve clip provenance and approval but do not embed MP4 bytes; creators must download clips separately.
 - Displayed citations are limited to explicit, valid planner-to-source relationships; missing source IDs do not receive substitutes.
 - Generation-cost figures are illustrative planning estimates, not provider quotes or billing records. A plan can also be expressed in credits or marked unpriced.
 - Acceptance is one undoable operation.
 - Deleting the final unlocked layers requires confirmation. Before applying it, Cineserye stores one local last-non-empty recovery document; restoring it does not contact a provider.
 - The recovery document is overwritten by the next confirmed full-canvas deletion and removed after a successful recovery. It is not a substitute for a portable backup.
 - Clearing browser site data removes the local working copy; a downloaded `.cineserye` file is the recovery mechanism.
-- No authentication, collaboration cloud, video generation, or automatic deployment is implemented. Storyboard still generation is the bounded media exception described above.
+- No authentication, collaboration cloud, multi-shot video generation, automatic timeline assembly, or automatic deployment is implemented. Storyboard stills and one approved-frame-to-clip experiment are the bounded media exceptions described above.
 
 If Cineserye is deployed later, the host may process normal HTTP delivery metadata such as IP address, user agent, URL, timing, and status. Application logs must continue to exclude canvas and screenplay content. This technical baseline is not a complete privacy policy for a deployed product.

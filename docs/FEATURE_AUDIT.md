@@ -1,6 +1,6 @@
 # Cineserye current-feature audit
 
-> **Status update — 2026-09-02:** the findings that became Sprints 1–4 are implemented and verified. P0-08’s rights-aware Reference Deck and Increment C’s one-shot storyboard-still workflow are complete. Post-Sprint-4 closure also delivered dimension-aware non-overlapping proposal layout, legacy layout migration, live-provider resilience, and a workbench-first Visuals UI. The findings below remain as the audited-baseline decision record; outstanding recommendations begin with Sprint 5 professional planning and handoff.
+> **Status update — 2026-09-02:** the findings that became Sprints 1–6 are implemented and verified. The rights-aware Reference Deck, one-shot storyboard-still workflow, professional planning/handoff, and controlled approved-frame-to-clip experiment are complete. The findings below remain as the audited-baseline decision record; the outstanding recommendation is Sprint 7 multi-scene microdrama production.
 
 **Audit date:** 2026-09-01
 
@@ -18,7 +18,7 @@ Cineserye already has a stronger technical foundation than most hackathon protot
 
 At the audited baseline, the next product risk was trust and workflow closure: discovery, neutral first-run intent, safe revisions, sidecar consistency, pending-proposal recovery, citation integrity, and distinct generation-budget semantics. Sprints 1–4 closed that loop and added the approved visual-anchor boundary without replacing the canvas.
 
-**Current recommendation:** close and commit the verified Sprint 4 working tree, then begin Sprint 5 with synchronized Shot Table and Board projections. A bounded directed-variant option may make storyboard alternatives more intentional, but professional planning, continuity review, and handoff exports remain higher priority. Do not begin video generation until Sprint 5 acceptance evidence is complete and the user explicitly approves that expanded scope.
+**Current recommendation:** preserve the verified Sprint 6 single-scene and controlled-media boundaries while adding Sprint 7 multi-scene project navigation, shared continuity impact analysis, per-scene isolation, totals, and sequence review. Video must remain optional rather than becoming a prerequisite for project planning.
 
 ## Scope and method
 

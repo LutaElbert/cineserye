@@ -21,6 +21,7 @@ import {
 import { validateImageFile } from '../../editor/image-file';
 import { loadLocalMediaBlob, saveLocalMediaBlob } from '../../editor/persistence';
 import type { GenerateStoryboardRequest, GenerateStoryboardResponse } from './storyboard-api';
+import { VideoPreproductionPanel } from '../video/VideoPreproductionPanel';
 
 type VisualUpdater = (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData;
 
@@ -447,6 +448,13 @@ export function VisualPreproductionPanel({
           <div><strong>Variant {frame.variantIndex + 1}</strong><small>{frame.intent.replaceAll('-', ' ')} · {frame.status} · {frame.model}</small></div>
           <footer><button type="button" className="secondary-button" disabled={frame.status === 'approved'} onClick={() => onUpdate((current) => approveStoryboardFrame(current, frame.id))}><Check size={12} /> {frame.status === 'approved' ? 'Approved anchor' : 'Approve'}</button><button type="button" className="icon-button" aria-label={`Reject storyboard variant ${frame.variantIndex + 1}`} onClick={() => onUpdate((current) => rejectStoryboardFrame(current, frame.id))}><X size={13} /></button></footer>
         </article>)}</div> : null}
+        {accepted ? <VideoPreproductionPanel
+          cinema={{ ...cinema, visualPreproduction: visual }}
+          shot={shot}
+          providerMode={providerMode}
+          onUpdate={onUpdate}
+          onNotice={onNotice}
+        /> : null}
       </section> : null}
 
       <section className={`reference-deck ${referenceManagerOpen ? 'reference-deck-open' : ''}`} aria-labelledby="reference-deck-title">

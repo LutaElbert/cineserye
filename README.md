@@ -2,7 +2,7 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-The professional pre-production foundation is now implemented through Sprint 5: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references, generate one to four directed storyboard still variants for a selected accepted shot, and manage the accepted plan through synchronized Canvas, Shot table, and Board views. Production order, camera/lighting setups, continuity state, status, and a six-file local handoff remain separate from narrative order. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills use an environment-selected Vertex image model. Cineserye still contains no authentication, cloud project store, video generation, or deployment.
+The controlled-media foundation is now implemented through Sprint 6: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references, generate one to four directed storyboard still variants, manage the accepted plan through synchronized Canvas, Shot table, and Board views, and turn one approved frame into one separately reviewed clip. Production order, camera/lighting setups, continuity state, status, and a six-file local handoff remain separate from narrative order. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills and the one-clip experiment use environment-selected Vertex models. Cineserye still contains no authentication, cloud project store, multi-shot timeline generation, or deployment.
 
 ## Foundation
 
@@ -23,6 +23,7 @@ The professional pre-production foundation is now implemented through Sprint 5: 
 - A workbench-first one-shot Storyboard experience with direct 1–4 variant controls, a collapsible scene Reference Deck, an offline fixture, an opt-in Vertex adapter, explicit preflight confirmation, server output/spend caps, cancellation, exact provenance, and one approved shot anchor.
 - Synchronized Canvas, editable Shot table, and production Board projections over one validated cinema sidecar, with independent production order, camera/lighting setups, continuity matrix, planned/ready/captured/skipped status, and directed storyboard intent.
 - A deterministic local handoff ZIP containing a revision-specific shot-list CSV and PDF, prompt and source/provenance Markdown, illustrative-cost CSV, and JSON manifest.
+- A one-shot Motion Workbench with a current Veo 3.1 capability profile, approved-frame gate, one silent 4/6/8-second clip, server spend ceiling, reload-safe polling, cancel/retry states, content-addressed local MP4 storage, metadata download, and independent clip approval.
 
 The initial story canvas is a linear fixture:
 
@@ -56,6 +57,16 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 5. Confirm and generate one to four still variants. Fixture mode is offline and costs $0; live mode requires server-side pricing and a maximum estimated-spend setting before it can run.
 6. Compare, reject, regenerate, or approve one frame as the shot anchor. The accepted shot and plan revision remain unchanged.
 7. Download a `.cineserye` backup to carry the validated media and provenance to another browser profile.
+
+## One-shot video walkthrough
+
+1. Approve one storyboard frame. The Motion Workbench appears below the still variants and reads the shot's existing video prompt.
+2. Choose 4, 6, or 8 seconds, 720p or 1080p, and 9:16 or 16:9. The experiment is always one silent output; unsupported settings are rejected again on the server.
+3. Review the selected model capability, approved start frame, negative constraints, content-transfer statement, and configured estimate/spend ceiling, then confirm the request.
+4. Follow queued, running, finalizing, and ready states. The operation identity is persisted so a browser reload resumes polling while the local server still owns the provider operation.
+5. Cancel local tracking or retry a failed/cancelled operation as a new linked run. With live Veo, the current SDK cannot cancel service-side processing, so the UI warns that billing may continue.
+6. Review the local clip, download its MP4 and metadata JSON, then approve or reject it independently from the storyboard frame and shot plan.
+7. `.cineserye` backups retain video metadata and approval state but intentionally exclude large MP4 bytes. Download clips separately before changing browsers or clearing site data.
 
 ## Manual canvas building
 
@@ -106,6 +117,11 @@ export CINESERYE_VERTEX_IMAGE_MODEL=gemini-2.5-flash-image
 export CINESERYE_STORYBOARD_USD_PER_IMAGE='set-current-provider-price'
 export CINESERYE_STORYBOARD_MAX_ESTIMATED_USD='set-a-small-per-request-limit'
 export CINESERYE_STORYBOARD_MAX_OUTPUTS=4
+# One-shot video stays blocked until current pricing and a request ceiling are configured.
+export CINESERYE_VERTEX_VIDEO_MODEL=veo-3.1-fast-generate-001
+export CINESERYE_VERTEX_VIDEO_LOCATION=us-central1
+export CINESERYE_VIDEO_USD_PER_SECOND='set-current-provider-price'
+export CINESERYE_VIDEO_MAX_ESTIMATED_USD='set-a-small-per-request-limit'
 npm run dev
 ```
 
@@ -135,6 +151,12 @@ The separate storyboard smoke also spends credits and is never part of ordinary 
 
 ```sh
 CINESERYE_RUN_STORYBOARD_SMOKE=1 npx vitest run app/server/cinema/storyboard-live.test.ts --config vitest.config.ts
+```
+
+The one-clip Veo smoke is also opt-in and can spend credits:
+
+```sh
+CINESERYE_RUN_VIDEO_SMOKE=1 npx vitest run app/server/cinema/video-live.test.ts --config vitest.config.ts
 ```
 
 CI builds the application and runs Playwright against the local production Cloudflare Worker in Chromium, Firefox, and WebKit. Verification does not deploy the Worker.

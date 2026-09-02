@@ -25,7 +25,15 @@ accepted shot + approved local references
                 |
  validated blobs + immutable provenance
                 |
- compare variants → approve one shot anchor
+compare variants → approve one shot anchor
+                |
+       video capability + spend preflight
+                |
+      fixture provider / Vertex Veo adapter
+                |
+  queued → running → finalizing → local MP4
+                |
+        review → approve one clip
 ```
 
 ## Generic editor foundation
@@ -53,7 +61,7 @@ Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the dest
 - research-source records with supported, needs-verification, or irrelevant review state plus creator pinning and usage relationships;
 - illustrative, credits-based, or explicitly unpriced cost records with a versioned profile and visible assumptions.
 - immutable accepted-plan revision snapshots with predecessor links and one active revision.
-- visual pre-production records for typed references, explicit rights/allowed-use/approval, storyboard runs, and immutable frame provenance.
+- visual pre-production records for typed references, explicit rights/allowed-use/approval, storyboard runs, immutable frame provenance, long-running video operations, and immutable clip provenance.
 
 Runtime validation resolves every scene, shot, character, asset, prompt, source, cost, run, and host canvas node relationship. The sidecar participates in document migrations, IndexedDB autosave, checkpoints, `.cineserye` backup/restore, and undo/redo.
 
@@ -73,7 +81,7 @@ Runtime validation resolves every scene, shot, character, asset, prompt, source,
 
 Fixture providers remain the default for deterministic UI and pull-request tests. Live mode is enabled only by server environment configuration and requires explicit per-request content-transfer consent in both the UI and API boundary.
 
-`app/domain/cinema/visual-preproduction.ts` is the separate visual domain layer. It validates reference types and usage, enforces conservative generation eligibility, blocks deletion while usages exist, validates storyboard run/frame provenance, and permits only one approved anchor per shot. `app/editor/persistence.ts` owns a provider-neutral `media-blobs` IndexedDB store keyed by SHA-256; it does not interpret cinema records.
+`app/domain/cinema/visual-preproduction.ts` is the separate visual domain layer. It validates reference types and usage, enforces conservative generation eligibility, blocks deletion while usages exist, validates storyboard and video provenance, and permits only one approved frame anchor and one approved clip per shot. Existing version-1 visual sidecars gain empty video maps deterministically. `app/editor/persistence.ts` owns a provider-neutral `media-blobs` IndexedDB store keyed by SHA-256; it does not interpret cinema records.
 
 `app/server/cinema/storyboard-provider.ts` defines the still-image provider contract. The fixture emits deterministic safe SVG storyboards without networking. The opt-in Vertex adapter defaults to the current recommended `gemini-2.5-flash-image` model but remains environment-selectable. The route validates accepted-plan intent, prompt purpose, approved reference payloads, output count, safety, response dimensions, provider provenance, current unit pricing, and maximum estimated spend before returning pixels. The browser validates raster signatures again before local storage.
 
@@ -81,7 +89,11 @@ Fixture providers remain the default for deterministic UI and pull-request tests
 
 `app/features/storyboard/VisualPreproductionPanel.tsx` is a projection over the visual-pre-production sidecar, not another source of truth. The selected-shot workbench appears first; the scene Reference Deck is collapsed until requested; changing the 1–4 output selection invalidates confirmation; and reference, frame, and plan approvals remain separate domain operations.
 
-Portable backup version 6 embeds only media hashes referenced by the current project. Restore verifies size and SHA-256 before writing any blob, never fetches external inspiration links, and remains compatible with text-only backup versions 1–5.
+`app/server/cinema/video-capabilities.ts` snapshots the verified model boundary independently from provider code. `app/api/cinema/generate-video/route.ts` validates approved frames, exact one-output settings, MIME/size limits, live consent, current unit pricing, and maximum spend before starting a provider operation. `app/server/cinema/video-provider.ts` keeps `@google/genai` server-only, uses the SDK's `generateVideos`/`getVideosOperation` lifecycle, and exposes a deterministic valid-MP4 fixture for ordinary tests. The current app profile defaults to environment-selectable `veo-3.1-fast-generate-001` in `us-central1`, 4/6/8 seconds, 9:16/16:9, 720p/1080p, one silent output, and optional last frame. The SDK does not expose service cancellation, so live cancellation is explicitly local stop-tracking.
+
+`app/features/video/VideoPreproductionPanel.tsx` persists the local operation identity before polling, resumes it after browser reload, stores successful MP4 bytes by SHA-256, and creates a separate candidate clip record only after storage succeeds. Setting changes invalidate confirmation. Failed, timed-out, and cancelled operations keep content-bounded diagnostics and can be retried as linked operations without altering the approved plan or frame.
+
+Portable backup version 6 embeds referenced images but intentionally excludes MP4 bytes. Video metadata and approval remain in the document, and the UI tells creators to download clips separately. Restore verifies embedded image size and SHA-256 before writing any blob, never fetches external inspiration links or video, and remains compatible with text-only backup versions 1–5.
 
 ## Review and persistence sequence
 
@@ -105,9 +117,9 @@ The browser retains at most 50 content-free run traces in the local `agent-trace
 ## Deliberately absent
 
 - authentication, accounts, collaboration, or cloud project storage;
-- audio or video generation;
+- generated audio, multi-shot video generation, or automatic timeline assembly;
 - API-key entry in the browser;
 - automatic proposal acceptance or background autonomy;
 - A2A exposure, deployment, or provisioned observability infrastructure.
 
-The next implementation phase is Sprint 5 professional planning and handoff, beginning with synchronized Shot Table and Board projections. Directed storyboard intents are an optional bounded Sprint 5 extension; they do not change the current one-shot or approval boundaries. Video generation remains intentionally outside the current boundary.
+The next implementation phase is Sprint 7 multi-scene microdrama production. It must preserve the verified one-scene approval and storage boundaries and must not make video generation a prerequisite for planning or sequence review.
