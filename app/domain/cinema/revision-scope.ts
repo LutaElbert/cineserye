@@ -110,6 +110,27 @@ export function scopeCinemaProjectDataForRun(
       const id = costIds.get(cost.id) ?? cost.id;
       return [id, { ...structuredClone(cost), id, runId: runIds.get(cost.runId) ?? cost.runId }];
     })),
+    professionalPlanning: project.professionalPlanning ? {
+      ...structuredClone(project.professionalPlanning),
+      setups: Object.fromEntries(Object.entries(project.professionalPlanning.setups).map(([id, setup]) => [id, {
+        ...structuredClone(setup),
+        shotIds: remapList(setup.shotIds, recordIds),
+      }])),
+      shots: Object.fromEntries(Object.values(project.professionalPlanning.shots).map((shot) => {
+        const shotId = recordIds.get(shot.shotId) ?? shot.shotId;
+        return [shotId, { ...structuredClone(shot), shotId, revisionId: null }];
+      })),
+      continuityStates: Object.fromEntries(Object.entries(project.professionalPlanning.continuityStates).map(([shotId, states]) => [
+        recordIds.get(shotId) ?? shotId,
+        Object.fromEntries(Object.entries(states).map(([nodeId, state]) => [nodeIds.get(nodeId) ?? nodeId, state])),
+      ])),
+      continuityExceptions: Object.fromEntries(Object.entries(project.professionalPlanning.continuityExceptions).map(([id, exception]) => [id, {
+        ...structuredClone(exception),
+        entityNodeId: nodeIds.get(exception.entityNodeId) ?? exception.entityNodeId,
+        fromShotId: recordIds.get(exception.fromShotId) ?? exception.fromShotId,
+        toShotId: recordIds.get(exception.toShotId) ?? exception.toShotId,
+      }])),
+    } : undefined,
   };
   const hostNodeIds = new Set<string>([
     ...(next.projectNodeId ? [next.projectNodeId] : []),

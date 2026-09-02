@@ -1,4 +1,5 @@
 import type { CinemaAspectRatio } from '../../domain/cinema/project-data';
+import type { CinemaStoryboardIntent } from '../../domain/cinema/visual-preproduction';
 import type { ProviderErrorCode } from '../scene-planner/plan-scene-api';
 
 export type StoryboardReferenceInput = {
@@ -19,7 +20,7 @@ export type GenerateStoryboardRequest = {
   acceptedPlan: true;
   prompt: { id: string; version: number; text: string; purpose: 'storyboard'; status: string };
   references: StoryboardReferenceInput[];
-  settings: { aspectRatio: CinemaAspectRatio; outputCount: number };
+  settings: { aspectRatio: CinemaAspectRatio; outputCount: number; intent: CinemaStoryboardIntent };
   explicitConfirmation: boolean;
   liveProviderConsent: boolean;
 };

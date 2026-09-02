@@ -175,7 +175,11 @@ import {
   prepareCinemaPlanProposal,
 } from './cinema-plan-proposal';
 import { cinemaSourceFingerprint } from './document-fingerprint';
-import { applyCinemaDomainCommand, type CinemaShotPatch } from './cinema-domain-commands';
+import {
+  applyCinemaDomainCommand,
+  type CinemaDomainCommand,
+  type CinemaShotPatch,
+} from './cinema-domain-commands';
 import { prepareCinemaRevisionRestore } from '../domain/cinema/revision-restore';
 import type { CinemaProjectPresentation } from '../domain/cinema/prompt-artifacts';
 import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
@@ -205,11 +209,16 @@ import {
 } from '../domain/cinema/manual-creation';
 import { CinemaCreationPalette } from '../features/manual-creation/CinemaCreationPalette';
 import { EmptyCanvasRecovery } from '../features/manual-creation/EmptyCanvasRecovery';
+import {
+  ProfessionalPlanningWorkspace,
+  type ProfessionalWorkspaceView,
+} from '../features/production/ProfessionalPlanningWorkspace';
 
 type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
 type SelectionOperation = 'replace' | 'add' | 'subtract';
 type MobilePanel = 'layers' | 'inspector' | null;
+type EditorWorkspaceView = 'canvas' | ProfessionalWorkspaceView;
 type Toast = { id: number; message: string; tone: 'info' | 'success' | 'error' };
 const MAX_FILES_PER_IMPORT = 12;
 const InlineConceptEditor = lazy(() => import('./InlineConceptEditor'));
@@ -653,6 +662,7 @@ function EditorInner() {
   const [backupOpen, setBackupOpen] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
+  const [workspaceView, setWorkspaceView] = useState<EditorWorkspaceView>('canvas');
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1752,6 +1762,27 @@ function EditorInner() {
     }
   }, [announce, getCurrentDocument, recordHistory]);
 
+  const applyProfessionalPlanningCommand = useCallback((
+    command: CinemaDomainCommand,
+    successMessage: string,
+  ) => {
+    try {
+      const updated = applyCinemaDomainCommand(getCurrentDocument(), command);
+      recordHistory();
+      setNodes(updated.nodes);
+      setEdges(updated.edges);
+      setCinema(updated.cinema);
+      announce(successMessage, 'success');
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The production plan could not be updated.', 'error');
+    }
+  }, [announce, getCurrentDocument, recordHistory]);
+
+  const selectProfessionalShot = useCallback((nodeId: string) => {
+    setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
+    setMobilePanel('inspector');
+  }, []);
+
   const updateVisualPreproduction = useCallback((
     updater: (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData,
   ) => {
@@ -2392,6 +2423,7 @@ function EditorInner() {
       setProposalCinema(null);
       setProposalMode(null);
       setPendingProposalId(null);
+      setWorkspaceView('canvas');
       refreshHistoryState();
       window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
       announce('New local document created.', 'success');
@@ -2409,6 +2441,7 @@ function EditorInner() {
     setEdges(structuredClone(initialDocument.edges));
     setTitle(initialDocument.title);
     setCinema(undefined);
+    setWorkspaceView('canvas');
     setFirstRunOpen(false);
     window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
     announce('Clean scene workspace ready. Edit Scene 01, then generate a shot plan.', 'success');
@@ -2421,6 +2454,7 @@ function EditorInner() {
     setEdges(sample.edges.map((edge) => ({ ...edge, selected: false })));
     setTitle(REEL_KNOWS_TOMORROW.title);
     setCinema(structuredClone(MOCK_CINEMA_PROJECT_DATA));
+    setWorkspaceView('canvas');
     setFirstRunOpen(false);
     window.setTimeout(() => fitView({ duration: 320, padding: 0.14 }), 0);
     announce('Sample opened locally with fixture sources. No external request was made.', 'success');
@@ -2435,6 +2469,7 @@ function EditorInner() {
       setEdges(restored.edges.map((edge) => ({ ...edge, selected: false })));
       setTitle(restored.title);
       setCinema(restored.cinema);
+      setWorkspaceView('canvas');
       setSelectedPath(null);
       await queueDocumentSave(restored);
       await clearLocalRecoveryDocument();
@@ -2511,6 +2546,7 @@ function EditorInner() {
     setSceneBriefDefaults(null);
     setProposalCinema(null);
     setProposalMode(null);
+    setWorkspaceView('canvas');
     await queueDocumentSave(restored);
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
@@ -2549,6 +2585,7 @@ function EditorInner() {
       setProposalCinema(null);
       setProposalMode(null);
       setExpandedVectors(new Set());
+      setWorkspaceView('canvas');
       refreshHistoryState();
       await queueDocumentSave(restored);
       setBackupOpen(false);
@@ -2814,6 +2851,11 @@ function EditorInner() {
               {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved on device'}
             </span>
           </label>
+          {mockPlanAccepted && !mockProposalPreview ? <div className="editor-view-switch" role="group" aria-label="Workspace view">
+            <button type="button" className={workspaceView === 'canvas' ? 'active' : ''} aria-pressed={workspaceView === 'canvas'} onClick={() => setWorkspaceView('canvas')}>Canvas</button>
+            <button type="button" className={workspaceView === 'table' ? 'active' : ''} aria-pressed={workspaceView === 'table'} onClick={() => setWorkspaceView('table')}>Shot table</button>
+            <button type="button" className={workspaceView === 'board' ? 'active' : ''} aria-pressed={workspaceView === 'board'} onClick={() => setWorkspaceView('board')}>Board</button>
+          </div> : null}
           <div className="topbar-actions">
             <button
               type="button"
@@ -3117,7 +3159,16 @@ function EditorInner() {
             addConceptAt({ x: event.clientX, y: event.clientY }, true);
           }}
         >
+          {workspaceView !== 'canvas' && cinema && mockPlanAccepted && !mockProposalPreview ? <ProfessionalPlanningWorkspace
+            cinema={cinema}
+            view={workspaceView}
+            onViewChange={setWorkspaceView}
+            onCommand={applyProfessionalPlanningCommand}
+            onSelectShot={selectProfessionalShot}
+            onNotice={announce}
+          /> : null}
           <ReactFlow<EditorNode, EditorEdge>
+            className={workspaceView === 'canvas' ? '' : 'workspace-canvas-hidden'}
             nodes={canvasNodes}
             edges={canvasEdges}
             nodeTypes={nodeTypes}
@@ -3280,7 +3331,7 @@ function EditorInner() {
               <button type="button" className="secondary-button" onClick={() => planningControllerRef.current?.abort('creator-cancelled')}>Cancel</button>
             </Panel> : null}
           </ReactFlow>
-          {nodes.length === 0 && !mockProposalPreview && mockProposalStage !== 'planning' ? (
+          {workspaceView === 'canvas' && nodes.length === 0 && !mockProposalPreview && mockProposalStage !== 'planning' ? (
             <EmptyCanvasRecovery
               canUndo={historyState.canUndo}
               hasRecovery={Boolean(recoveryDocument)}
@@ -3292,7 +3343,7 @@ function EditorInner() {
               onExploreSample={chooseSampleProject}
             />
           ) : null}
-          {mockProposalStage === 'planning' ? (
+          {workspaceView === 'canvas' && mockProposalStage === 'planning' ? (
             <div className="mock-planning-card" role="status">
               <span className="mock-planning-icon"><LoaderCircle className="spin" size={18} /></span>
               <div>
@@ -3301,7 +3352,7 @@ function EditorInner() {
               </div>
             </div>
           ) : null}
-          {mockProposalPreview ? (
+          {workspaceView === 'canvas' && mockProposalPreview ? (
             <section className="proposal-review-bar" aria-label="Shot proposal review">
               <div className="proposal-review-icon" aria-hidden="true"><Sparkles size={16} /></div>
               <div className="proposal-review-copy">

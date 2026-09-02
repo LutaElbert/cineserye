@@ -18,5 +18,9 @@ describe('cinema revision identity scope', () => {
     ];
     expect(secondGenerated.every((id) => !firstGenerated.has(id))).toBe(true);
     expect(Object.keys(first.revisions)).toHaveLength(0);
+    expect(Object.keys(first.professionalPlanning!.shots)).toEqual(first.scenes[first.activeSceneId!].shotIds);
+    expect(Object.values(first.professionalPlanning!.shots).every((shot) => shot.revisionId === null)).toBe(true);
+    expect(Object.values(first.professionalPlanning!.setups).flatMap((setup) => setup.shotIds))
+      .toEqual(expect.arrayContaining(first.scenes[first.activeSceneId!].shotIds));
   });
 });

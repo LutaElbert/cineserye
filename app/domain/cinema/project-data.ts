@@ -214,6 +214,7 @@ export type CinemaProjectData = Omit<CinemaProjectDataV1, 'schemaVersion'> & {
   activeRevisionId: string | null;
   revisions: Record<string, CinemaPlanRevisionRecord>;
   visualPreproduction?: import('./visual-preproduction').CinemaVisualPreproductionData;
+  professionalPlanning?: import('./professional-planning').CinemaProfessionalPlanningData;
 };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -462,6 +463,13 @@ export function createEmptyCinemaProjectData(projectId = 'cineserye-local-projec
     sources: {},
     costs: {},
     visualPreproduction: createEmptyVisualPreproductionData(),
+    professionalPlanning: createDefaultProfessionalPlanningData({
+      activeRevisionId: null,
+      sceneOrder: [],
+      scenes: {},
+      shots: {},
+      costs: {},
+    }),
   };
 }
 
@@ -832,6 +840,10 @@ function migrateCinemaProjectDataV1(project: CinemaProjectDataV1): CinemaProject
     activeRevisionId: revisionId,
     revisions: revision ? { [revision.id]: revision } : {},
     visualPreproduction: createEmptyVisualPreproductionData(),
+    professionalPlanning: createDefaultProfessionalPlanningData({
+      ...project,
+      activeRevisionId: revisionId,
+    }),
   };
 }
 
@@ -903,6 +915,10 @@ export function validateCinemaProjectData(
       }
     }
   }
+  const professionalPlanning = validateProfessionalPlanningData(value.professionalPlanning, {
+    ...current,
+    activeRevisionId,
+  });
   return {
     ...current,
     ...extensions(value),
@@ -911,6 +927,7 @@ export function validateCinemaProjectData(
     activeRevisionId,
     revisions,
     visualPreproduction,
+    professionalPlanning,
   };
 }
 
@@ -954,6 +971,10 @@ export function acceptCinemaPlanRevision(
     revisions,
     visualPreproduction: structuredClone(
       current?.visualPreproduction ?? incoming.visualPreproduction ?? createEmptyVisualPreproductionData(),
+    ),
+    professionalPlanning: reconcileProfessionalPlanningData(
+      { ...next, activeRevisionId: revisionId },
+      current?.professionalPlanning ?? incoming.professionalPlanning,
     ),
   };
   for (const shot of Object.values(result.shots)) {
@@ -1163,6 +1184,13 @@ export function removeCinemaRecordsForNodes(
     }
   }
 
+  next.professionalPlanning = reconcileProfessionalPlanningData(next, next.professionalPlanning);
+
   return validateCinemaProjectData(next, remainingHostNodeIds);
 }
 import { createEmptyVisualPreproductionData, validateVisualPreproductionData } from './visual-preproduction';
+import {
+  createDefaultProfessionalPlanningData,
+  reconcileProfessionalPlanningData,
+  validateProfessionalPlanningData,
+} from './professional-planning';

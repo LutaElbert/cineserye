@@ -39,4 +39,53 @@ describe('cinema domain command boundary', () => {
     })).toThrow('duration');
     expect(source).toEqual(before);
   });
+
+  it('S5-IT-01 applies batch table edits as one validated domain transaction', () => {
+    const applied = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL);
+    const source = { ...applied.document, cinema: structuredClone(MOCK_CINEMA_PROJECT_DATA) };
+    const [firstId, secondId] = source.cinema.scenes['scene-01'].shotIds;
+    const result = applyCinemaDomainCommand(source, {
+      type: 'batch-update-shots',
+      updates: [
+        { shotId: firstId, patch: { durationSeconds: 5, framing: 'Wide master' } },
+        { shotId: secondId, patch: { durationSeconds: 7, audio: 'Projector ignition' } },
+      ],
+    });
+    expect(result.cinema?.shots[firstId]).toMatchObject({ durationSeconds: 5, framing: 'Wide master' });
+    expect(result.cinema?.shots[secondId]).toMatchObject({ durationSeconds: 7, audio: 'Projector ignition' });
+    expect(source.cinema.shots[firstId].durationSeconds).not.toBe(5);
+  });
+
+  it('updates production order, setup, status, and continuity through the command boundary', () => {
+    const applied = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL);
+    const source = { ...applied.document, cinema: structuredClone(MOCK_CINEMA_PROJECT_DATA) };
+    const scene = source.cinema.scenes['scene-01'];
+    const setupId = 'setup-scene-01-night';
+    const first = applyCinemaDomainCommand(source, {
+      type: 'upsert-production-setup',
+      setup: {
+        id: setupId, sceneId: scene.id, name: 'Night inserts', camera: 'Phone camera', lens: '2×',
+        lighting: 'Projector practical', location: 'Auditorium', equipment: ['tripod'], notes: '',
+        estimatedSetupMinutes: 15, shotIds: [],
+      },
+    });
+    const second = applyCinemaDomainCommand(first, {
+      type: 'assign-shots-to-setup', shotIds: [scene.shotIds[0]], setupId,
+    });
+    const third = applyCinemaDomainCommand(second, {
+      type: 'reorder-production-shot', shotId: scene.shotIds.at(-1)!, toIndex: 0,
+    });
+    const fourth = applyCinemaDomainCommand(third, {
+      type: 'set-production-status', shotIds: [scene.shotIds[0]], status: 'ready',
+    });
+    const continuityNodeId = source.cinema.shots[scene.shotIds[0]].continuityNodeIds[0];
+    const result = applyCinemaDomainCommand(fourth, {
+      type: 'set-continuity-state', shotId: scene.shotIds[0], entityNodeId: continuityNodeId, state: 'screen-left',
+    });
+
+    expect(result.cinema?.professionalPlanning?.shots[scene.shotIds[0]]).toMatchObject({ setupId, status: 'ready' });
+    expect(result.cinema?.professionalPlanning?.shots[scene.shotIds.at(-1)!].productionOrder).toBe(1);
+    expect(result.cinema?.professionalPlanning?.continuityStates[scene.shotIds[0]][continuityNodeId]).toBe('screen-left');
+    expect(result.cinema?.scenes['scene-01'].shotIds).toEqual(scene.shotIds);
+  });
 });

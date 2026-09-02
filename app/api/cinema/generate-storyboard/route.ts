@@ -35,6 +35,7 @@ const RequestSchema = z.object({
   settings: z.object({
     aspectRatio: z.enum(['9:16', '16:9', '1:1', '4:5']),
     outputCount: z.number().int().min(1).max(4),
+    intent: z.enum(['balanced', 'production-safe', 'emotion-first', 'visually-experimental', 'budget-conscious']),
   }).strict(),
   explicitConfirmation: z.literal(true),
   liveProviderConsent: z.boolean(),

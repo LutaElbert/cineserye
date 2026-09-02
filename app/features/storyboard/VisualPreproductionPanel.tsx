@@ -15,6 +15,7 @@ import {
   type CinemaReferenceRight,
   type CinemaReferenceType,
   type CinemaReferenceUse,
+  type CinemaStoryboardIntent,
   type CinemaVisualPreproductionData,
 } from '../../domain/cinema/visual-preproduction';
 import { validateImageFile } from '../../editor/image-file';
@@ -74,6 +75,7 @@ export function VisualPreproductionPanel({
   const [uploading, setUploading] = useState(false);
   const [canvasImageId, setCanvasImageId] = useState('');
   const [outputCount, setOutputCount] = useState(3);
+  const [intent, setIntent] = useState<CinemaStoryboardIntent>('balanced');
   const [confirmed, setConfirmed] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [referencesOpen, setReferencesOpen] = useState(false);
@@ -97,6 +99,11 @@ export function VisualPreproductionPanel({
 
   const chooseOutputCount = (count: number) => {
     setOutputCount(count);
+    setConfirmed(false);
+  };
+
+  const chooseIntent = (next: CinemaStoryboardIntent) => {
+    setIntent(next);
     setConfirmed(false);
   };
 
@@ -258,6 +265,7 @@ export function VisualPreproductionPanel({
           model: providerMode === 'live' ? 'environment-selected' : 'fixture-cinematic-board-v1',
           aspectRatio: cinema.scenes[shot.sceneId]?.brief?.aspectRatio ?? '9:16',
           outputCount,
+          intent,
           estimatedCost: providerMode === 'fixture' ? 0 : null,
           currency: providerMode === 'fixture' ? 'USD' : null,
           status: 'generating',
@@ -299,6 +307,7 @@ export function VisualPreproductionPanel({
         settings: {
           aspectRatio: cinema.scenes[shot.sceneId]?.brief?.aspectRatio ?? '9:16',
           outputCount,
+          intent,
         },
         explicitConfirmation: true,
         liveProviderConsent: providerMode === 'live',
@@ -332,6 +341,7 @@ export function VisualPreproductionPanel({
           aspectRatio: payload.settings.aspectRatio,
           seed: frame.seed,
           variantIndex: frame.variantIndex,
+          intent,
           blobHash: media.hash,
           mimeType: frame.mimeType,
           width: validated.width,
@@ -412,11 +422,21 @@ export function VisualPreproductionPanel({
                 {[1, 2, 3, 4].map((count) => <button key={count} type="button" aria-pressed={outputCount === count} aria-label={`${count} storyboard ${count === 1 ? 'variant' : 'variants'}`} disabled={generating} onClick={() => chooseOutputCount(count)}>{count}</button>)}
               </div>
             </div>
+            <div className="storyboard-intent-picker">
+              <span>Direction</span>
+              <select aria-label="Storyboard creative intent" value={intent} disabled={generating} onChange={(event) => chooseIntent(event.target.value as CinemaStoryboardIntent)}>
+                <option value="balanced">Balanced</option>
+                <option value="production-safe">Production-safe</option>
+                <option value="emotion-first">Emotion-first</option>
+                <option value="visually-experimental">Visually experimental</option>
+                <option value="budget-conscious">Budget-conscious</option>
+              </select>
+            </div>
             <div><span>Image model</span><strong>{providerMode === 'live' ? 'Vertex AI' : 'Offline fixture'}</strong></div>
             <div><span>Estimate</span><strong>{providerMode === 'live' ? 'After generation' : '$0.00 fixture'}</strong></div>
           </div>
           <div className="storyboard-generation-footer">
-            <label className="storyboard-consent"><input type="checkbox" checked={confirmed} disabled={generating} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm this prompt, {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'reference' : 'references'}, and {outputCount} {outputCount === 1 ? 'output' : 'outputs'}.</label>
+            <label className="storyboard-consent"><input type="checkbox" checked={confirmed} disabled={generating} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm the {intent.replaceAll('-', ' ')} direction, this prompt, {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'reference' : 'references'}, and {outputCount} {outputCount === 1 ? 'output' : 'outputs'}.</label>
             <div className="storyboard-actions"><small>{outputCount} {outputCount === 1 ? 'image' : 'images'} · {providerMode === 'live' ? 'cost recorded after generation' : '$0.00 fixture'}</small>{generating ? <button type="button" className="secondary-button" onClick={() => controllerRef.current?.abort()}><X size={13} /> Cancel</button> : null}<button type="button" className="primary-button" disabled={!confirmed || generating} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} {generating ? 'Generating…' : shotFrames.length ? 'Regenerate variants' : 'Generate storyboard'}</button></div>
           </div>
         </>}
@@ -424,7 +444,7 @@ export function VisualPreproductionPanel({
           {/* Local object URLs are intentionally not sent through an image optimizer. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {frameUrls[frame.id] ? <img src={frameUrls[frame.id]} alt={`Storyboard variant ${frame.variantIndex + 1} for ${shot.title}`} /> : <div className="storyboard-frame-loading"><LoaderCircle className="spin" /></div>}
-          <div><strong>Variant {frame.variantIndex + 1}</strong><small>{frame.status} · {frame.model}</small></div>
+          <div><strong>Variant {frame.variantIndex + 1}</strong><small>{frame.intent.replaceAll('-', ' ')} · {frame.status} · {frame.model}</small></div>
           <footer><button type="button" className="secondary-button" disabled={frame.status === 'approved'} onClick={() => onUpdate((current) => approveStoryboardFrame(current, frame.id))}><Check size={12} /> {frame.status === 'approved' ? 'Approved anchor' : 'Approve'}</button><button type="button" className="icon-button" aria-label={`Reject storyboard variant ${frame.variantIndex + 1}`} onClick={() => onUpdate((current) => rejectStoryboardFrame(current, frame.id))}><X size={13} /></button></footer>
         </article>)}</div> : null}
       </section> : null}

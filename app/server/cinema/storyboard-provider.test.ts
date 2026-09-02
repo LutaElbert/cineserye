@@ -10,7 +10,7 @@ const request: GenerateStoryboardRequest = {
   acceptedPlan: true,
   prompt: { id: 'prompt-01', version: 1, text: 'A restrained close-up in an abandoned cinema.', purpose: 'storyboard', status: 'draft' },
   references: [],
-  settings: { aspectRatio: '9:16', outputCount: 3 },
+  settings: { aspectRatio: '9:16', outputCount: 3, intent: 'balanced' },
   explicitConfirmation: true,
   liveProviderConsent: false,
 };

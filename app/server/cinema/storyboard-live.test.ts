@@ -24,7 +24,7 @@ describe('opt-in Vertex storyboard smoke', () => {
         text: 'A non-identifiable filmmaker arranging an empty tabletop miniature set, neutral studio lighting, storyboard still, no logos, no text.',
       },
       references: [],
-      settings: { aspectRatio: '16:9', outputCount: 1 },
+      settings: { aspectRatio: '16:9', outputCount: 1, intent: 'production-safe' },
       explicitConfirmation: true,
       liveProviderConsent: true,
     };

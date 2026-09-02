@@ -2,7 +2,7 @@
 
 Cineserye is a local-first, agent-ready cinema workspace for developing stories from premise to scene to shot. This repository is a private, independent project generated from `LutaElbert/canvas-starter`; it has its own Git history, dependencies, browser storage namespace, Cloudflare configuration, and product roadmap.
 
-The visual pre-production MVP is now implemented through Sprint 4: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references and generate one to four storyboard still variants for a selected accepted shot. Generated plans use dimension-aware, non-overlapping context and shot lanes, and the selected-shot Visuals tab prioritizes prompt review and generation while keeping the scene Reference Deck available on demand. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills use an environment-selected Vertex image model. Cineserye still contains no authentication, cloud project store, video generation, or deployment.
+The professional pre-production foundation is now implemented through Sprint 5: one selected scene becomes a cited, budget-aware, chronological prompt package that remains a preview until acceptance; creators can then curate rights-aware references, generate one to four directed storyboard still variants for a selected accepted shot, and manage the accepted plan through synchronized Canvas, Shot table, and Board views. Production order, camera/lighting setups, continuity state, status, and a six-file local handoff remain separate from narrative order. Deterministic fixture mode is the default. Optional live planning uses Parallel Search and Gemini on Vertex AI through the official TypeScript ADK; optional storyboard stills use an environment-selected Vertex image model. Cineserye still contains no authentication, cloud project store, video generation, or deployment.
 
 ## Foundation
 
@@ -21,6 +21,8 @@ The visual pre-production MVP is now implemented through Sprint 4: one selected 
 - A scene-level Reference Deck for validated local uploads, existing canvas images, and non-fetched external inspiration links, with explicit provenance, rights, allowed-use, approval, pinning, search, filtering, and shot usage.
 - Content-addressed local media storage with SHA-256 deduplication, safe orphan cleanup, and version-6 `.cineserye` backups that embed and verify required media.
 - A workbench-first one-shot Storyboard experience with direct 1–4 variant controls, a collapsible scene Reference Deck, an offline fixture, an opt-in Vertex adapter, explicit preflight confirmation, server output/spend caps, cancellation, exact provenance, and one approved shot anchor.
+- Synchronized Canvas, editable Shot table, and production Board projections over one validated cinema sidecar, with independent production order, camera/lighting setups, continuity matrix, planned/ready/captured/skipped status, and directed storyboard intent.
+- A deterministic local handoff ZIP containing a revision-specific shot-list CSV and PDF, prompt and source/provenance Markdown, illustrative-cost CSV, and JSON manifest.
 
 The initial story canvas is a linear fixture:
 
@@ -62,6 +64,10 @@ Use **Add** in the Layers panel or **Add filmmaking layer** in the canvas toolba
 These drafts remain generic canvas concept nodes with a validated `domainType`; the canvas engine stores but does not interpret that value. The cinema domain layer owns role labels, naming, relationship rules, and conversion behavior. Manual creation and role conversion use the same validated command boundary reserved for future copilot proposals.
 
 If every unlocked layer is deleted, Cineserye asks for confirmation and stores the last non-empty document locally before applying the deletion. The empty canvas then offers **Undo delete** during the current session or **Recover last canvas** after reload. It also provides explicit choices to start with a scene, add a layer, restore a backup, or explore the sample. Sample data is never inserted automatically.
+
+## Professional planning and handoff
+
+After accepting a plan, switch among **Canvas**, **Shot table**, and **Board** in the header. Table edits use the same validated domain command boundary as canvas edits. Narrative order remains the story sequence, while production order and setup assignment can be optimized independently for the shoot. Update continuity states before export, mark shots planned/ready/captured/skipped on a phone, then choose **Export handoff** to download one local ZIP containing the six revision-specific deliverables. The export is generated entirely in the browser and clearly labels illustrative costs.
 
 The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 

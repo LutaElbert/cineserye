@@ -24,6 +24,7 @@ test('S4-UX-01 prioritizes the shot workbench, collapses reference management, a
   await expect(panel.getByText('Prompt v1')).toBeVisible();
   await expect(panel.locator('#scene-reference-manager')).toBeHidden();
   await expect(panel.getByRole('button', { name: '3 storyboard variants' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(panel.getByLabel('Storyboard creative intent')).toHaveValue('balanced');
 
   const tabTops = await page.locator('.inspector-tabs').getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().top)));
   expect(new Set(tabTops).size).toBe(1);
@@ -92,10 +93,12 @@ test('S3-E2E-02 and S4-E2E-01 upload an approved reference and create three revi
   await reference.getByRole('button', { name: 'Approve' }).click();
   await reference.getByRole('button', { name: 'Attach to shot' }).click();
   await expect(panel).toContainText('1 approved ref');
-  await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
+  await panel.getByLabel('Storyboard creative intent').selectOption('budget-conscious');
+  await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
   await expect(panel.locator('.storyboard-frame')).toHaveCount(3, { timeout: 10_000 });
   await expect(panel).toContainText('fixture-cinematic-board-v1');
+  await expect(panel.locator('.storyboard-frame').first()).toContainText('budget conscious');
   await panel.locator('.storyboard-frame').nth(1).getByRole('button', { name: 'Approve' }).click();
   await expect(panel.locator('.storyboard-frame').nth(1)).toContainText('Approved anchor');
   await expect(panel.locator('.storyboard-frame').filter({ hasText: 'Approved anchor' })).toHaveCount(1);
@@ -106,7 +109,7 @@ test('S3-E2E-02 and S4-E2E-01 upload an approved reference and create three revi
 test('S3-E2E-03 and S4-E2E-02 restore the approved anchor and portable local pixels', async ({ page }) => {
   await openAcceptedSample(page);
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
-  await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
+  await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
   await expect(panel.locator('.storyboard-frame')).toHaveCount(3, { timeout: 10_000 });
   await panel.locator('.storyboard-frame').first().getByRole('button', { name: 'Approve' }).click();
@@ -137,17 +140,17 @@ test('S3-E2E-03 and S4-E2E-02 restore the approved anchor and portable local pix
 test('S4-E2E-03 cancels cleanly and permits an explicit retry', async ({ page }) => {
   await openAcceptedSample(page);
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
-  await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
+  await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: '4 storyboard variants' }).click();
-  await expect(panel.getByRole('checkbox', { name: /I confirm this prompt/ })).not.toBeChecked();
+  await expect(panel.getByRole('checkbox', { name: /I confirm the .* direction/ })).not.toBeChecked();
   await expect(panel.getByRole('button', { name: 'Generate storyboard' })).toBeDisabled();
   await panel.getByRole('button', { name: '3 storyboard variants' }).click();
-  await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
+  await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
   await panel.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByText('Storyboard generation cancelled.')).toBeVisible();
   await expect(panel.locator('.storyboard-frame')).toHaveCount(0);
-  await panel.getByRole('checkbox', { name: /I confirm this prompt/ }).check();
+  await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
   await expect(panel.locator('.storyboard-frame')).toHaveCount(3);
 });
@@ -160,7 +163,7 @@ test('S3-SEC-01 and S4-IT-02 reject unapproved references and excessive outputs 
     revisionId: 'revision-01',
     acceptedPlan: true,
     prompt: { id: 'prompt-01', version: 1, text: 'Safe storyboard still.', purpose: 'storyboard', status: 'draft' },
-    settings: { aspectRatio: '9:16', outputCount: 1 },
+    settings: { aspectRatio: '9:16', outputCount: 1, intent: 'balanced' },
     explicitConfirmation: true,
     liveProviderConsent: false,
   };
@@ -175,7 +178,7 @@ test('S3-SEC-01 and S4-IT-02 reject unapproved references and excessive outputs 
   const excessive = await request.post('/api/cinema/generate-storyboard', { data: {
     ...base,
     references: [],
-    settings: { aspectRatio: '9:16', outputCount: 5 },
+    settings: { aspectRatio: '9:16', outputCount: 5, intent: 'balanced' },
   } });
   expect(excessive.status()).toBe(400);
 });

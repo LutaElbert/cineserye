@@ -11,6 +11,7 @@ export type CinemaReferenceType =
 export type CinemaReferenceRight = 'creator-owned' | 'licensed' | 'public-domain' | 'unknown';
 export type CinemaReferenceUse = 'research' | 'image-generation' | 'video-generation';
 export type CinemaReferenceApproval = 'pending' | 'approved' | 'revoked';
+export type CinemaStoryboardIntent = 'balanced' | 'production-safe' | 'emotion-first' | 'visually-experimental' | 'budget-conscious';
 
 export type CinemaReferenceRecord = {
   id: string;
@@ -45,6 +46,7 @@ export type CinemaStoryboardRunRecord = {
   model: string;
   aspectRatio: CinemaAspectRatio;
   outputCount: number;
+  intent: CinemaStoryboardIntent;
   estimatedCost: number | null;
   currency: 'USD' | null;
   status: 'queued' | 'generating' | 'completed' | 'failed' | 'cancelled';
@@ -68,6 +70,7 @@ export type CinemaStoryboardFrameRecord = {
   aspectRatio: CinemaAspectRatio;
   seed: number;
   variantIndex: number;
+  intent: CinemaStoryboardIntent;
   blobHash: string;
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml';
   width: number;
@@ -91,6 +94,7 @@ const REFERENCE_TYPES: CinemaReferenceType[] = ['character', 'location', 'prop',
 const RIGHTS: CinemaReferenceRight[] = ['creator-owned', 'licensed', 'public-domain', 'unknown'];
 const USES: CinemaReferenceUse[] = ['research', 'image-generation', 'video-generation'];
 const ASPECTS: CinemaAspectRatio[] = ['9:16', '16:9', '1:1', '4:5'];
+const STORYBOARD_INTENTS: CinemaStoryboardIntent[] = ['balanced', 'production-safe', 'emotion-first', 'visually-experimental', 'budget-conscious'];
 const MAX_RECORDS = 2_500;
 
 export function createEmptyVisualPreproductionData(): CinemaVisualPreproductionData {
@@ -216,6 +220,7 @@ export function validateVisualPreproductionData(
       model: text(item.model, 'Storyboard model', 160),
       aspectRatio: enumValue(item.aspectRatio, ASPECTS, 'Storyboard aspect ratio'),
       outputCount,
+      intent: item.intent === undefined ? 'balanced' : enumValue(item.intent, STORYBOARD_INTENTS, 'Storyboard intent'),
       estimatedCost: nullableNumber(item.estimatedCost, 'Storyboard estimated cost'),
       currency: item.currency === null ? null : enumValue(item.currency, ['USD'], 'Storyboard currency'),
       status: enumValue(item.status, ['queued', 'generating', 'completed', 'failed', 'cancelled'], 'Storyboard run status'),
@@ -242,6 +247,7 @@ export function validateVisualPreproductionData(
       aspectRatio: enumValue(item.aspectRatio, ASPECTS, 'Storyboard frame aspect ratio'),
       seed: numberValue(item.seed, 'Storyboard frame seed'),
       variantIndex: numberValue(item.variantIndex, 'Storyboard frame variant index'),
+      intent: item.intent === undefined ? run.intent : enumValue(item.intent, STORYBOARD_INTENTS, 'Storyboard frame intent'),
       blobHash: text(item.blobHash, 'Storyboard frame blob hash', 128),
       mimeType: enumValue(item.mimeType, ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'], 'Storyboard frame MIME type'),
       width: numberValue(item.width, 'Storyboard frame width', 1),

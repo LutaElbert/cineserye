@@ -10,7 +10,7 @@
 
 **Scope:** a seven-sprint local product roadmap, from one-scene workflow closure through multi-scene microdrama planning
 
-**Execution status (2026-09-02):** Sprints 1–4 are complete and verified. Gate B—the visual pre-production MVP—is the current product boundary. Post-Sprint-4 layout, live-provider resilience, and Visuals-workflow refinements are implemented and verified as closure work. Sprints 5–7 remain intentionally unstarted.
+**Execution status (2026-09-02):** Sprints 1–5 are complete and verified. Gate C—the professional solo workflow—is the current product boundary. Sprint 5 adds synchronized table/board views, independent production order and setups, continuity review, directed storyboard intent, mobile set status, and a deterministic six-file local handoff archive. Sprints 6–7 are authorized and remain gated by their own acceptance suites.
 
 | Sprint | Status | Acceptance evidence |
 | --- | --- | --- |
@@ -18,7 +18,8 @@
 | 2 — Revision and Recovery | Complete | Immutable revisions, restore-as-new, accepted-shot edits, pending-proposal recovery, cancellation, traces, and evaluation assets |
 | 3 — Rights-Aware Reference Deck | Complete | Explicit rights/use approval, upload/canvas/link origins, SHA-256 dedupe, shot/prompt usage, safe cleanup, media-inclusive backup/restore, policy and accessibility tests |
 | 4 — One-Shot Storyboard Frame | Complete | Offline fixture and opt-in Vertex adapter, accepted-plan/reference validation, 1–4 variants, spend caps, cancel/retry, immutable provenance, one approved anchor, reload/restore, dimension-aware canvas layout, workbench-first Visuals UI, and accessibility tests |
-| 5–7 | Not started | Outside the requested Sprint 4 stop point |
+| 5 — Professional Planning and Handoff | Complete | One-source-of-truth table/board/canvas editing, independent production order/setups, continuity matrix, directed intent, mobile statuses, and a cross-browser six-file ZIP handoff |
+| 6–7 | Authorized, gated | Proceed only after each preceding sprint's unit, integration, browser, visual, build, and regression gates pass |
 
 ### Sprint 4 close evidence
 
@@ -836,6 +837,8 @@ Make the accepted plan useful for a real solo pre-production workflow beyond the
 
 Complete UC-08 and hand the exported package to a reviewer unfamiliar with the app. The reviewer must identify shot order, references, prompts, costs, and open warnings without opening Cineserye.
 
+**Completion evidence:** passed. The accepted revision now drives synchronized Canvas, Shot table, and Board projections; production order and setup membership validate independently from narrative order; continuity states surface conflicts before export; and directed storyboard candidates retain a declared bounded intent while remaining unapproved. The local handoff downloads as one Safari-compatible ZIP containing six deterministic revision-specific files (CSV shot list, PDF shot list, prompt Markdown, source/provenance Markdown, cost CSV, and JSON manifest). Formula injection, markup, unsafe URLs, filenames, revision scoping, and ZIP membership are unit-tested. The generated PDF was rendered through Poppler and visually inspected after fixing line clipping and punctuation degradation. The close gate passed TypeScript, ESLint, all 149 unit/integration tests with two opt-in live skips, Vinext 100% compatibility, client-boundary validation, production build, high-severity audit, and all 166 runnable Playwright scenarios across Chromium, Firefox, and WebKit with two intended stress skips. No live provider credits were spent and nothing was deployed.
+
 ## 10. Sprint 6 — One-Shot Video Experiment
 
 ### Sprint objective
@@ -1191,6 +1194,6 @@ Close the verified Sprint 4 working tree before beginning another product increm
 4. optionally run one bounded live storyboard smoke only after explicitly reviewing credit spend and content transfer;
 5. commit and push the closure to `main` without deploying.
 
-Then begin **S5-WP1 — Shot table and board projection**. It delivers the highest-value professional surface while preserving the accepted cinema sidecar as the only source of truth. The optional directed-storyboard package may follow WP1, but it must not delay synchronized editing, production order, continuity review, and reliable handoff exports.
+Sprint 5 is closed. Begin **S6-WP1 — Capability and provider contract** from the verified Gate C commit. Confirm current official Vertex/Veo capabilities before selecting an environment-configurable profile, keep the deterministic fixture as the ordinary test path, and preserve an explicit approval boundary between an approved storyboard frame and an unapproved video candidate.
 
-Sprints 6 and 7 remain gated. Do not begin video generation or multi-scene migration until Sprint 5 acceptance evidence is complete and the user explicitly approves the expanded scope.
+Sprint 7 remains gated behind the complete Sprint 6 acceptance suite. Multi-scene migration must preserve every valid single-scene backup and must not make video generation a prerequisite for project-level planning.
