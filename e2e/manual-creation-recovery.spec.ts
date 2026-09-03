@@ -249,55 +249,55 @@ test('keeps an accepted plan stable when adding a manual shot and next scene', a
   ))).toEqual([]);
 });
 
-test('automatically organizes manual children and preserves flat Layers as a separate view', async ({ page }) => {
+test('automatically updates one Project Outline and preserves flat Layers as a separate view', async ({ page }) => {
   await openEditor(page);
-  const structure = page.getByRole('tree', { name: 'Canvas structure' });
-  await expect(page.getByRole('heading', { name: 'Structure' })).toBeVisible();
-  await expect(structure.getByRole('treeitem')).toHaveCount(3);
-  await expect(structure.getByRole('button', { name: 'Story Premise', exact: true }).locator('..').locator('..')).toHaveAttribute('aria-level', '1');
-  await expect(structure.getByRole('button', { name: 'Scene 01', exact: true }).locator('..').locator('..')).toHaveAttribute('aria-level', '2');
-  await expect(structure.getByRole('button', { name: 'Shot 01', exact: true }).locator('..').locator('..')).toHaveAttribute('aria-level', '3');
+  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Story Premise', exact: true })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Scene 01', exact: true })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Shot 01', exact: true })).toBeVisible();
+  await expect(outline.getByText('1 shot · 0s', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('button', { name: 'Add shot', exact: true }).click();
   await page.getByLabel('Concept title').fill('Shot 02 - Flashlight reveal');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
-  const secondShot = structure.getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true });
+  const secondShot = outline.getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true });
   await expect(secondShot).toBeVisible();
-  await expect(secondShot.locator('..').locator('..')).toHaveAttribute('aria-level', '3');
+  await expect(outline.getByText('2 shots · 0s', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Collapse structure branch from Scene 01' }).click();
+  await page.getByRole('button', { name: 'Collapse Scene 01' }).click();
   await expect(secondShot).toHaveCount(0);
-  await structure.getByRole('button', { name: 'Scene 01', exact: true }).click();
+  await outline.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('button', { name: 'Add shot', exact: true }).click();
   await page.getByLabel('Concept title').fill('Shot 03 - Auto-expanded branch');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
-  await expect(structure.getByRole('button', { name: 'Shot 03 - Auto-expanded branch', exact: true })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Shot 03 - Auto-expanded branch', exact: true })).toBeVisible();
 
-  await structure.getByRole('button', { name: 'Scene 01', exact: true }).click();
+  await outline.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await addCinemaDraft(page, 'Note');
   await page.getByLabel('Concept title').fill('Wardrobe continuity');
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
-  const wardrobeNote = structure.getByRole('button', { name: 'Wardrobe continuity', exact: true });
+  const wardrobeNote = outline.getByRole('button', { name: 'Wardrobe continuity', exact: true });
   await expect(wardrobeNote).toBeVisible();
-  await expect(wardrobeNote.locator('..').locator('..')).toHaveAttribute('aria-level', '3');
+  await expect(outline.getByRole('list', { name: 'Notes in Scene 01' })).toContainText('Wardrobe continuity');
 
-  await page.getByRole('button', { name: 'Collapse structure branch from Scene 01' }).click();
-  const search = page.getByLabel('Search layers and concept text');
+  await page.getByRole('button', { name: 'Collapse Scene 01' }).click();
+  const search = page.getByLabel('Search project outline');
   await search.fill('flashlight reveal');
-  await expect(structure.getByRole('button', { name: 'Story Premise', exact: true })).toBeVisible();
-  await expect(structure.getByRole('button', { name: 'Scene 01', exact: true })).toBeVisible();
-  await expect(structure.getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Story Premise', exact: true })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Scene 01', exact: true })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true })).toBeVisible();
   await expect(page.locator('.layer-search').getByText('1', { exact: true })).toBeVisible();
   await search.fill('');
   await expect(secondShot).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Canvas layers' })).toBeVisible();
-  await expect(page.getByRole('tree', { name: 'Canvas structure' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Structure', exact: true }).click();
-  await page.getByRole('button', { name: 'Expand structure branch from Scene 01' }).click();
-  await expect(page.getByRole('tree', { name: 'Canvas structure' }).getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Project outline' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Project Outline', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand Scene 01' }).click();
+  await expect(page.getByRole('navigation', { name: 'Project outline' }).getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true })).toBeVisible();
 
   await waitForSaved(page);
   const attachmentRelationship = await page.evaluate(() => new Promise<string | null>((resolve, reject) => {
@@ -321,5 +321,5 @@ test('automatically organizes manual children and preserves flat Layers as a sep
   expect(attachmentRelationship).toBe('attachment');
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
-  await expect(page.getByRole('tree', { name: 'Canvas structure' }).getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Project outline' }).getByRole('button', { name: 'Shot 02 - Flashlight reveal', exact: true })).toBeVisible();
 });

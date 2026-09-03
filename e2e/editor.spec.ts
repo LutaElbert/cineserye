@@ -10,7 +10,8 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
   });
 
   await openEditor(page);
-  await expect(page.getByRole('heading', { name: 'Structure' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
 
   const imageInput = page.getByLabel('Choose images to add to the canvas');
   await expect(imageInput).toBeEnabled();
@@ -51,6 +52,7 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
 
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.getByRole('button', { name: 'test-map.png', exact: true })).toBeVisible();
   expect(externalRequests).toEqual([]);
 });
@@ -95,6 +97,7 @@ test('edits, hides, locks, duplicates, deletes, undoes, and redoes layers', asyn
   await page.getByRole('button', { name: 'Redo' }).click();
   await expect(page.getByRole('button', { name: 'Launch plan copy', exact: true })).toHaveCount(0);
 
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Hide Launch plan' }).click();
   await expect(page.getByRole('button', { name: 'Show Launch plan' })).toBeVisible();
 });
@@ -112,6 +115,7 @@ test('rejects mislabeled and corrupt image files', async ({ page }) => {
 
 test('accepts images dropped or pasted directly onto the canvas', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const bytes = Array.from(await createDiagramPng(page));
   await page.evaluate<void, number[]>((pngBytes) => {
     const dataTransfer = new DataTransfer();
@@ -207,6 +211,7 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
 
 test('renames layers, searches content, adds and collapses branches, and saves checkpoints', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
 
   const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
   await researchLayer.dblclick();

@@ -35,6 +35,8 @@ Reusable destructive-action UX is tracked in [Reusable Confirmation Dialog Imple
 
 Mixed accepted-plan/manual-creation layout hardening is complete and verified in [Mixed-State Cinema Layout Implementation Plan](./MIXED_STATE_CINEMA_LAYOUT_PLAN.md). It keeps accepted planning lanes stable when creators add draft shots or scenes, self-heals legacy displaced generated lanes on reload, and closes generated-title numbering gaps.
 
+Unified draft/production navigation is tracked in [Unified Project Outline Implementation Plan](./UNIFIED_PROJECT_OUTLINE_PLAN.md). It keeps one automatic Project Outline before, during, and after planning while retaining Layers as the flat technical view.
+
 ### Verified Sprint 10 closure
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).

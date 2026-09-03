@@ -88,6 +88,7 @@ test('keeps a 500-layer, 800-connector document responsive and persistent', asyn
   await confirmCineseryeDialog(page, 'Restore backup');
   await expect(page.getByText('Project backup restored.')).toBeVisible({ timeout: 20_000 });
   expect(Date.now() - restoreStarted).toBeLessThan(20_000);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.locator('.layer-row')).toHaveCount(500);
   await expect(page.locator('.react-flow__node')).toHaveCount(500);
   await expect(page.locator('.react-flow__edge')).toHaveCount(800);
@@ -106,6 +107,7 @@ test('keeps a 500-layer, 800-connector document responsive and persistent', asyn
 
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.locator('.layer-row')).toHaveCount(500);
   await expect(page.locator('.react-flow__edge')).toHaveCount(800);
   expect(runtimeErrors).toEqual([]);

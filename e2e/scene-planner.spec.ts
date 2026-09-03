@@ -86,6 +86,10 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
 
   await page.goto('/');
   await chooseStartScene(page);
+  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Project Outline', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(outline.getByRole('button', { name: 'Shot 01', exact: true }).getByText('Draft', { exact: true })).toBeVisible();
   await expect(page.getByText('Fixture mode', { exact: true }).first()).toBeVisible();
   await expect(page.locator('.plan-scene-button')).toBeDisabled();
   await editSceneText(page, 'Mara enters an abandoned cinema and sees her immediate future projected on screen.');
@@ -115,7 +119,8 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await expect(review).toBeVisible();
   await expectVisibleNodesNotToOverlap(page);
   await expect(page.getByRole('button', { name: 'Review shot plan' })).toBeVisible();
-  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  await expect(page.getByRole('button', { name: 'Project Outline', exact: true })).toBeVisible();
+  await expect(outline.locator('.outline-status-badge.status-proposed').first()).toContainText('Proposed');
   await expect(outline).toContainText('6 shots · 42s');
   await expect(outline).toContainText('₱820');
   await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
@@ -137,6 +142,7 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
 
   await review.getByRole('button', { name: 'Accept plan' }).click();
   await expect(review).toHaveCount(0);
+  await expect(outline.getByRole('button', { name: '01 · Entering the Auditorium', exact: true }).getByText('Prompts ready', { exact: true })).toBeVisible();
   await expectVisibleNodesNotToOverlap(page);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeEnabled();
   await page.getByRole('button', { name: 'Undo' }).click();
@@ -201,6 +207,8 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await expect(review).toContainText('Unpriced');
   await review.getByRole('button', { name: 'Reject' }).click();
   await expect(review).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
+  await expect(outline.getByRole('button', { name: 'Shot 01', exact: true }).getByText('Draft', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Shot 01', exact: true })).toBeVisible();
   expect(externalRequests).toEqual([]);
 });

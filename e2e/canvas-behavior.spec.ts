@@ -60,6 +60,7 @@ test('canvas selection, hand mode, zoom controls, dragging, and pane deselection
 
 test('select all, marquee modifiers, escape, and layer ranges stay synchronized', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const layerButton = (name: string) => page.getByRole('button', { name, exact: true });
   const research = canvasNode(page, 'Story Premise');
   const explore = canvasNode(page, 'Scene 01');
@@ -199,6 +200,7 @@ test('space, middle mouse, and trackpad navigation do not disturb layer selectio
 
 test('select all respects editing and locked layers and supports bulk actions', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const title = page.locator('.document-title input');
   await title.click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
@@ -241,6 +243,7 @@ test('double-clicking one layer drills from multi-selection into editing', async
 
 test('double-clicking empty canvas creates and edits a concept while zoom recovery remains available', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const pane = page.locator('.react-flow__pane');
   const originalCount = await page.locator('.layer-list .layer-row').count();
   const zoomReset = page.getByRole('button', { name: /Reset zoom to 100%/ });

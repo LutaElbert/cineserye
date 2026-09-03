@@ -30,7 +30,6 @@ import {
   AlignHorizontalSpaceBetween,
   AlignVerticalJustifyStart,
   AlignVerticalSpaceBetween,
-  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
@@ -118,7 +117,6 @@ import {
   resolveCinemaHierarchyInsertion,
 } from './cinema-hierarchy';
 import { planAcceptedCinemaDraftInsertion } from './cinema-workspace-placement';
-import { buildLayerStructure, type LayerStructureRow } from './layer-structure';
 import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
@@ -191,8 +189,11 @@ import {
 } from './cinema-domain-commands';
 import { prepareCinemaRevisionRestore } from '../domain/cinema/revision-restore';
 import type { CinemaProjectPresentation } from '../domain/cinema/prompt-artifacts';
-import { ProjectOutline, type OutlineBranchId } from '../features/project-outline/ProjectOutline';
-import { buildCinemaOutline } from '../features/project-outline/outline-model';
+import {
+  UnifiedProjectOutline,
+  type UnifiedOutlineBranchId,
+} from '../features/project-outline/UnifiedProjectOutline';
+import { buildUnifiedProjectOutline } from '../features/project-outline/unified-outline-model';
 import { CinemaInspector } from '../features/scene-planner/CinemaInspector';
 import {
   SceneBriefDialog,
@@ -230,7 +231,7 @@ type ToolMode = 'select' | 'hand';
 type SelectionOperation = 'replace' | 'add' | 'subtract';
 type MobilePanel = 'layers' | 'inspector' | null;
 type EditorWorkspaceView = 'canvas' | 'project' | ProfessionalWorkspaceView;
-type LayerPanelMode = 'structure' | 'layers';
+type LayerPanelMode = 'outline' | 'layers';
 type Toast = { id: number; message: string; tone: 'info' | 'success' | 'error' };
 const MAX_FILES_PER_IMPORT = 12;
 const InlineConceptEditor = lazy(() => import('./InlineConceptEditor'));
@@ -679,8 +680,7 @@ function EditorInner() {
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [layerPanelMode, setLayerPanelMode] = useState<LayerPanelMode>('structure');
-  const [collapsedStructureNodes, setCollapsedStructureNodes] = useState<Set<string>>(new Set());
+  const [layerPanelMode, setLayerPanelMode] = useState<LayerPanelMode>('outline');
   const [creationPaletteOpen, setCreationPaletteOpen] = useState(false);
   const [recoveryDocument, setRecoveryDocument] = useState<EditorDocument | null>(null);
   const [checkpoints, setCheckpoints] = useState<LocalCheckpoint[]>([]);
@@ -695,9 +695,7 @@ function EditorInner() {
   const [localCinemaTraces, setLocalCinemaTraces] = useState<LocalCinemaTrace[]>([]);
   const [sceneBriefDefaults, setSceneBriefDefaults] = useState<SceneBriefDefaults | null>(null);
   const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
-  const [expandedOutlineBranches, setExpandedOutlineBranches] = useState<Set<OutlineBranchId>>(
-    () => new Set(['project', 'scene', 'planning', 'characters', 'locations', 'props', 'visual-elements', 'shots', 'assets']),
-  );
+  const [collapsedOutlineBranches, setCollapsedOutlineBranches] = useState<Set<UnifiedOutlineBranchId>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectInputRef = useRef<HTMLInputElement>(null);
   const exportDialogRef = useRef<HTMLDialogElement>(null);
@@ -2221,10 +2219,10 @@ function EditorInner() {
     if (created) {
       const createdParentId = hierarchyInsertion?.parentId ?? relativeLayout?.parentId;
       if (createdParentId) {
-        setCollapsedStructureNodes((current) => {
-          if (!current.has(createdParentId)) return current;
+        setCollapsedOutlineBranches((current) => {
           const next = new Set(current);
-          next.delete(createdParentId);
+          next.delete('project');
+          next.delete(`scene:${createdParentId}`);
           return next;
         });
       }
@@ -2917,30 +2915,16 @@ function EditorInner() {
     ].join(' ').toLocaleLowerCase();
     return searchable.includes(normalizedSearch);
   });
-  const manualStructureModel = useMemo(
-    () => buildLayerStructure(presentedNodes, presentedEdges, searchQuery, collapsedStructureNodes),
-    [collapsedStructureNodes, presentedEdges, presentedNodes, searchQuery],
-  );
-  const presentedNodeById = useMemo(
-    () => new Map(presentedNodes.map((node) => [node.id, node])),
-    [presentedNodes],
-  );
-  const structureLayerNodes = useMemo(
-    () => manualStructureModel.rows
-      .map((row) => presentedNodeById.get(row.nodeId))
-      .filter((node): node is EditorNode => Boolean(node)),
-    [manualStructureModel.rows, presentedNodeById],
-  );
-  const sidebarLayerNodes = layerPanelMode === 'structure' ? structureLayerNodes : layerNodes;
-  const structureRowById = useMemo(
-    () => new Map(manualStructureModel.rows.map((row) => [row.nodeId, row])),
-    [manualStructureModel.rows],
-  );
+  const sidebarLayerNodes = layerNodes;
   const cinemaOutlineModel = useMemo(
-    () => cinemaOutlineActive
-      ? buildCinemaOutline(presentedNodes, activeCinemaProject, previewNodeIds, searchQuery)
-      : null,
-    [activeCinemaProject, cinemaOutlineActive, presentedNodes, previewNodeIds, searchQuery],
+    () => buildUnifiedProjectOutline(
+      presentedNodes,
+      presentedEdges,
+      activeCinemaData ?? undefined,
+      previewNodeIds,
+      searchQuery,
+    ),
+    [activeCinemaData, presentedEdges, presentedNodes, previewNodeIds, searchQuery],
   );
   const handleLayerSelection = useCallback((event: ReactMouseEvent<HTMLButtonElement>, id: string) => {
     if (mockProposalPreview) {
@@ -2972,21 +2956,23 @@ function EditorInner() {
     layerSelectionAnchorRef.current = id;
     revealAndSelectNode(id);
   }, [mockProposalPreview, revealAndSelectNode, selectNode, sidebarLayerNodes]);
-  const handleOutlineSelection = useCallback((id: string) => {
+  const handleOutlineSelection = useCallback((id: string, additive = false) => {
     if (mockProposalPreview) {
       setPreviewSelectedNodeId(id);
       setSelectedPath(null);
+    } else if (additive) {
+      selectNode(id, true);
     } else {
       revealAndSelectNode(id);
     }
     window.setTimeout(() => fitView({ nodes: [{ id }], duration: 280, padding: 0.6, maxZoom: 1.35 }), 0);
-  }, [fitView, mockProposalPreview, revealAndSelectNode]);
+  }, [fitView, mockProposalPreview, revealAndSelectNode, selectNode]);
   const focusOutlineNodes = useCallback((ids: string[]) => {
     if (!ids.length) return;
     fitView({ nodes: ids.map((id) => ({ id })), duration: 300, padding: 0.3, maxZoom: 1.2 });
   }, [fitView]);
-  const toggleOutlineBranch = useCallback((id: OutlineBranchId) => {
-    setExpandedOutlineBranches((current) => {
+  const toggleOutlineBranch = useCallback((id: UnifiedOutlineBranchId) => {
+    setCollapsedOutlineBranches((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
@@ -3072,7 +3058,7 @@ function EditorInner() {
         <ProposedNodeIdsContext.Provider value={previewNodeIds}>
           <NodeActionContext.Provider value={nodeActionValue}>
         <main
-        className={`editor-shell ${cinemaOutlineActive ? 'cinema-outline-active' : ''}`}
+        className="editor-shell cinema-outline-active"
         aria-label={APP_CONFIG.editorAriaLabel}
         aria-busy={!hydrated}
         data-ready={hydrated ? 'true' : 'false'}
@@ -3181,64 +3167,61 @@ function EditorInner() {
         <aside className={`panel layers-panel ${mobilePanel === 'layers' ? 'panel-open' : ''}`} aria-labelledby="layers-title">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">{cinemaOutlineActive ? 'Production' : 'Document'}</span>
-              <h1 id="layers-title">{cinemaOutlineActive ? 'Project Outline' : layerPanelMode === 'structure' ? 'Structure' : 'Layers'}</h1>
+              <span className="eyebrow">{layerPanelMode === 'outline' ? 'Project' : 'Document'}</span>
+              <h1 id="layers-title">{layerPanelMode === 'outline' ? 'Project Outline' : 'Layers'}</h1>
             </div>
             <div className="panel-heading-actions">
-              {!cinemaOutlineActive ? <button type="button" className="icon-button" aria-label="Add filmmaking layer" onClick={addConceptNode}><Plus size={16} /></button> : null}
+              {layerPanelMode === 'outline' ? <button type="button" className="icon-button" aria-label="Add filmmaking layer" disabled={Boolean(mockProposalPreview)} onClick={addConceptNode}><Plus size={16} /></button> : null}
               <button type="button" className="icon-button panel-close-button" aria-label="Close layers panel" onClick={() => setMobilePanel(null)}><X size={16} /></button>
             </div>
           </div>
-          {!cinemaOutlineActive ? (
-            <div className="layer-view-switch" role="group" aria-label="Layer panel view">
-              <button
-                type="button"
-                aria-pressed={layerPanelMode === 'structure'}
-                onClick={() => setLayerPanelMode('structure')}
-              >Structure</button>
-              <button
-                type="button"
-                aria-pressed={layerPanelMode === 'layers'}
-                onClick={() => setLayerPanelMode('layers')}
-              >Layers</button>
-            </div>
-          ) : null}
+          <div className="layer-view-switch" role="group" aria-label="Project sidebar view">
+            <button
+              type="button"
+              aria-pressed={layerPanelMode === 'outline'}
+              onClick={() => setLayerPanelMode('outline')}
+            >Project Outline</button>
+            <button
+              type="button"
+              aria-pressed={layerPanelMode === 'layers'}
+              onClick={() => setLayerPanelMode('layers')}
+            >Layers</button>
+          </div>
           <div className="layer-search">
             <Search size={13} aria-hidden="true" />
-            <label htmlFor="layer-search-input" className="visually-hidden">{cinemaOutlineActive ? 'Search project outline' : 'Search layers and concept text'}</label>
+            <label htmlFor="layer-search-input" className="visually-hidden">{layerPanelMode === 'outline' ? 'Search project outline' : 'Search layers and concept text'}</label>
             <input
               id="layer-search-input"
               type="search"
-              placeholder={cinemaOutlineActive ? 'Search scenes, assets, shots' : 'Search layers and notes'}
+              placeholder={layerPanelMode === 'outline' ? 'Search scenes, assets, shots' : 'Search layers and notes'}
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return;
-                const firstOutlineNode = cinemaOutlineModel?.groups[0]?.items[0]?.nodeId
-                  ?? cinemaOutlineModel?.scene.nodeId
-                  ?? cinemaOutlineModel?.project?.nodeId;
-                if (cinemaOutlineActive && firstOutlineNode) handleOutlineSelection(firstOutlineNode);
+                const firstScene = cinemaOutlineModel.scenes[0];
+                const firstOutlineNode = firstScene?.groups[0]?.items[0]?.nodeId
+                  ?? firstScene?.item.nodeId
+                  ?? cinemaOutlineModel.project?.nodeId;
+                if (layerPanelMode === 'outline' && firstOutlineNode) handleOutlineSelection(firstOutlineNode);
                 else if (sidebarLayerNodes[0]) revealAndSelectNode(sidebarLayerNodes[0].id);
               }}
             />
-            {normalizedSearch ? <span aria-live="polite">{cinemaOutlineModel?.visibleItemCount ?? (layerPanelMode === 'structure' ? manualStructureModel.matchCount : layerNodes.length)}</span> : null}
+            {normalizedSearch ? <span aria-live="polite">{layerPanelMode === 'outline' ? cinemaOutlineModel.visibleItemCount : layerNodes.length}</span> : null}
           </div>
-          {!cinemaOutlineActive ? <div className="cinema-add-entry">
+          {layerPanelMode === 'outline' && !mockProposalPreview ? <div className="cinema-add-entry">
             <span><strong>Build your project</strong><small>Add a typed scene, shot, character, asset, or note.</small></span>
             <button type="button" onClick={addConceptNode}><Plus size={12} /> Add</button>
           </div> : null}
           <p id="layer-list-instructions" className="visually-hidden">
-            {cinemaOutlineActive
-              ? 'The project outline is generated automatically from the active cinema canvas. Select an item to focus its node.'
-              : layerPanelMode === 'structure'
-                ? 'The structure is generated automatically from validated canvas connections. Use the disclosure buttons to collapse branches. Double-click an unlocked item or press F2 to rename it.'
-                : 'Layers shows the flat canvas stacking order. Double-click an unlocked layer or press F2 while it is focused to rename it.'}
+            {layerPanelMode === 'outline'
+              ? 'Project Outline is generated automatically from validated canvas connections and production records. Draft, proposed, and accepted items remain in one hierarchy.'
+              : 'Layers shows the flat canvas stacking order. Double-click an unlocked layer or press F2 while it is focused to rename it.'}
           </p>
-          {cinemaOutlineActive && cinemaOutlineModel ? (
-            <ProjectOutline
+          {layerPanelMode === 'outline' ? (
+            <UnifiedProjectOutline
               model={cinemaOutlineModel}
               selectedNodeId={selectedNodeId}
-              expandedBranches={expandedOutlineBranches}
+              collapsedBranches={collapsedOutlineBranches}
               proposalPreview={Boolean(mockProposalPreview)}
               searchActive={Boolean(normalizedSearch)}
               onToggleBranch={toggleOutlineBranch}
@@ -3248,18 +3231,12 @@ function EditorInner() {
               onToggleLock={toggleNodeLock}
             />
           ) : <ul
-            className={`layer-list ${layerPanelMode === 'structure' ? 'structure-list' : ''}`}
-            aria-label={layerPanelMode === 'structure' ? 'Canvas structure' : 'Canvas layers'}
+            className="layer-list"
+            aria-label="Canvas layers"
             aria-describedby="layer-list-instructions"
-            role={layerPanelMode === 'structure' ? 'tree' : undefined}
           >
-            {sidebarLayerNodes.map((node, rowIndex) => {
-              const structureRow: LayerStructureRow | undefined = layerPanelMode === 'structure'
-                ? structureRowById.get(node.id)
-                : undefined;
-              const expanded = structureRow ? !collapsedStructureNodes.has(node.id) : expandedVectors.has(node.id);
-              const previousStructureRow = rowIndex > 0 ? structureRowById.get(sidebarLayerNodes[rowIndex - 1].id) : undefined;
-              const startsUnassigned = structureRow?.section === 'unassigned' && previousStructureRow?.section !== 'unassigned';
+            {sidebarLayerNodes.map((node) => {
+              const expanded = expandedVectors.has(node.id);
               const cinemaDetail = cinemaNodeIds.has(node.id) ? activeCinemaProject.nodes[node.id] : undefined;
               const draftRole = node.data.kind === 'concept'
                 ? cinemaDraftRole(node.data.domainType, node.data.eyebrow)
@@ -3267,33 +3244,9 @@ function EditorInner() {
               const draftDescriptor = draftRole ? cinemaDraftDescriptor(draftRole) : null;
               return (
                 <Fragment key={node.id}>
-                  {startsUnassigned ? (
-                    <li className="structure-section-label" role="presentation">
-                      <span>Unassigned</span>
-                      <small>{manualStructureModel.unassignedCount}</small>
-                    </li>
-                  ) : null}
-                  <li
-                    role={structureRow ? 'treeitem' : undefined}
-                    aria-level={structureRow?.depth}
-                    aria-expanded={structureRow?.hasChildren ? expanded : undefined}
-                    className={structureRow ? `structure-item depth-${Math.min(structureRow.depth, 4)}` : undefined}
-                    style={structureRow ? ({ '--structure-depth': structureRow.depth } as CSSProperties) : undefined}
-                  >
-                  <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''} ${structureRow?.warning ? 'has-warning' : ''}`}>
-                    {structureRow?.hasChildren ? (
-                      <button
-                        type="button"
-                        className="layer-disclosure"
-                        aria-label={`${expanded ? 'Collapse' : 'Expand'} structure branch from ${node.data.name}`}
-                        aria-expanded={expanded}
-                        onClick={() => setCollapsedStructureNodes((current) => {
-                          const next = new Set(current);
-                          if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
-                          return next;
-                        })}
-                      >{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
-                    ) : !structureRow && node.data.kind === 'vector' ? (
+                  <li>
+                  <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''}`}>
+                    {node.data.kind === 'vector' ? (
                       <button
                         type="button"
                         className="layer-disclosure"
@@ -3372,18 +3325,6 @@ function EditorInner() {
                         </span>
                         <span className="layer-name-group">
                           <span className="layer-name">{node.data.name}</span>
-                          {structureRow?.warning ? (
-                            <span
-                              className="structure-warning"
-                              role="img"
-                              aria-label={structureRow.warning === 'cycle'
-                                ? `${node.data.name} is part of a connection cycle`
-                                : `${node.data.name} has multiple structural parents`}
-                              title={structureRow.warning === 'cycle'
-                                ? 'Connection cycle — resolve this item on the canvas'
-                                : 'Multiple structural parents — resolve this item on the canvas'}
-                            ><AlertTriangle size={11} /></span>
-                          ) : null}
                         </span>
                       </button>
                     )}
@@ -3394,7 +3335,7 @@ function EditorInner() {
                       {node.data.locked ? <Lock size={12} /> : <Unlock size={12} />}
                     </button>
                   </div>
-                  {!structureRow && node.data.kind === 'vector' && expanded ? (
+                  {node.data.kind === 'vector' && expanded ? (
                     <ul className="path-list" aria-label={`${node.data.name} paths`}>
                       {node.data.paths.map((path) => (
                         <li key={path.id}>

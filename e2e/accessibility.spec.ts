@@ -22,6 +22,7 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
   await page.keyboard.press('Enter');
   await expect(page.getByRole('region', { name: 'Canvas workspace' })).toBeFocused();
 
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
   await researchLayer.focus();
   await researchLayer.press('F2');
@@ -86,23 +87,23 @@ test('presents destructive confirmation accessibly and restores focus when cance
 
 test('exposes layer, connector, toggle, and selection state semantically', async ({ page }) => {
   await openEditor(page);
-  await expect(page.getByRole('tree', { name: 'Canvas structure' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
-  await expect(page.getByRole('treeitem')).toHaveCount(3);
-  await expect(page.getByRole('button', { name: 'Structure', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('navigation', { name: 'Project outline' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
+  await expect(page.getByRole('button', { name: 'Project Outline', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Collapse branch from Story Premise' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Collapse project' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Collapse Scene 01' })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toBeVisible();
   await expect(page.getByLabel('Connector from Scene 01 to Shot 01')).toBeVisible();
 
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Hide Story Premise', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Show Story Premise', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Show Story Premise', exact: true }).click();
   await page.getByRole('button', { name: 'Lock Story Premise', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Unlock Story Premise', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Canvas layers' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
 });
 

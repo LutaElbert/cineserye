@@ -307,6 +307,7 @@ test('child and sibling actions create compact layers below the parent with vert
 
 test('image actions add editable concept children and parent-aware siblings', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByLabel('Choose images to add to the canvas').setInputFiles({
     name: 'story-reference.png',
     mimeType: 'image/png',
@@ -370,6 +371,7 @@ test('image actions add editable concept children and parent-aware siblings', as
 
 test('image branch shortcuts work and locked images do not expose branch actions', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByLabel('Choose images to add to the canvas').setInputFiles({
     name: 'shortcut-reference.png',
     mimeType: 'image/png',
@@ -434,6 +436,7 @@ test('content alignment is accessible, undoable, and persistent on resized conce
 
 test('double-click and F2 rename a layer with commit, cancel, undo, and redo', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const researchLayer = page.getByRole('button', { name: 'Story Premise', exact: true });
 
   await researchLayer.dblclick();
@@ -458,6 +461,7 @@ test('double-click and F2 rename a layer with commit, cancel, undo, and redo', a
 
 test('double-click rename works for raster layers while vectorization is disabled', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByLabel('Choose images to add to the canvas').setInputFiles({
     name: 'double-click-map.png',
     mimeType: 'image/png',
@@ -474,6 +478,7 @@ test('double-click rename works for raster layers while vectorization is disable
 
 test('locked layers reject canvas editing, renaming, and new connections', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Lock Scene 01', exact: true }).click();
   const explore = canvasNode(page, 'Scene 01');
 
@@ -590,6 +595,7 @@ test('connector deletion and layer deletion cascade through undo and redo', asyn
 
 test('mixed locked selection changes and deletes only unlocked layers', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('button', { name: 'Lock Scene 01', exact: true }).click();
   await page.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('button', { name: 'Shot 01', exact: true }).click({ modifiers: ['Meta'] });

@@ -454,7 +454,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 .outline-summary-main {
   display: grid;
-  grid-template-columns: 17px minmax(0, 1fr);
+  grid-template-columns: 17px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   min-block-size: 38px;
@@ -507,7 +507,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 }
 .outline-item-row:hover { background: #f2f3f5; }
 .outline-item-row.active { background: var(--accent-soft); color: #38345e; }
-.outline-item-row.proposed::before { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 0; inline-size: 2px; border-radius: 999px; background: var(--accent); }
+.outline-item-row.status-proposed::before { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 0; inline-size: 2px; border-radius: 999px; background: var(--accent); }
+.outline-item-row.status-attention::before { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 0; inline-size: 2px; border-radius: 999px; background: #b06c1a; }
 .outline-item-main {
   display: grid;
   grid-template-columns: 19px minmax(0, 1fr) auto auto;
@@ -520,12 +521,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .outline-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .outline-item-row.active .outline-item-name { font-weight: 700; }
 .outline-item-metric { color: #8a8e97; font-size: 7px; font-weight: 690; font-variant-numeric: tabular-nums; }
-.outline-draft-badge { padding: 2px 5px; border: 1px solid #d8d5ff; border-radius: 999px; background: #f5f4ff; color: var(--accent); font-size: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-.outline-item-actions { display: flex; inline-size: 0; overflow: hidden; opacity: 0; transition: inline-size 120ms ease, opacity 120ms ease; }
-.outline-item-row:hover .outline-item-actions, .outline-item-row:focus-within .outline-item-actions { inline-size: 52px; opacity: 1; }
+.outline-status-badge { max-inline-size: 72px; overflow: hidden; padding: 2px 5px; border: 1px solid #d8dbe2; border-radius: 999px; background: #f5f6f8; color: #686c76; text-overflow: ellipsis; white-space: nowrap; font-size: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.outline-status-badge.status-draft, .outline-status-badge.status-proposed { border-color: #d8d5ff; background: #f5f4ff; color: var(--accent); }
+.outline-status-badge.status-production { border-color: #cbe8d9; background: #f0faf5; color: #24785c; }
+.outline-status-badge.status-attention { border-color: #ead7b1; background: #fff9ea; color: #8a641a; }
+.outline-item-actions { display: flex; inline-size: 52px; opacity: 1; }
 .outline-item-actions .layer-control { inline-size: 24px; block-size: 26px; }
 .outline-item-actions .layer-control:disabled { opacity: .3; cursor: not-allowed; }
 .outline-empty { margin: 18px 12px; color: var(--muted); font-size: 10px; text-align: center; }
+.outline-scene-empty { margin: 7px 8px 11px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.outline-attention { margin-block-start: 10px; padding-block-start: 6px; border-block-start: 1px solid var(--line); }
 .layer-renaming input {
   min-inline-size: 0;
   inline-size: 100%;
