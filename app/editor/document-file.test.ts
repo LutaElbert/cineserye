@@ -22,6 +22,22 @@ describe('Cineserye project backups', () => {
     expect(restored.edges).toHaveLength(initialDocument.edges.length);
     expect(restored.nodes.every((node) => node.selected === false)).toBe(true);
     expect(restored.schemaVersion).toBe(5);
+    expect(restored.edges.every((edge) => edge.data?.relationship === 'hierarchy')).toBe(true);
+  });
+
+  it('preserves allowlisted connector relationships and drops unknown metadata values', () => {
+    const document = structuredClone(initialDocument);
+    document.edges[0].data = { ...document.edges[0].data!, relationship: 'reference' };
+    document.edges[1].data = { ...document.edges[1].data!, relationship: 'sequence' };
+    const restored = parseProjectBackup(serializeProjectBackup(document));
+    expect(restored.edges.map((edge) => edge.data?.relationship)).toEqual(['reference', 'sequence']);
+
+    const invalid = structuredClone(initialDocument) as unknown as {
+      edges: Array<{ data: Record<string, unknown> }>;
+    };
+    invalid.edges[0].data.relationship = 'provider-authored';
+    const sanitized = validateEditorDocument(invalid);
+    expect(sanitized.edges[0].data?.relationship).toBeUndefined();
   });
 
   it('migrates version 1 projects to the current document version', () => {

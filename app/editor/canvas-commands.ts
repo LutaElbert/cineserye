@@ -23,6 +23,14 @@ export type ConnectNodesCommand = {
   edge: EditorEdge;
 };
 
+export type UpdateEdgeCommand = {
+  type: 'update-edge';
+  id: string;
+  patch: Partial<Pick<EditorEdge, 'sourceHandle' | 'targetHandle' | 'type'>> & {
+    data?: Partial<Pick<NonNullable<EditorEdge['data']>, 'relationship'>>;
+  };
+};
+
 export type DeleteNodesCommand = {
   type: 'delete-nodes';
   ids: string[];
@@ -32,6 +40,7 @@ export type CanvasCommand =
   | CreateNodeCommand
   | UpdateNodeCommand
   | ConnectNodesCommand
+  | UpdateEdgeCommand
   | DeleteNodesCommand;
 
 export type CanvasCommandProposal = {
@@ -146,6 +155,51 @@ export function applyCanvasCommandProposal(
         next.edges.push(structuredClone(command.edge) as EditorEdge);
         affectedNodeIds.add(source);
         affectedNodeIds.add(target);
+        affectedEdgeIds.add(id);
+        break;
+      }
+      case 'update-edge': {
+        const id = boundedString(command.id, 'Updated connector id');
+        const patch = ensureRecord(command.patch, 'Connector patch');
+        const allowedKeys = new Set(['sourceHandle', 'targetHandle', 'type', 'data']);
+        if (Object.keys(patch).some((key) => !allowedKeys.has(key))) {
+          throw new Error('Connector patches may only change handles, routing type, or relationship metadata.');
+        }
+        const index = next.edges.findIndex((edge) => edge.id === id);
+        if (index < 0) throw new Error(`Connector ${id} does not exist.`);
+        const current = next.edges[index];
+        const sourceNode = next.nodes.find((node) => node.id === current.source);
+        const targetNode = next.nodes.find((node) => node.id === current.target);
+        if (!sourceNode || !targetNode) throw new Error(`Connector ${id} has a missing endpoint.`);
+        if (sourceNode.data.locked || targetNode.data.locked) throw new Error(`Connector ${id} has a locked endpoint.`);
+        const dataPatch = patch.data === undefined ? undefined : ensureRecord(patch.data, 'Connector data patch');
+        if (dataPatch && (Object.keys(dataPatch).some((key) => key !== 'relationship')
+          || !['hierarchy', 'reference', 'sequence'].includes(String(dataPatch.relationship)))) {
+          throw new Error('Connector relationship metadata is invalid.');
+        }
+        if (patch.type !== undefined && patch.type !== 'smoothstep') {
+          throw new Error('Connector routing type is invalid.');
+        }
+        for (const handle of [patch.sourceHandle, patch.targetHandle]) {
+          if (handle !== undefined && handle !== 'bottom' && handle !== 'top' && handle !== 'left' && handle !== 'right') {
+            throw new Error('Connector handle is invalid.');
+          }
+        }
+        const nextData: EditorEdge['data'] = dataPatch === undefined
+          ? current.data
+          : {
+            ...(current.data ?? { label: '', kind: 'default' }),
+            relationship: dataPatch.relationship as NonNullable<EditorEdge['data']>['relationship'],
+          };
+        next.edges[index] = {
+          ...current,
+          ...(patch.sourceHandle === undefined ? {} : { sourceHandle: String(patch.sourceHandle) }),
+          ...(patch.targetHandle === undefined ? {} : { targetHandle: String(patch.targetHandle) }),
+          ...(patch.type === undefined ? {} : { type: patch.type as EditorEdge['type'] }),
+          ...(nextData === undefined ? {} : { data: nextData }),
+        };
+        affectedNodeIds.add(current.source);
+        affectedNodeIds.add(current.target);
         affectedEdgeIds.add(id);
         break;
       }

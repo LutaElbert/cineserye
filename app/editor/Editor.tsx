@@ -110,6 +110,11 @@ import {
   relativeConceptLayout,
 } from './node-layout';
 import {
+  cinemaHierarchyRootId,
+  planCinemaHierarchyLayout,
+  resolveCinemaHierarchyInsertion,
+} from './cinema-hierarchy';
+import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
   clearPendingCinemaProposals,
@@ -2050,17 +2055,31 @@ function EditorInner() {
       : undefined;
     if (source?.data.locked) return false;
     const relation = options.relation ?? 'child';
-    const layout = source
+    let hierarchyInsertion: ReturnType<typeof resolveCinemaHierarchyInsertion> | null = null;
+    if (source && (role === 'scene' || role === 'shot')) {
+      try {
+        hierarchyInsertion = resolveCinemaHierarchyInsertion(
+          nodesRef.current,
+          edgesRef.current,
+          source.id,
+          role,
+        );
+      } catch (error) {
+        announce(error instanceof Error ? error.message : 'The filmmaking hierarchy is invalid.', 'error');
+        return false;
+      }
+    }
+    const relativeLayout = source && !hierarchyInsertion
       ? relativeConceptLayout(nodesRef.current, edgesRef.current, source.id, relation, newId)
       : null;
     const center = options.screenPoint
       ? screenToFlowPosition(options.screenPoint)
       : screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    const position = layout?.positions.get(newId) ?? { x: center.x - 110, y: center.y - 46 };
-    const nextNode: EditorNode = {
+    const provisionalPosition = relativeLayout?.positions.get(newId) ?? { x: center.x - 110, y: center.y - 46 };
+    let nextNode: EditorNode = {
       id: newId,
       type: 'concept',
-      position,
+      position: provisionalPosition,
       style: { width: CONCEPT_DEFAULT_WIDTH, height: CONCEPT_MIN_HEIGHT },
       draggable: true,
       deletable: true,
@@ -2081,20 +2100,63 @@ function EditorInner() {
         locked: false,
       },
     };
+    const hierarchyEdge: EditorEdge | null = hierarchyInsertion ? {
+      id: crypto.randomUUID(),
+      source: hierarchyInsertion.parentId,
+      target: newId,
+      sourceHandle: 'bottom',
+      targetHandle: 'top',
+      type: 'smoothstep',
+      animated: false,
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { stroke: '#a9adb7', strokeWidth: 1.5 },
+      data: { label: '', kind: 'default', relationship: 'hierarchy' },
+    } : null;
+    const hierarchyLayout = hierarchyInsertion && hierarchyEdge
+      ? planCinemaHierarchyLayout(
+        [...nodesRef.current, nextNode],
+        [...edgesRef.current, hierarchyEdge],
+        { ...hierarchyInsertion, newNodeId: newId },
+      )
+      : null;
+    const plannedPosition = hierarchyLayout?.positions.get(newId);
+    if (plannedPosition) nextNode = { ...nextNode, position: plannedPosition };
     const commands: CanvasCommandProposal['commands'] = [];
     for (const node of nodesRef.current) {
-      const moved = layout?.positions.get(node.id);
+      const moved = hierarchyLayout?.positions.get(node.id) ?? relativeLayout?.positions.get(node.id);
       if (moved && (moved.x !== node.position.x || moved.y !== node.position.y)) {
         commands.push({ type: 'update-node', id: node.id, patch: { position: moved } });
       }
     }
+    if (hierarchyLayout) {
+      const nodeById = new Map(nodesRef.current.map((node) => [node.id, node]));
+      for (const edgeId of hierarchyLayout.hierarchyEdgeIds) {
+        const edge = edgesRef.current.find((candidate) => candidate.id === edgeId);
+        if (!edge) continue;
+        if (nodeById.get(edge.source)?.data.locked || nodeById.get(edge.target)?.data.locked) continue;
+        if (edge.sourceHandle === 'bottom' && edge.targetHandle === 'top'
+          && edge.type === 'smoothstep' && edge.data?.relationship === 'hierarchy') continue;
+        commands.push({
+          type: 'update-edge',
+          id: edge.id,
+          patch: {
+            sourceHandle: 'bottom',
+            targetHandle: 'top',
+            type: 'smoothstep',
+            data: { relationship: 'hierarchy' },
+          },
+        });
+      }
+    }
     commands.push({ type: 'create-node', node: nextNode });
-    if (layout?.parentId) {
+    if (hierarchyEdge) {
+      commands.push({ type: 'connect-nodes', edge: hierarchyEdge });
+    } else if (relativeLayout?.parentId) {
       commands.push({
         type: 'connect-nodes',
         edge: {
           id: crypto.randomUUID(),
-          source: layout.parentId,
+          source: relativeLayout.parentId,
           target: newId,
           sourceHandle: 'bottom',
           targetHandle: 'top',
@@ -2404,8 +2466,28 @@ function EditorInner() {
   }, [recordHistory, selectedPath]);
 
   const toggleNodeVisibility = useCallback((id: string) => {
-    updateNode(id, (node) => ({ ...node, hidden: !node.hidden }));
-  }, [updateNode]);
+    const selected = nodesRef.current.find((node) => node.id === id);
+    if (!selected) return;
+    if (!selected.hidden) {
+      updateNode(id, (node) => ({ ...node, hidden: true }));
+      return;
+    }
+    const revealedNodes = nodesRef.current.map((node) => node.id === id ? { ...node, hidden: false } : node);
+    try {
+      const rootId = cinemaHierarchyRootId(revealedNodes, edgesRef.current, id);
+      const layout = rootId
+        ? planCinemaHierarchyLayout(revealedNodes, edgesRef.current, { rootId })
+        : null;
+      recordHistory();
+      setNodes(revealedNodes.map((node) => ({
+        ...node,
+        position: layout?.positions.get(node.id) ?? node.position,
+      })));
+      if (layout) announce('Layer shown and its cinema hierarchy spacing was checked.', 'success');
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The layer could not be shown safely.', 'error');
+    }
+  }, [announce, recordHistory, updateNode]);
 
   const toggleNodeLock = useCallback((id: string) => {
     updateNode(id, (node) => ({

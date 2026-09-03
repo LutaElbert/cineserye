@@ -17,6 +17,7 @@ The local project foundation is now implemented through Sprint 10: each selected
 - Server-only provider contracts, bounded retry/timeout/cancellation, runtime output validation, and content-free structured telemetry.
 - Ghost proposal review with atomic acceptance, rejection without mutation, and one-step undo.
 - Cinema-aware manual creation for story, scene, shot, character, location, prop, visual-element, and note drafts, with contextual child/sibling actions.
+- Ancestor-aware Story → Scene → Shot creation that resolves semantic parents, packs complete mixed-height subtrees without overlap, and persists consistent bottom-to-top hierarchy connectors as one undoable change.
 - A guarded empty-canvas state with same-session undo, a persisted last-non-empty recovery copy, clean scene bootstrap, backup restore, and an explicit sample choice.
 - A scene-level Reference Deck for validated local uploads, existing canvas images, and non-fetched external inspiration links, with explicit provenance, rights, allowed-use, approval, pinning, search, filtering, and shot usage.
 - Content-addressed local media storage with SHA-256 deduplication, safe orphan cleanup, and version-6 `.cineserye` backups that embed and verify required media.
@@ -73,7 +74,7 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 
 ## Manual canvas building
 
-Use **Add** in the Layers panel or **Add filmmaking layer** in the canvas toolbar to open the creation palette. It exposes cinema roles instead of generic templates and enforces simple prerequisites—for example, a shot requires a scene. When a scene is selected, a new shot, character, location, prop, visual element, or note is connected beneath it automatically. Selected story, scene, and shot cards also expose contextual actions such as **Add scene**, **Add shot**, and **Add next shot**.
+Use **Add** in the Layers panel or **Add filmmaking layer** in the canvas toolbar to open the creation palette. It exposes cinema roles instead of generic templates and enforces simple prerequisites—for example, a shot requires a scene. When a scene is selected, a new shot, character, location, prop, visual element, or note is connected beneath it automatically. Selected story, scene, and shot cards also expose contextual actions such as **Add scene**, **Add shot**, and **Add next shot**. Scene and shot creation resolves the real Story or Scene parent, then repacks that Story hierarchy so siblings and descendants stay grouped without overlapping; unrelated free-form canvas branches remain untouched.
 
 These drafts remain generic canvas concept nodes with a validated `domainType`; the canvas engine stores but does not interpret that value. The cinema domain layer owns role labels, naming, relationship rules, and conversion behavior. Manual creation and role conversion use the same validated command boundary reserved for future copilot proposals.
 

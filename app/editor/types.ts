@@ -79,6 +79,8 @@ export type ConnectorKind = 'default' | 'dashed' | 'emphasis';
 export type EditorEdgeData = Record<string, unknown> & {
   label: string;
   kind: ConnectorKind;
+  /** Product semantics are optional so generic and legacy canvas connectors remain valid. */
+  relationship?: 'hierarchy' | 'reference' | 'sequence';
 };
 export type EditorEdge = Edge<EditorEdgeData>;
 

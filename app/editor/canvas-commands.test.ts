@@ -103,4 +103,66 @@ describe('validated canvas command boundary', () => {
       commands: [{ type: 'call-provider' }],
     })).toThrow('unsupported canvas command');
   });
+
+  it('normalizes a hierarchy connector without changing its presentation data', () => {
+    const source = structuredClone(initialDocument);
+    source.edges[0] = {
+      ...source.edges[0],
+      sourceHandle: 'right',
+      targetHandle: 'left',
+      label: 'develops',
+      data: { label: 'develops', kind: 'emphasis' },
+      style: { stroke: '#635bff', strokeWidth: 2.5 },
+    };
+    const result = applyCanvasCommandProposal(source, {
+      version: 1,
+      proposalId: 'normalize-hierarchy-edge',
+      summary: 'Normalize hierarchy routing',
+      commands: [{
+        type: 'update-edge',
+        id: source.edges[0].id,
+        patch: {
+          sourceHandle: 'bottom',
+          targetHandle: 'top',
+          type: 'smoothstep',
+          data: { relationship: 'hierarchy' },
+        },
+      }],
+    });
+
+    expect(result.document.edges[0]).toMatchObject({
+      id: source.edges[0].id,
+      sourceHandle: 'bottom',
+      targetHandle: 'top',
+      label: 'develops',
+      data: { label: 'develops', kind: 'emphasis', relationship: 'hierarchy' },
+      style: { stroke: '#635bff', strokeWidth: 2.5 },
+    });
+    expect(result.affectedEdgeIds).toEqual([source.edges[0].id]);
+  });
+
+  it('rejects unsafe connector patches and locked hierarchy endpoints atomically', () => {
+    expect(() => applyCanvasCommandProposal(initialDocument, {
+      version: 1,
+      proposalId: 'unsafe-edge-patch',
+      summary: 'Unsafe connector patch',
+      commands: [{
+        type: 'update-edge',
+        id: initialDocument.edges[0].id,
+        patch: { source: 'shot-01' },
+      }],
+    })).toThrow('may only change handles');
+
+    const locked = structuredClone(initialDocument);
+    locked.nodes[0].data.locked = true;
+    expect(() => applyCanvasCommandProposal(locked, {
+      version: 1,
+      proposalId: 'locked-edge-patch',
+      summary: 'Locked connector patch',
+      commands: [{
+        type: 'update-edge', id: locked.edges[0].id, patch: { sourceHandle: 'bottom' },
+      }],
+    })).toThrow('locked endpoint');
+    expect(locked.edges[0].sourceHandle).toBeUndefined();
+  });
 });

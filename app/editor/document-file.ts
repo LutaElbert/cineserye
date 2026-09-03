@@ -355,6 +355,11 @@ function parseEdge(value: unknown, index: number): EditorEdge {
     : typeof value.label === 'string'
       ? boundedString(value.label, 'Connector label', 240)
       : '';
+  const relationship = rawData.relationship === 'hierarchy'
+    || rawData.relationship === 'reference'
+    || rawData.relationship === 'sequence'
+    ? rawData.relationship
+    : undefined;
   return {
     id: boundedString(value.id, 'Connector id', 160),
     source: boundedString(value.source, 'Connector source', 160),
@@ -372,7 +377,7 @@ function parseEdge(value: unknown, index: number): EditorEdge {
     },
     markerEnd: { type: MarkerType.ArrowClosed },
     label,
-    data: { label, kind },
+    data: { label, kind, ...(relationship ? { relationship } : {}) },
     selected: false,
   };
 }

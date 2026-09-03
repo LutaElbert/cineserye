@@ -2,7 +2,7 @@
 
 **Plan date:** 2026-09-01
 
-**Last reconciled:** 2026-09-02
+**Last reconciled:** 2026-09-03
 
 **Historical starting baseline:** `f315cf0209b474810d0faebe8e8c632980f53555`
 
@@ -11,6 +11,8 @@
 **Source documents:** [current-feature audit](FEATURE_AUDIT.md), [architecture guide](ARCHITECTURE.md), and [initial vertical-slice plan](IMPLEMENTATION_PLAN.md)
 
 **Scope:** a ten-sprint roadmap from one-scene workflow closure through a locally verified copilot, tightly controlled live research/planning, and evidence-backed reliability closure
+
+**Post–Sprint 10 follow-up:** [ancestor-aware Story → Scene → Shot layout](HIERARCHICAL_CANVAS_LAYOUT_PLAN.md) — complete and verified
 
 **Execution status (2026-09-02):** Sprints 1–10 are implemented. Sprint 8 provides a fixture-first continuity audit with bounded findings and fingerprint-checked corrections. Sprint 9's fail-closed live boundary requires `elbertluta@gmail.com`, project/quota project `cineserye`, explicit consent, an operator ceiling, and a local enable switch; its credit-consuming live smoke is correctly recorded as **Not run** pending fresh authorization. Sprint 10 adds separate development/holdout grades, no-content retention, a 100-run fixture soak, spend governance, and a readiness report. Deployment, autonomous/background mutation, authentication, collaboration, and required live media generation remain outside this roadmap.
 

@@ -10,7 +10,7 @@ async function chooseStartScene(page: Page) {
 }
 
 async function editSceneText(page: Page, text: string) {
-  const scene = page.locator('.react-flow__node').filter({ hasText: 'Scene 01' }).first();
+  const scene = page.locator('.react-flow__node[data-id="scene-01"]');
   await scene.locator('.concept-node').dblclick();
   await page.locator('.concept-body-editor').fill(text);
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();

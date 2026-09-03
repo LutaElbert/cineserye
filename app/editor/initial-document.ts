@@ -83,7 +83,7 @@ export const initialDocument: EditorDocument = {
       animated: false,
       style: { stroke: '#a9adb7', strokeWidth: 1.5 },
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { label: '', kind: 'default' },
+      data: { label: '', kind: 'default', relationship: 'hierarchy' },
     },
     {
       id: 'scene-01-shot-01',
@@ -93,7 +93,7 @@ export const initialDocument: EditorDocument = {
       animated: false,
       style: { stroke: '#a9adb7', strokeWidth: 1.5 },
       markerEnd: { type: MarkerType.ArrowClosed },
-      data: { label: '', kind: 'default' },
+      data: { label: '', kind: 'default', relationship: 'hierarchy' },
     },
   ],
 };
