@@ -79,7 +79,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import '@xyflow/react/dist/style.css';
-import { useConfirmationDialog } from '../components/ConfirmationDialog';
+import { useConfirmationDialog } from '../components/useConfirmationDialog';
 import {
   downloadProjectBackup,
   MAX_PROJECT_FILE_SIZE,

@@ -2,11 +2,9 @@
 
 import { AlertTriangle, CircleHelp, LoaderCircle, ShieldAlert } from 'lucide-react';
 import {
-  useCallback,
   useEffect,
   useId,
   useRef,
-  useState,
 } from 'react';
 
 export type ConfirmationTone = 'default' | 'warning' | 'danger';
@@ -126,42 +124,4 @@ export function ConfirmationDialog({
       ) : null}
     </dialog>
   );
-}
-
-export function useConfirmationDialog() {
-  const pendingRef = useRef<{
-    request: ConfirmationDialogOptions;
-    resolve: (confirmed: boolean) => void;
-  } | null>(null);
-  const [request, setRequest] = useState<ConfirmationDialogOptions | null>(null);
-
-  const settle = useCallback((confirmed: boolean) => {
-    const pending = pendingRef.current;
-    if (!pending) return;
-    pendingRef.current = null;
-    setRequest(null);
-    pending.resolve(confirmed);
-  }, []);
-
-  const confirm = useCallback((nextRequest: ConfirmationDialogOptions) => new Promise<boolean>((resolve) => {
-    pendingRef.current?.resolve(false);
-    pendingRef.current = { request: nextRequest, resolve };
-    setRequest(nextRequest);
-  }), []);
-
-  useEffect(() => () => {
-    pendingRef.current?.resolve(false);
-    pendingRef.current = null;
-  }, []);
-
-  return {
-    confirm,
-    confirmationDialog: (
-      <ConfirmationDialog
-        request={request}
-        onConfirm={() => settle(true)}
-        onCancel={() => settle(false)}
-      />
-    ),
-  };
 }
