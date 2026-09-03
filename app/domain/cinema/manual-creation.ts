@@ -89,9 +89,12 @@ export function nextCinemaDraftName(
 ): string {
   const descriptor = cinemaDraftDescriptor(role);
   if (role === 'story' && !existingNames.includes(descriptor.namePrefix)) return descriptor.namePrefix;
-  const expression = new RegExp(`^${descriptor.namePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(\\d+)$`, 'i');
+  const escapedPrefix = descriptor.namePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const expression = new RegExp(`^${escapedPrefix}\\s+(\\d+)(?:$|\\s*[·:—-]\\s+.*$)`, 'i');
+  const acceptedShotExpression = role === 'shot' ? /^(\d+)\s*[·:—-]\s+.+$/i : null;
   const highest = existingNames.reduce((maximum, name) => {
-    const match = expression.exec(name.trim());
+    const normalized = name.trim();
+    const match = expression.exec(normalized) ?? acceptedShotExpression?.exec(normalized);
     return match ? Math.max(maximum, Number(match[1])) : maximum;
   }, 0);
   return `${descriptor.namePrefix} ${String(highest + 1).padStart(2, '0')}`;

@@ -50,7 +50,7 @@ accepted project + reviewed scene outlines
 
 ## Generic editor foundation
 
-`app/editor` owns selection, viewport behavior, drag, resize, connections, ordering, undo/redo, graph integrity, IndexedDB persistence, checkpoints, backup/restore, SVG export, keyboard support, responsive panels, accessibility, and security limits. `node-layout.ts` exposes provider-neutral node rectangles and lane packing, while `graph-rules.ts` uses measured dimensions and locked nodes as collision obstacles for deterministic Tidy. Cinema proposal layout consumes those generic primitives without teaching the editor what a shot or character means.
+`app/editor` owns selection, viewport behavior, drag, resize, connections, ordering, undo/redo, graph integrity, IndexedDB persistence, checkpoints, backup/restore, SVG export, keyboard support, responsive panels, accessibility, and security limits. `node-layout.ts` exposes provider-neutral node rectangles and lane packing, while `graph-rules.ts` uses measured dimensions and locked nodes as collision obstacles for deterministic Tidy. Cinema proposal layout consumes those generic primitives without teaching the editor what a shot or character means. `cinema-workspace-placement.ts` is the narrow cinema-aware adapter for adding a draft to an accepted workspace: it treats accepted plan hosts as fixed, calculates only the new node's collision-free position, and leaves the generic hierarchy planner unchanged for unplanned canvases.
 
 Provider prompts, credentials, model SDKs, research logic, and cinema business rules do not belong in this layer. Generic canvas fixes should remain reusable independently of Cineserye's product decisions.
 

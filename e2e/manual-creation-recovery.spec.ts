@@ -22,6 +22,15 @@ async function visibleCinemaHierarchyOverlaps(page: import('@playwright/test').P
   });
 }
 
+async function flowNodePositions(page: import('@playwright/test').Page, ids?: string[]) {
+  return page.locator('.react-flow__node').evaluateAll((elements, requestedIds) => {
+    const requested = new Set(requestedIds);
+    return Object.fromEntries(elements
+      .map((element) => [element.getAttribute('data-id') ?? '', (element as HTMLElement).style.transform])
+      .filter(([id]) => id && (!requested.size || requested.has(id))));
+  }, ids ?? []);
+}
+
 test('creates typed cinema drafts with contextual relationships and reversible commands', async ({ page }) => {
   await openEditor(page);
 
@@ -188,6 +197,56 @@ test('keeps new scenes and shots connected to semantic parents without overlappi
   await page.getByRole('button', { name: 'Fit View' }).click();
   await expect(page.getByLabel('Connector from Scene 02 to Shot 04')).toBeVisible();
   await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
+});
+
+test('keeps an accepted plan stable when adding a manual shot and next scene', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  const chooser = page.getByRole('dialog', { name: /Start with your scene/ });
+  await chooser.getByRole('button', { name: /Explore the sample/ }).click();
+  await expect(page.getByText('Sample opened locally with fixture sources.')).toBeVisible();
+
+  const acceptedIds = await page.locator('.react-flow__node').evaluateAll((elements) => (
+    elements.map((element) => element.getAttribute('data-id')).filter((id): id is string => Boolean(id))
+  ));
+  const acceptedPositions = await flowNodePositions(page, acceptedIds);
+  const acceptedOverlaps = await visibleCinemaHierarchyOverlaps(page);
+  const scene = canvasNode(page, 'Scene 01 · The Abandoned Cinema');
+
+  await scene.click();
+  await page.getByRole('button', { name: 'Add shot', exact: true }).click();
+  await expect(page.getByLabel('Concept title')).toContainText('Shot 07');
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await expect(page.getByLabel('Connector from Scene 01 · The Abandoned Cinema to Shot 07')).toBeVisible();
+  expect(await flowNodePositions(page, acceptedIds)).toEqual(acceptedPositions);
+
+  await page.getByRole('button', { name: 'Fit View' }).click();
+  await scene.click();
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await expect(page.getByLabel('Concept title')).toContainText('Scene 02');
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await expect(page.getByLabel('Connector from The Reel That Knows Tomorrow to Scene 02')).toBeVisible();
+  await expect(page.getByLabel(/Connector from Scene 01 · The Abandoned Cinema to Scene 02/)).toHaveCount(0);
+  expect(await flowNodePositions(page, acceptedIds)).toEqual(acceptedPositions);
+  await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual(acceptedOverlaps);
+  expect((await visibleCinemaHierarchyOverlaps(page)).filter((pair) => (
+    pair.includes('Shot 07') || pair.includes('Scene 02')
+  ))).toEqual([]);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(canvasNode(page, 'Scene 02')).toHaveCount(0);
+  expect(await flowNodePositions(page, acceptedIds)).toEqual(acceptedPositions);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(canvasNode(page, 'Scene 02')).toBeVisible();
+
+  await waitForSaved(page);
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await expect(canvasNode(page, 'Shot 07')).toBeVisible();
+  await expect(canvasNode(page, 'Scene 02')).toBeVisible();
+  expect((await visibleCinemaHierarchyOverlaps(page)).filter((pair) => (
+    pair.includes('Shot 07') || pair.includes('Scene 02')
+  ))).toEqual([]);
 });
 
 test('automatically organizes manual children and preserves flat Layers as a separate view', async ({ page }) => {

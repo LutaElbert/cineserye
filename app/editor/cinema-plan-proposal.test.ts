@@ -68,4 +68,35 @@ describe('cinema proposal canvas layout', () => {
     const migrated = layoutCinemaProposalNodes(applied.document.nodes, cinema);
     expect(cinemaPlanNeedsLayoutMigration(migrated, cinema)).toBe(false);
   });
+
+  it('repacks displaced generated lanes around the persisted scene anchor', () => {
+    const source = structuredClone(initialDocument);
+    const cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
+    const applied = applyCanvasCommandProposal(
+      cinemaProposalCanvasSource(source),
+      prepareCinemaPlanProposal(source, source.cinema, MOCK_SHOT_PLAN_PROPOSAL),
+    );
+    const expected = layoutCinemaProposalNodes(applied.document.nodes, cinema);
+    const generatedIds = new Set([
+      ...Object.values(cinema.agentRuns).map((run) => run.nodeId),
+      ...Object.values(cinema.characters).map((character) => character.nodeId),
+      ...Object.values(cinema.assets).map((asset) => asset.nodeId),
+      ...Object.values(cinema.shots).map((shot) => shot.nodeId),
+    ]);
+    const displaced = expected.map((node) => generatedIds.has(node.id)
+      ? { ...node, position: { x: node.position.x + 480, y: node.position.y + 260 } }
+      : node);
+    const repaired = layoutCinemaProposalNodes(displaced, cinema);
+    const expectedById = new Map(expected.map((node) => [node.id, node.position]));
+
+    expect(repaired.find((node) => node.id === 'story-premise')!.position).toEqual(
+      displaced.find((node) => node.id === 'story-premise')!.position,
+    );
+    expect(repaired.find((node) => node.id === 'scene-01')!.position).toEqual(
+      displaced.find((node) => node.id === 'scene-01')!.position,
+    );
+    for (const id of generatedIds) {
+      expect(repaired.find((node) => node.id === id)!.position).toEqual(expectedById.get(id));
+    }
+  });
 });

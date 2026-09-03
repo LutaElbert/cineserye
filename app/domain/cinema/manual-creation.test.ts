@@ -23,6 +23,9 @@ describe('cinema manual creation', () => {
 
   it('allocates stable human-readable draft names', () => {
     expect(nextCinemaDraftName('scene', ['Scene 01', 'Scene 03'])).toBe('Scene 04');
+    expect(nextCinemaDraftName('scene', ['Scene 01 · The Abandoned Cinema'])).toBe('Scene 02');
+    expect(nextCinemaDraftName('shot', ['01 · Entering', '06 · Reveal'])).toBe('Shot 07');
+    expect(nextCinemaDraftName('shot', ['Shot 02 - Insert', '03 · Reveal'])).toBe('Shot 04');
     expect(nextCinemaDraftName('story', [])).toBe('Story Premise');
     expect(nextCinemaDraftName('prop', ['Prop 01'])).toBe('Prop 02');
   });

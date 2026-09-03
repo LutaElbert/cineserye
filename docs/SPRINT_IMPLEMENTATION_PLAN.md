@@ -33,6 +33,8 @@ Post-sprint UX hardening is tracked separately in [Structured Layer Outline Impl
 
 Reusable destructive-action UX is tracked in [Reusable Confirmation Dialog Implementation Plan](./REUSABLE_CONFIRMATION_DIALOG_PLAN.md). It replaces browser-native confirmations without changing the existing undo, recovery, validation, or storage boundaries.
 
+Mixed accepted-plan/manual-creation layout hardening is complete and verified in [Mixed-State Cinema Layout Implementation Plan](./MIXED_STATE_CINEMA_LAYOUT_PLAN.md). It keeps accepted planning lanes stable when creators add draft shots or scenes, self-heals legacy displaced generated lanes on reload, and closes generated-title numbering gaps.
+
 ### Verified Sprint 10 closure
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).

@@ -117,6 +117,7 @@ import {
   planCinemaHierarchyLayout,
   resolveCinemaHierarchyInsertion,
 } from './cinema-hierarchy';
+import { planAcceptedCinemaDraftInsertion } from './cinema-workspace-placement';
 import { buildLayerStructure, type LayerStructureRow } from './layer-structure';
 import {
   clearLocalRecoveryDocument,
@@ -178,7 +179,6 @@ import {
 } from '../domain/cinema/visual-preproduction';
 import {
   cinemaProposalCanvasSource,
-  cinemaPlanNeedsLayoutMigration,
   compileCinemaCanvasProposal,
   layoutCinemaProposalNodes,
   prepareCinemaPlanProposal,
@@ -1216,7 +1216,7 @@ function EditorInner() {
           setFirstRunOpen(true);
           return;
         }
-        const loadedNodes = document.cinema && cinemaPlanNeedsLayoutMigration(document.nodes, document.cinema)
+        const loadedNodes = document.cinema
           ? layoutCinemaProposalNodes(document.nodes, document.cinema)
           : document.nodes;
         setNodes(loadedNodes.map((node) => ({ ...node, selected: false })));
@@ -2146,14 +2146,24 @@ function EditorInner() {
       style: { stroke: '#a9adb7', strokeWidth: 1.5 },
       data: { label: '', kind: 'default', relationship: 'hierarchy' },
     } : null;
-    const hierarchyLayout = hierarchyInsertion && hierarchyEdge
+    const acceptedCinemaPosition = hierarchyInsertion && (role === 'scene' || role === 'shot')
+      ? planAcceptedCinemaDraftInsertion(
+        nodesRef.current,
+        edgesRef.current,
+        cinemaRef.current,
+        hierarchyInsertion,
+        role,
+        nextNode,
+      )
+      : null;
+    const hierarchyLayout = hierarchyInsertion && hierarchyEdge && !acceptedCinemaPosition
       ? planCinemaHierarchyLayout(
         [...nodesRef.current, nextNode],
         [...edgesRef.current, hierarchyEdge],
         { ...hierarchyInsertion, newNodeId: newId },
       )
       : null;
-    const plannedPosition = hierarchyLayout?.positions.get(newId);
+    const plannedPosition = acceptedCinemaPosition ?? hierarchyLayout?.positions.get(newId);
     if (plannedPosition) nextNode = { ...nextNode, position: plannedPosition };
     const commands: CanvasCommandProposal['commands'] = [];
     for (const node of nodesRef.current) {
