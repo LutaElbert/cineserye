@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { createDiagramPng, waitForSaved } from './helpers';
+import { confirmCineseryeDialog, createDiagramPng, waitForSaved } from './helpers';
 
 async function openAcceptedSample(page: import('@playwright/test').Page) {
   await page.goto('/');
@@ -124,8 +124,8 @@ test('S3-E2E-03 and S4-E2E-02 restore the approved anchor and portable local pix
   expect(envelope.version).toBe(6);
   expect(envelope.media).toHaveLength(3);
   expect(envelope.media.every((media) => /^[a-f0-9]{64}$/.test(media.hash) && media.base64.length > 20)).toBe(true);
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByLabel('Choose a Cineserye project backup').setInputFiles(downloadPath!);
+  await confirmCineseryeDialog(page, 'Restore backup');
   await expect(page.getByText(/Project backup restored\./)).toBeVisible();
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();

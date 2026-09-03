@@ -55,6 +55,13 @@ export async function waitForSaved(page: Page) {
   await expect(workspace).toHaveAttribute('data-save-state', 'saved');
 }
 
+export async function confirmCineseryeDialog(page: Page, confirmLabel: string | RegExp) {
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: confirmLabel }).click();
+  await expect(dialog).not.toBeVisible();
+}
+
 export async function createDiagramPng(page: Page): Promise<Buffer> {
   const bytes = await page.evaluate<number[]>(async () => {
     const canvas = document.createElement('canvas');

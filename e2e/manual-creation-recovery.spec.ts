@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { addCinemaDraft, canvasNode, openEditor, waitForSaved } from './helpers';
+import { addCinemaDraft, canvasNode, confirmCineseryeDialog, openEditor, waitForSaved } from './helpers';
 
 const selectAllShortcut = process.platform === 'darwin' ? 'Meta+A' : 'Control+A';
 
@@ -62,8 +62,8 @@ test('guards an empty canvas and supports undo plus persisted recovery', async (
     await page.locator('#canvas-workspace').focus();
     await page.keyboard.press(selectAllShortcut);
     await expect(page.locator('.inspector-panel').getByText('3 layers selected', { exact: true }).first()).toBeVisible();
-    page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: 'Delete unlocked layers', exact: true }).click();
+    await confirmCineseryeDialog(page, 'Delete 3 layers');
     await expect(page.locator('.react-flow__node')).toHaveCount(0);
   };
 

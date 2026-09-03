@@ -38,6 +38,52 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
   await expect(researchNode).toBeFocused();
 });
 
+test('presents destructive confirmation accessibly and restores focus when cancelled', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openEditor(page);
+  await page.locator('#canvas-workspace').focus();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+
+  const deleteButton = page.getByRole('button', { name: 'Delete unlocked layers', exact: true });
+  await deleteButton.focus();
+  await deleteButton.press('Enter');
+
+  const dialog = page.getByRole('alertdialog', { name: 'Delete entire canvas?' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('3 layers and their connected cinema data will be removed.');
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  const box = await dialog.boundingBox();
+  expect(box).toBeTruthy();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+
+  const results = await new AxeBuilder({ page })
+    .include('.confirmation-dialog')
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .analyze();
+  const blocking = results.violations.filter((violation) =>
+    violation.impact === 'critical' || violation.impact === 'serious');
+  expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join('\n')).toEqual([]);
+
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.react-flow__node')).toHaveCount(3);
+  await expect(deleteButton).toBeFocused();
+
+  await deleteButton.press('Enter');
+  await expect(dialog).toBeVisible();
+  await page.mouse.click(2, 2);
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.react-flow__node')).toHaveCount(3);
+
+  await deleteButton.press('Enter');
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.react-flow__node')).toHaveCount(3);
+  await expect(deleteButton).toBeFocused();
+});
+
 test('exposes layer, connector, toggle, and selection state semantically', async ({ page }) => {
   await openEditor(page);
   await expect(page.getByRole('tree', { name: 'Canvas structure' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');

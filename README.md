@@ -10,6 +10,7 @@ The local project foundation is now implemented through Sprint 10: each selected
 - Rich concept titles and notes, raster images, editable vector layers, measured dimension-aware layout, locked-node-aware Tidy, and branch workflows.
 - Undo/redo, IndexedDB autosave, local checkpoints, strict restore validation, portable `.cineserye` backups, and editable SVG export.
 - Keyboard workflows, reduced-motion support, responsive panels, accessible labels, and automated accessibility checks.
+- A reusable branded confirmation boundary for destructive and replacement actions, with explicit consequences, action-specific labels, safe default focus, and consistent keyboard/backdrop cancellation.
 - Unit, browser, compatibility, type, lint, build, and dependency-audit gates.
 - Security headers and a privacy baseline designed for an on-device application.
 - A prompt-first scene planner with character, location, prop, shot, cited source, continuity, and illustrative generation-cost views.
@@ -81,7 +82,7 @@ The left panel opens in **Structure**, an automatic outline derived from those v
 
 These drafts remain generic canvas concept nodes with a validated `domainType`; the canvas engine stores but does not interpret that value. The cinema domain layer owns role labels, naming, relationship rules, and conversion behavior. Manual creation and role conversion use the same validated command boundary reserved for future copilot proposals.
 
-If every unlocked layer is deleted, Cineserye asks for confirmation and stores the last non-empty document locally before applying the deletion. The empty canvas then offers **Undo delete** during the current session or **Recover last canvas** after reload. It also provides explicit choices to start with a scene, add a layer, restore a backup, or explore the sample. Sample data is never inserted automatically.
+If every unlocked layer is deleted, Cineserye opens its reusable confirmation dialog with the exact layer count and recovery consequence, then stores the last non-empty document locally before applying the deletion. The same dialog boundary protects New, revision/checkpoint/backup restore, local-media cleanup, and fatal local reset; generic browser `OK` prompts are not used. The empty canvas then offers **Undo delete** during the current session or **Recover last canvas** after reload. It also provides explicit choices to start with a scene, add a layer, restore a backup, or explore the sample. Sample data is never inserted automatically.
 
 ## Professional planning and handoff
 
@@ -99,7 +100,7 @@ After accepting a plan, switch among **Canvas**, **Project**, **Shot table**, an
 
 The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 
-See the [sprint implementation plan](docs/SPRINT_IMPLEMENTATION_PLAN.md), [structured layer outline plan](docs/STRUCTURED_LAYER_OUTLINE_PLAN.md), [current-feature audit](docs/FEATURE_AUDIT.md), [initial vertical-slice plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
+See the [sprint implementation plan](docs/SPRINT_IMPLEMENTATION_PLAN.md), [reusable confirmation dialog plan](docs/REUSABLE_CONFIRMATION_DIALOG_PLAN.md), [structured layer outline plan](docs/STRUCTURED_LAYER_OUTLINE_PLAN.md), [current-feature audit](docs/FEATURE_AUDIT.md), [initial vertical-slice plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
 
 ## Local development
 

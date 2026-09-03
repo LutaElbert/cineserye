@@ -31,6 +31,8 @@
 
 Post-sprint UX hardening is tracked separately in [Structured Layer Outline Implementation Plan](./STRUCTURED_LAYER_OUTLINE_PLAN.md). It makes the manual Layers panel mirror validated Story → Scene → Shot/attachment relationships while preserving a flat z-order view.
 
+Reusable destructive-action UX is tracked in [Reusable Confirmation Dialog Implementation Plan](./REUSABLE_CONFIRMATION_DIALOG_PLAN.md). It replaces browser-native confirmations without changing the existing undo, recovery, validation, or storage boundaries.
+
 ### Verified Sprint 10 closure
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { waitForSaved } from './helpers';
+import { confirmCineseryeDialog, waitForSaved } from './helpers';
 
 async function chooseStartScene(page: Page) {
   await expect(page.locator('main[data-ready="true"]')).toBeVisible({ timeout: 10_000 });
@@ -187,8 +187,8 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
   await expectVisibleNodesNotToOverlap(page);
 
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'New', exact: true }).click();
+  await confirmCineseryeDialog(page, 'Start new document');
   await expect(page.getByText('New local document created.', { exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await editSceneText(page, 'A dancer misses the final train and hears footsteps matching her rhythm.');
@@ -344,8 +344,8 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await expect(history).toContainText('Revision 1');
   expect(planningRequests).toBe(2);
 
-  page.once('dialog', (dialog) => dialog.accept());
   await history.getByRole('button', { name: 'Restore Revision 1 as new revision' }).click();
+  await confirmCineseryeDialog(page, 'Restore as Revision 3');
   await expect(page.getByText('Revision 1 restored as new Revision 3.')).toBeVisible();
   await expect(history).toContainText('3 revisions');
   await expect(history.locator('li').filter({ hasText: 'Revision 3' })).toContainText('Current');

@@ -79,6 +79,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import '@xyflow/react/dist/style.css';
+import { useConfirmationDialog } from '../components/ConfirmationDialog';
 import {
   downloadProjectBackup,
   MAX_PROJECT_FILE_SIZE,
@@ -648,6 +649,7 @@ function connectorPresentation(kind: 'default' | 'dashed' | 'emphasis') {
 }
 
 function EditorInner() {
+  const { confirm: requestConfirmation, confirmationDialog } = useConfirmationDialog();
   const [nodes, setNodes] = useState<EditorNode[]>(initialDocument.nodes);
   const [edges, setEdges] = useState<EditorEdge[]>(initialDocument.edges);
   const [cinema, setCinema] = useState<CinemaProjectData | undefined>(initialDocument.cinema);
@@ -1133,12 +1135,21 @@ function EditorInner() {
     announce('Prompt package accepted as one undoable canvas change.', 'success');
   }, [announce, fitView, mockProposalPreview, pendingProposalId, proposalCinema, recordHistory]);
 
-  const restorePlanRevision = useCallback((revisionId: string) => {
+  const restorePlanRevision = useCallback(async (revisionId: string) => {
     const current = cinemaRef.current;
     const revision = current?.revisions[revisionId];
     if (!current || !revision || revision.id === current.activeRevisionId) return;
     const nextNumber = Math.max(0, ...Object.values(current.revisions).map((item) => item.number)) + 1;
-    if (!window.confirm(`Restore Revision ${revision.number} as new Revision ${nextNumber}? The current plan remains in history and this change can be undone.`)) return;
+    const confirmed = await requestConfirmation({
+      tone: 'warning',
+      eyebrow: 'Plan history',
+      title: `Restore Revision ${revision.number}?`,
+      description: `Revision ${revision.number} will become new Revision ${nextNumber}.`,
+      impact: 'The current plan will remain available in revision history.',
+      reassurance: 'The restore is recorded as one undoable canvas change.',
+      confirmLabel: `Restore as Revision ${nextNumber}`,
+    });
+    if (!confirmed) return;
     try {
       const restoredAt = new Date().toISOString();
       const restoreRunId = crypto.randomUUID();
@@ -1167,7 +1178,7 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The revision could not be restored.', 'error');
     }
-  }, [announce, fitView, getCurrentDocument, recordHistory]);
+  }, [announce, fitView, getCurrentDocument, recordHistory, requestConfirmation]);
 
   const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
     const ticket = pendingTicket ?? ++saveTicketRef.current;
@@ -1284,9 +1295,16 @@ function EditorInner() {
     const deletingIds = new Set(deletingNodes.map((node) => node.id));
     const leavesCanvasEmpty = nodesRef.current.every((node) => deletingIds.has(node.id));
     if (!leavesCanvasEmpty) return { nodes: deletingNodes, edges: deletingEdges };
-    const confirmed = window.confirm(
-      `Delete the entire canvas? This removes ${deletingNodes.length} ${deletingNodes.length === 1 ? 'layer' : 'layers'} and their connected cinema data. You can undo or recover the last non-empty canvas.`,
-    );
+    const layerLabel = deletingNodes.length === 1 ? 'layer' : 'layers';
+    const confirmed = await requestConfirmation({
+      tone: 'danger',
+      eyebrow: 'Canvas deletion',
+      title: 'Delete entire canvas?',
+      description: `${deletingNodes.length} ${layerLabel} and their connected cinema data will be removed.`,
+      impact: 'The current canvas will be empty after this action.',
+      reassurance: 'You can undo immediately or recover the last non-empty canvas after reloading.',
+      confirmLabel: `Delete ${deletingNodes.length} ${layerLabel}`,
+    });
     if (!confirmed) return false;
     const recovery = getCurrentDocument();
     try {
@@ -1297,7 +1315,7 @@ function EditorInner() {
       announce('The recovery copy could not be saved. Undo remains available in this session.', 'error');
     }
     return { nodes: deletingNodes, edges: deletingEdges };
-  }, [announce, getCurrentDocument]);
+  }, [announce, getCurrentDocument, requestConfirmation]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<EditorNode>[]) => {
@@ -1891,13 +1909,23 @@ function EditorInner() {
         announce('No unused local media was found.');
         return;
       }
-      if (!window.confirm(`Delete ${unused.length} unused local media ${unused.length === 1 ? 'item' : 'items'}? Media used by the current project or a checkpoint will remain.`)) return;
+      const itemLabel = unused.length === 1 ? 'item' : 'items';
+      const confirmed = await requestConfirmation({
+        tone: 'danger',
+        eyebrow: 'Local storage cleanup',
+        title: 'Delete unused local media?',
+        description: `${unused.length} unused local media ${itemLabel} will be permanently removed from this device.`,
+        impact: 'Media used by the current project or a checkpoint will remain.',
+        reassurance: 'This cleanup cannot be undone.',
+        confirmLabel: `Delete ${unused.length} ${itemLabel}`,
+      });
+      if (!confirmed) return;
       await Promise.all(unused.map((entry) => deleteLocalMediaBlob(entry.hash)));
       announce(`${unused.length} unused local media ${unused.length === 1 ? 'item' : 'items'} deleted.`, 'success');
     } catch {
       announce('Unused local media could not be cleaned.', 'error');
     }
-  }, [announce, getCurrentDocument]);
+  }, [announce, getCurrentDocument, requestConfirmation]);
 
   const updateSelectedNodes = useCallback((updater: (node: EditorNode) => EditorNode) => {
     const selectedIds = new Set(nodesRef.current.filter((node) => node.selected && !node.data.locked).map((node) => node.id));
@@ -2558,7 +2586,16 @@ function EditorInner() {
   }, [recordHistory]);
 
   const resetDocument = useCallback(async () => {
-    if (!window.confirm('Start a new local document? This clears the current canvas on this device.')) return;
+    const confirmed = await requestConfirmation({
+      tone: 'warning',
+      eyebrow: 'New project',
+      title: 'Start a new local document?',
+      description: 'The current canvas on this device will be replaced with the clean Cineserye starting structure.',
+      impact: 'Recovery state and pending proposals for this document will be cleared.',
+      reassurance: 'Download a backup first if you may need this version later.',
+      confirmLabel: 'Start new document',
+    });
+    if (!confirmed) return;
     try {
       conversionControllerRef.current?.abort();
       planningControllerRef.current?.abort('new-document');
@@ -2585,7 +2622,7 @@ function EditorInner() {
     } catch {
       announce('The local project could not be cleared. Download a backup before trying again.', 'error');
     }
-  }, [announce, fitView, refreshHistoryState]);
+  }, [announce, fitView, refreshHistoryState, requestConfirmation]);
 
   const chooseStartScene = useCallback(() => {
     if (!firstRunOpen) recordHistory();
@@ -2688,7 +2725,16 @@ function EditorInner() {
   }, [announce, getCurrentDocument]);
 
   const restoreCheckpoint = useCallback(async (checkpoint: LocalCheckpoint) => {
-    if (!window.confirm(`Restore “${checkpoint.title}” from ${new Date(checkpoint.createdAt).toLocaleString()}?`)) return;
+    const confirmed = await requestConfirmation({
+      tone: 'warning',
+      eyebrow: 'Version checkpoint',
+      title: 'Restore this checkpoint?',
+      description: `“${checkpoint.title}” from ${new Date(checkpoint.createdAt).toLocaleString()} will replace the current canvas.`,
+      impact: 'Any cinema data attached to the checkpoint will be restored with it.',
+      reassurance: 'Current work remains available through Undo after the checkpoint is restored.',
+      confirmLabel: 'Restore checkpoint',
+    });
+    if (!confirmed) return;
     recordHistory();
     const restored = structuredClone(checkpoint.document);
     setNodes(restored.nodes);
@@ -2707,7 +2753,7 @@ function EditorInner() {
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
     announce('Checkpoint restored.', 'success');
-  }, [announce, fitView, queueDocumentSave, recordHistory]);
+  }, [announce, fitView, queueDocumentSave, recordHistory, requestConfirmation]);
 
   const removeCheckpoint = useCallback(async (id: string) => {
     try {
@@ -2724,7 +2770,17 @@ function EditorInner() {
       if (file.size > MAX_PROJECT_FILE_SIZE) throw new Error('The project backup is larger than 40 MB.');
       const parsed = await parseProjectBackupWithMedia(await file.text());
       const restored = parsed.document;
-      if (!window.confirm(`Replace the current canvas with “${restored.title}” and restore ${parsed.media.length} local media ${parsed.media.length === 1 ? 'item' : 'items'}?`)) return;
+      const mediaLabel = parsed.media.length === 1 ? 'item' : 'items';
+      const confirmed = await requestConfirmation({
+        tone: 'warning',
+        eyebrow: 'Portable backup',
+        title: 'Restore this backup?',
+        description: `“${restored.title}” will replace the current canvas.`,
+        impact: `${parsed.media.length} verified local media ${mediaLabel} will also be restored.`,
+        reassurance: 'The backup is validated before any project or media data is replaced.',
+        confirmLabel: 'Restore backup',
+      });
+      if (!confirmed) return;
       await Promise.all(parsed.media.map((entry) => saveLocalMediaBlob(entry.blob, entry)));
       conversionControllerRef.current?.abort();
       pastRef.current = [];
@@ -2750,7 +2806,7 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The project backup could not be restored.', 'error');
     }
-  }, [announce, fitView, queueDocumentSave, refreshHistoryState]);
+  }, [announce, fitView, queueDocumentSave, refreshHistoryState, requestConfirmation]);
 
   const performExport = useCallback(() => {
     try {
@@ -3789,6 +3845,8 @@ function EditorInner() {
             }}
           />
         ) : null}
+
+        {confirmationDialog}
 
         <div className="toast-region" aria-live="polite" aria-atomic="false">
           {toasts.map((toast) => (

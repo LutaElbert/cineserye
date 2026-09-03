@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { addCinemaDraft, createDiagramPng, openEditor } from './helpers';
+import { addCinemaDraft, confirmCineseryeDialog, createDiagramPng, openEditor } from './helpers';
 
 test('imports, persists, backs up, and exports locally with vectorization disabled', async ({ page, baseURL }) => {
   const externalRequests: string[] = [];
@@ -34,13 +34,13 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
   expect(backupPath).toBeTruthy();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
 
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'New', exact: true }).click();
+  await confirmCineseryeDialog(page, 'Start new document');
   await expect(page.getByRole('button', { name: 'test-map.png', exact: true })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByLabel('Choose a Cineserye project backup').setInputFiles(backupPath!);
+  await confirmCineseryeDialog(page, 'Restore backup');
   await expect(page.getByText('Project backup restored.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'test-map.png', exact: true })).toBeVisible();
 
@@ -242,8 +242,8 @@ test('renames layers, searches content, adds and collapses branches, and saves c
   await inspector.getByLabel('Label').fill('Changed after checkpoint');
   await inspector.getByLabel('Label').blur();
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
-  page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: /Untitled Cineserye/ }).first().click();
+  await confirmCineseryeDialog(page, 'Restore checkpoint');
   await expect(page.getByText('Checkpoint restored.')).toBeVisible();
   await expect(page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).first()).toBeVisible();
 

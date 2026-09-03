@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openEditor, waitForSaved } from './helpers';
+import { confirmCineseryeDialog, openEditor, waitForSaved } from './helpers';
 
 function stressProject(nodeCount = 500, edgeCount = 800) {
   const nodes = Array.from({ length: nodeCount }, (_, index) => ({
@@ -79,13 +79,13 @@ test('keeps a 500-layer, 800-connector document responsive and persistent', asyn
   await openEditor(page);
 
   await page.getByRole('button', { name: 'Project backup and restore' }).click();
-  page.once('dialog', (dialog) => dialog.accept());
   const restoreStarted = Date.now();
   await page.getByLabel('Choose a Cineserye project backup').setInputFiles({
     name: 'stress-graph.cineserye',
     mimeType: 'application/json',
     buffer: Buffer.from(stressProject()),
   });
+  await confirmCineseryeDialog(page, 'Restore backup');
   await expect(page.getByText('Project backup restored.')).toBeVisible({ timeout: 20_000 });
   expect(Date.now() - restoreStarted).toBeLessThan(20_000);
   await expect(page.locator('.layer-row')).toHaveCount(500);
