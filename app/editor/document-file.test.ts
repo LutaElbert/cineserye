@@ -27,10 +27,10 @@ describe('Cineserye project backups', () => {
 
   it('preserves allowlisted connector relationships and drops unknown metadata values', () => {
     const document = structuredClone(initialDocument);
-    document.edges[0].data = { ...document.edges[0].data!, relationship: 'reference' };
+    document.edges[0].data = { ...document.edges[0].data!, relationship: 'attachment' };
     document.edges[1].data = { ...document.edges[1].data!, relationship: 'sequence' };
     const restored = parseProjectBackup(serializeProjectBackup(document));
-    expect(restored.edges.map((edge) => edge.data?.relationship)).toEqual(['reference', 'sequence']);
+    expect(restored.edges.map((edge) => edge.data?.relationship)).toEqual(['attachment', 'sequence']);
 
     const invalid = structuredClone(initialDocument) as unknown as {
       edges: Array<{ data: Record<string, unknown> }>;

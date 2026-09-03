@@ -141,6 +141,20 @@ describe('validated canvas command boundary', () => {
     expect(result.affectedEdgeIds).toEqual([source.edges[0].id]);
   });
 
+  it('accepts explicit attachment metadata for non-hierarchy children', () => {
+    const result = applyCanvasCommandProposal(initialDocument, {
+      version: 1,
+      proposalId: 'mark-attachment-edge',
+      summary: 'Mark an attachment',
+      commands: [{
+        type: 'update-edge',
+        id: initialDocument.edges[0].id,
+        patch: { data: { relationship: 'attachment' } },
+      }],
+    });
+    expect(result.document.edges[0].data?.relationship).toBe('attachment');
+  });
+
   it('rejects unsafe connector patches and locked hierarchy endpoints atomically', () => {
     expect(() => applyCanvasCommandProposal(initialDocument, {
       version: 1,

@@ -58,6 +58,8 @@ Provider prompts, credentials, model SDKs, research logic, and cinema business r
 
 Generic concept nodes may carry an optional bounded `domainType`. The editor validates, persists, and includes the value in portable backups but does not assign product meaning to it. `app/domain/cinema/manual-creation.ts` maps Cineserye's `cinema.story`, `cinema.scene`, `cinema.shot`, `cinema.character`, `cinema.location`, `cinema.prop`, `cinema.visual-element`, and `cinema.note` types to labels, naming, styles, and contextual relationship rules. Manual creation and role conversion compile to `CanvasCommandProposal` and therefore exercise the same mutation boundary as future agent output.
 
+`app/editor/layer-structure.ts` is a provider-neutral read projection over editor nodes and allowlisted edge semantics. It treats validated Story → Scene and Scene → Shot pairs as hierarchy, recognizes explicit `attachment` edges for other child items, detects cycles and multiple parents, and emits a deterministic searchable tree without mutating the document. The manual sidebar keeps collapse/view state in React only. The original flat layer stack remains the authority for z-order operations, while accepted cinema plans continue to use the richer domain-backed Project Outline.
+
 Full-canvas deletion uses React Flow's pre-delete boundary. It confirms the destructive intent and writes a validated `last-non-empty` document into the existing IndexedDB document store before removal. Undo remains the primary same-session route; the persisted recovery copy handles reload. Recovery replaces the complete document atomically, clears the recovery copy after success, and never merges potentially inconsistent fragments.
 
 ## Cinema domain and presentation

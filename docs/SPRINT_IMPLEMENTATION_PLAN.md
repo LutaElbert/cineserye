@@ -29,6 +29,8 @@
 | 9 — Controlled Live Research and Planning | Complete; live smoke not run | Exact identity/project/quota preflight, digest-bound consent, hard per-run ceiling, local enable switch, provider isolation, and mocked boundary tests; credit-consuming cases remain opt-in |
 | 10 — Agent Quality, Telemetry, and Reliability Closure | Complete | 18/18 development and 6/6 holdout local grades at 1.0000, 100-run fixture soak, 500-event/30-day no-content retention, spend circuit breakers, and readiness report |
 
+Post-sprint UX hardening is tracked separately in [Structured Layer Outline Implementation Plan](./STRUCTURED_LAYER_OUTLINE_PLAN.md). It makes the manual Layers panel mirror validated Story → Scene → Shot/attachment relationships while preserving a flat z-order view.
+
 ### Verified Sprint 10 closure
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).

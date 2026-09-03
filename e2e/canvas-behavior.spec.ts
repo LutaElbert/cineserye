@@ -211,10 +211,10 @@ test('select all respects editing and locked layers and supports bulk actions', 
   await expect(page.locator('.inspector-panel').getByText('2 layers selected', { exact: true }).first()).toBeVisible();
   await expect(canvasNode(page, 'Story Premise')).not.toHaveClass(/selected/);
 
-  const originalLayerCount = await page.locator('.layer-list > li').count();
+  const originalLayerCount = await page.locator('.layer-list .layer-row').count();
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
   await page.getByRole('button', { name: 'Duplicate selected layers', exact: true }).click();
-  await expect(page.locator('.layer-list > li')).toHaveCount(originalLayerCount + 2);
+  await expect(page.locator('.layer-list .layer-row')).toHaveCount(originalLayerCount + 2);
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
   await expect(page.locator('.inspector-panel').getByText('2 layers selected', { exact: true }).first()).toBeVisible();
 
@@ -242,7 +242,7 @@ test('double-clicking one layer drills from multi-selection into editing', async
 test('double-clicking empty canvas creates and edits a concept while zoom recovery remains available', async ({ page }) => {
   await openEditor(page);
   const pane = page.locator('.react-flow__pane');
-  const originalCount = await page.locator('.layer-list > li').count();
+  const originalCount = await page.locator('.layer-list .layer-row').count();
   const zoomReset = page.getByRole('button', { name: /Reset zoom to 100%/ });
   await expect(zoomReset).toBeVisible();
   await page.getByRole('button', { name: 'Zoom in' }).click();
@@ -251,6 +251,6 @@ test('double-clicking empty canvas creates and edits a concept while zoom recove
   await expect(zoomReset).toHaveText('100%');
 
   await pane.dblclick({ position: { x: 35, y: 35 } });
-  await expect(page.locator('.layer-list > li')).toHaveCount(originalCount + 1);
+  await expect(page.locator('.layer-list .layer-row')).toHaveCount(originalCount + 1);
   await expect(page.getByLabel('Concept title')).toBeVisible();
 });

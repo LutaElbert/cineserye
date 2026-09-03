@@ -40,7 +40,9 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
 
 test('exposes layer, connector, toggle, and selection state semantically', async ({ page }) => {
   await openEditor(page);
-  await expect(page.getByRole('list', { name: 'Canvas layers' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
+  await expect(page.getByRole('tree', { name: 'Canvas structure' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
+  await expect(page.getByRole('treeitem')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Structure', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Story Premise', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -53,6 +55,9 @@ test('exposes layer, connector, toggle, and selection state semantically', async
   await page.getByRole('button', { name: 'Show Story Premise', exact: true }).click();
   await page.getByRole('button', { name: 'Lock Story Premise', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Unlock Story Premise', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await expect(page.getByRole('list', { name: 'Canvas layers' })).toHaveAttribute('aria-describedby', 'layer-list-instructions');
 });
 
 test('keeps controls usable with reduced motion and enlarged text on mobile', async ({ page }) => {

@@ -10,7 +10,7 @@ test('imports, persists, backs up, and exports locally with vectorization disabl
   });
 
   await openEditor(page);
-  await expect(page.getByRole('heading', { name: 'Layers' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Structure' })).toBeVisible();
 
   const imageInput = page.getByLabel('Choose images to add to the canvas');
   await expect(imageInput).toBeEnabled();

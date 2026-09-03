@@ -356,6 +356,7 @@ function parseEdge(value: unknown, index: number): EditorEdge {
       ? boundedString(value.label, 'Connector label', 240)
       : '';
   const relationship = rawData.relationship === 'hierarchy'
+    || rawData.relationship === 'attachment'
     || rawData.relationship === 'reference'
     || rawData.relationship === 'sequence'
     ? rawData.relationship

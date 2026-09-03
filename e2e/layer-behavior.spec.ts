@@ -608,6 +608,7 @@ test('mixed locked selection changes and deletes only unlocked layers', async ({
 
 test('layer ordering is deterministic and undoable', async ({ page }) => {
   await openEditor(page);
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
   const layerNames = () => page.locator('.layer-list > li .layer-main').allTextContents();
   expect(await layerNames()).toEqual(['Shot 01', 'Scene 01', 'Story Premise']);
   await page.getByRole('button', { name: 'Story Premise', exact: true }).click();

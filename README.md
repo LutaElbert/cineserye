@@ -18,6 +18,7 @@ The local project foundation is now implemented through Sprint 10: each selected
 - Ghost proposal review with atomic acceptance, rejection without mutation, and one-step undo.
 - Cinema-aware manual creation for story, scene, shot, character, location, prop, visual-element, and note drafts, with contextual child/sibling actions.
 - Ancestor-aware Story → Scene → Shot creation that resolves semantic parents, packs complete mixed-height subtrees without overlap, and persists consistent bottom-to-top hierarchy connectors as one undoable change.
+- A default Structure sidebar that derives Story → Scene → Shot/attachment nesting from validated connections, preserves ancestor context during search, exposes invalid/disconnected items under Unassigned, and keeps the original flat Layers view for z-order work.
 - A guarded empty-canvas state with same-session undo, a persisted last-non-empty recovery copy, clean scene bootstrap, backup restore, and an explicit sample choice.
 - A scene-level Reference Deck for validated local uploads, existing canvas images, and non-fetched external inspiration links, with explicit provenance, rights, allowed-use, approval, pinning, search, filtering, and shot usage.
 - Content-addressed local media storage with SHA-256 deduplication, safe orphan cleanup, and version-6 `.cineserye` backups that embed and verify required media.
@@ -74,7 +75,9 @@ All copilot output enters through `app/editor/canvas-commands.ts`. That boundary
 
 ## Manual canvas building
 
-Use **Add** in the Layers panel or **Add filmmaking layer** in the canvas toolbar to open the creation palette. It exposes cinema roles instead of generic templates and enforces simple prerequisites—for example, a shot requires a scene. When a scene is selected, a new shot, character, location, prop, visual element, or note is connected beneath it automatically. Selected story, scene, and shot cards also expose contextual actions such as **Add scene**, **Add shot**, and **Add next shot**. Scene and shot creation resolves the real Story or Scene parent, then repacks that Story hierarchy so siblings and descendants stay grouped without overlapping; unrelated free-form canvas branches remain untouched.
+Use **Add** in the Structure panel or **Add filmmaking layer** in the canvas toolbar to open the creation palette. It exposes cinema roles instead of generic templates and enforces simple prerequisites—for example, a shot requires a scene. When a scene is selected, a new shot, character, location, prop, visual element, or note is connected beneath it automatically. Selected story, scene, and shot cards also expose contextual actions such as **Add scene**, **Add shot**, and **Add next shot**. Scene and shot creation resolves the real Story or Scene parent, then repacks that Story hierarchy so siblings and descendants stay grouped without overlapping; unrelated free-form canvas branches remain untouched.
+
+The left panel opens in **Structure**, an automatic outline derived from those validated connections. Search shows matching items with their Story/Scene ancestors, and collapsed branches reopen when a new child is added. Disconnected or ambiguous items remain reachable under **Unassigned** instead of being attached silently. Switch to **Layers** whenever you need the original flat canvas stack, vector paths, or z-order controls; switching views does not change the document or canvas layout.
 
 These drafts remain generic canvas concept nodes with a validated `domainType`; the canvas engine stores but does not interpret that value. The cinema domain layer owns role labels, naming, relationship rules, and conversion behavior. Manual creation and role conversion use the same validated command boundary reserved for future copilot proposals.
 
@@ -96,7 +99,7 @@ After accepting a plan, switch among **Canvas**, **Project**, **Shot table**, an
 
 The active provider mode is always visible in the toolbar. Fixture mode uses no external requests. Live research cards link to their normalized sources, and a shot is cited only when the planner explicitly returns a valid relationship—Cineserye never substitutes a fallback citation. Generation prices remain visibly illustrative or unpriced in both modes, with profile assumptions shown alongside the estimate.
 
-See the [remaining-sprints implementation plan](docs/SPRINT_IMPLEMENTATION_PLAN.md), [current-feature audit](docs/FEATURE_AUDIT.md), [initial vertical-slice plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
+See the [sprint implementation plan](docs/SPRINT_IMPLEMENTATION_PLAN.md), [structured layer outline plan](docs/STRUCTURED_LAYER_OUTLINE_PLAN.md), [current-feature audit](docs/FEATURE_AUDIT.md), [initial vertical-slice plan](docs/IMPLEMENTATION_PLAN.md), [architecture and extension guide](docs/ARCHITECTURE.md), and [Cineserye foundation test plan](CINESERYE_FOUNDATION_TEST_PLAN.md).
 
 ## Local development
 

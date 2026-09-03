@@ -30,6 +30,7 @@ import {
   AlignHorizontalSpaceBetween,
   AlignVerticalJustifyStart,
   AlignVerticalSpaceBetween,
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Check,
@@ -64,6 +65,7 @@ import {
 } from 'lucide-react';
 import {
   createContext,
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -114,6 +116,7 @@ import {
   planCinemaHierarchyLayout,
   resolveCinemaHierarchyInsertion,
 } from './cinema-hierarchy';
+import { buildLayerStructure, type LayerStructureRow } from './layer-structure';
 import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
@@ -226,6 +229,7 @@ type ToolMode = 'select' | 'hand';
 type SelectionOperation = 'replace' | 'add' | 'subtract';
 type MobilePanel = 'layers' | 'inspector' | null;
 type EditorWorkspaceView = 'canvas' | 'project' | ProfessionalWorkspaceView;
+type LayerPanelMode = 'structure' | 'layers';
 type Toast = { id: number; message: string; tone: 'info' | 'success' | 'error' };
 const MAX_FILES_PER_IMPORT = 12;
 const InlineConceptEditor = lazy(() => import('./InlineConceptEditor'));
@@ -673,6 +677,8 @@ function EditorInner() {
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [layerPanelMode, setLayerPanelMode] = useState<LayerPanelMode>('structure');
+  const [collapsedStructureNodes, setCollapsedStructureNodes] = useState<Set<string>>(new Set());
   const [creationPaletteOpen, setCreationPaletteOpen] = useState(false);
   const [recoveryDocument, setRecoveryDocument] = useState<EditorDocument | null>(null);
   const [checkpoints, setCheckpoints] = useState<LocalCheckpoint[]>([]);
@@ -2164,7 +2170,7 @@ function EditorInner() {
           animated: false,
           markerEnd: { type: MarkerType.ArrowClosed },
           style: { stroke: '#a9adb7', strokeWidth: 1.5 },
-          data: { label: '', kind: 'default' },
+          data: { label: '', kind: 'default', relationship: 'attachment' },
         },
       });
     }
@@ -2174,7 +2180,18 @@ function EditorInner() {
       summary: `Add ${descriptor.label.toLocaleLowerCase()}`,
       commands,
     }, newId, options.editAfterCreate ?? true);
-    if (created) announce(`${descriptor.label} draft added.`, 'success');
+    if (created) {
+      const createdParentId = hierarchyInsertion?.parentId ?? relativeLayout?.parentId;
+      if (createdParentId) {
+        setCollapsedStructureNodes((current) => {
+          if (!current.has(createdParentId)) return current;
+          const next = new Set(current);
+          next.delete(createdParentId);
+          return next;
+        });
+      }
+      announce(`${descriptor.label} draft added.`, 'success');
+    }
     return created;
   }, [announce, applyManualCreation, screenToFlowPosition]);
 
@@ -2834,6 +2851,25 @@ function EditorInner() {
     ].join(' ').toLocaleLowerCase();
     return searchable.includes(normalizedSearch);
   });
+  const manualStructureModel = useMemo(
+    () => buildLayerStructure(presentedNodes, presentedEdges, searchQuery, collapsedStructureNodes),
+    [collapsedStructureNodes, presentedEdges, presentedNodes, searchQuery],
+  );
+  const presentedNodeById = useMemo(
+    () => new Map(presentedNodes.map((node) => [node.id, node])),
+    [presentedNodes],
+  );
+  const structureLayerNodes = useMemo(
+    () => manualStructureModel.rows
+      .map((row) => presentedNodeById.get(row.nodeId))
+      .filter((node): node is EditorNode => Boolean(node)),
+    [manualStructureModel.rows, presentedNodeById],
+  );
+  const sidebarLayerNodes = layerPanelMode === 'structure' ? structureLayerNodes : layerNodes;
+  const structureRowById = useMemo(
+    () => new Map(manualStructureModel.rows.map((row) => [row.nodeId, row])),
+    [manualStructureModel.rows],
+  );
   const cinemaOutlineModel = useMemo(
     () => cinemaOutlineActive
       ? buildCinemaOutline(presentedNodes, activeCinemaProject, previewNodeIds, searchQuery)
@@ -2848,12 +2884,12 @@ function EditorInner() {
     }
     const anchorId = layerSelectionAnchorRef.current;
     if (event.shiftKey && anchorId) {
-      const anchorIndex = layerNodes.findIndex((node) => node.id === anchorId);
-      const targetIndex = layerNodes.findIndex((node) => node.id === id);
+      const anchorIndex = sidebarLayerNodes.findIndex((node) => node.id === anchorId);
+      const targetIndex = sidebarLayerNodes.findIndex((node) => node.id === id);
       if (anchorIndex >= 0 && targetIndex >= 0) {
         const start = Math.min(anchorIndex, targetIndex);
         const end = Math.max(anchorIndex, targetIndex);
-        const rangeIds = new Set(layerNodes.slice(start, end + 1).map((node) => node.id));
+        const rangeIds = new Set(sidebarLayerNodes.slice(start, end + 1).map((node) => node.id));
         setNodes((current) => current.map((node) => ({ ...node, selected: rangeIds.has(node.id) })));
         setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
         setSelectedPath(null);
@@ -2869,7 +2905,7 @@ function EditorInner() {
 
     layerSelectionAnchorRef.current = id;
     revealAndSelectNode(id);
-  }, [layerNodes, mockProposalPreview, revealAndSelectNode, selectNode]);
+  }, [mockProposalPreview, revealAndSelectNode, selectNode, sidebarLayerNodes]);
   const handleOutlineSelection = useCallback((id: string) => {
     if (mockProposalPreview) {
       setPreviewSelectedNodeId(id);
@@ -3080,13 +3116,27 @@ function EditorInner() {
           <div className="panel-heading">
             <div>
               <span className="eyebrow">{cinemaOutlineActive ? 'Production' : 'Document'}</span>
-              <h1 id="layers-title">{cinemaOutlineActive ? 'Project Outline' : 'Layers'}</h1>
+              <h1 id="layers-title">{cinemaOutlineActive ? 'Project Outline' : layerPanelMode === 'structure' ? 'Structure' : 'Layers'}</h1>
             </div>
             <div className="panel-heading-actions">
               {!cinemaOutlineActive ? <button type="button" className="icon-button" aria-label="Add filmmaking layer" onClick={addConceptNode}><Plus size={16} /></button> : null}
               <button type="button" className="icon-button panel-close-button" aria-label="Close layers panel" onClick={() => setMobilePanel(null)}><X size={16} /></button>
             </div>
           </div>
+          {!cinemaOutlineActive ? (
+            <div className="layer-view-switch" role="group" aria-label="Layer panel view">
+              <button
+                type="button"
+                aria-pressed={layerPanelMode === 'structure'}
+                onClick={() => setLayerPanelMode('structure')}
+              >Structure</button>
+              <button
+                type="button"
+                aria-pressed={layerPanelMode === 'layers'}
+                onClick={() => setLayerPanelMode('layers')}
+              >Layers</button>
+            </div>
+          ) : null}
           <div className="layer-search">
             <Search size={13} aria-hidden="true" />
             <label htmlFor="layer-search-input" className="visually-hidden">{cinemaOutlineActive ? 'Search project outline' : 'Search layers and concept text'}</label>
@@ -3102,10 +3152,10 @@ function EditorInner() {
                   ?? cinemaOutlineModel?.scene.nodeId
                   ?? cinemaOutlineModel?.project?.nodeId;
                 if (cinemaOutlineActive && firstOutlineNode) handleOutlineSelection(firstOutlineNode);
-                else if (layerNodes[0]) revealAndSelectNode(layerNodes[0].id);
+                else if (sidebarLayerNodes[0]) revealAndSelectNode(sidebarLayerNodes[0].id);
               }}
             />
-            {normalizedSearch ? <span aria-live="polite">{cinemaOutlineModel?.visibleItemCount ?? layerNodes.length}</span> : null}
+            {normalizedSearch ? <span aria-live="polite">{cinemaOutlineModel?.visibleItemCount ?? (layerPanelMode === 'structure' ? manualStructureModel.matchCount : layerNodes.length)}</span> : null}
           </div>
           {!cinemaOutlineActive ? <div className="cinema-add-entry">
             <span><strong>Build your project</strong><small>Add a typed scene, shot, character, asset, or note.</small></span>
@@ -3114,7 +3164,9 @@ function EditorInner() {
           <p id="layer-list-instructions" className="visually-hidden">
             {cinemaOutlineActive
               ? 'The project outline is generated automatically from the active cinema canvas. Select an item to focus its node.'
-              : 'Double-click an unlocked layer or press F2 while it is focused to rename it.'}
+              : layerPanelMode === 'structure'
+                ? 'The structure is generated automatically from validated canvas connections. Use the disclosure buttons to collapse branches. Double-click an unlocked item or press F2 to rename it.'
+                : 'Layers shows the flat canvas stacking order. Double-click an unlocked layer or press F2 while it is focused to rename it.'}
           </p>
           {cinemaOutlineActive && cinemaOutlineModel ? (
             <ProjectOutline
@@ -3129,18 +3181,53 @@ function EditorInner() {
               onToggleVisibility={toggleNodeVisibility}
               onToggleLock={toggleNodeLock}
             />
-          ) : <ul className="layer-list" aria-label="Canvas layers" aria-describedby="layer-list-instructions">
-            {layerNodes.map((node) => {
-              const expanded = expandedVectors.has(node.id);
+          ) : <ul
+            className={`layer-list ${layerPanelMode === 'structure' ? 'structure-list' : ''}`}
+            aria-label={layerPanelMode === 'structure' ? 'Canvas structure' : 'Canvas layers'}
+            aria-describedby="layer-list-instructions"
+            role={layerPanelMode === 'structure' ? 'tree' : undefined}
+          >
+            {sidebarLayerNodes.map((node, rowIndex) => {
+              const structureRow: LayerStructureRow | undefined = layerPanelMode === 'structure'
+                ? structureRowById.get(node.id)
+                : undefined;
+              const expanded = structureRow ? !collapsedStructureNodes.has(node.id) : expandedVectors.has(node.id);
+              const previousStructureRow = rowIndex > 0 ? structureRowById.get(sidebarLayerNodes[rowIndex - 1].id) : undefined;
+              const startsUnassigned = structureRow?.section === 'unassigned' && previousStructureRow?.section !== 'unassigned';
               const cinemaDetail = cinemaNodeIds.has(node.id) ? activeCinemaProject.nodes[node.id] : undefined;
               const draftRole = node.data.kind === 'concept'
                 ? cinemaDraftRole(node.data.domainType, node.data.eyebrow)
                 : null;
               const draftDescriptor = draftRole ? cinemaDraftDescriptor(draftRole) : null;
               return (
-                <li key={node.id}>
-                  <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''}`}>
-                    {node.data.kind === 'vector' ? (
+                <Fragment key={node.id}>
+                  {startsUnassigned ? (
+                    <li className="structure-section-label" role="presentation">
+                      <span>Unassigned</span>
+                      <small>{manualStructureModel.unassignedCount}</small>
+                    </li>
+                  ) : null}
+                  <li
+                    role={structureRow ? 'treeitem' : undefined}
+                    aria-level={structureRow?.depth}
+                    aria-expanded={structureRow?.hasChildren ? expanded : undefined}
+                    className={structureRow ? `structure-item depth-${Math.min(structureRow.depth, 4)}` : undefined}
+                    style={structureRow ? ({ '--structure-depth': structureRow.depth } as CSSProperties) : undefined}
+                  >
+                  <div className={`layer-row ${node.selected ? 'active' : ''} ${previewNodeIds.has(node.id) ? 'proposed' : ''} ${structureRow?.warning ? 'has-warning' : ''}`}>
+                    {structureRow?.hasChildren ? (
+                      <button
+                        type="button"
+                        className="layer-disclosure"
+                        aria-label={`${expanded ? 'Collapse' : 'Expand'} structure branch from ${node.data.name}`}
+                        aria-expanded={expanded}
+                        onClick={() => setCollapsedStructureNodes((current) => {
+                          const next = new Set(current);
+                          if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
+                          return next;
+                        })}
+                      >{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
+                    ) : !structureRow && node.data.kind === 'vector' ? (
                       <button
                         type="button"
                         className="layer-disclosure"
@@ -3217,7 +3304,21 @@ function EditorInner() {
                               ? <span className={`cinema-layer-glyph role-${draftDescriptor.role}`} data-glyph={draftDescriptor.label.slice(0, 1)} />
                             : node.data.kind === 'raster' ? <ImageIcon size={12} /> : node.data.kind === 'vector' ? <Shapes size={12} /> : <Square size={11} />}
                         </span>
-                        <span className="layer-name">{node.data.name}</span>
+                        <span className="layer-name-group">
+                          <span className="layer-name">{node.data.name}</span>
+                          {structureRow?.warning ? (
+                            <span
+                              className="structure-warning"
+                              role="img"
+                              aria-label={structureRow.warning === 'cycle'
+                                ? `${node.data.name} is part of a connection cycle`
+                                : `${node.data.name} has multiple structural parents`}
+                              title={structureRow.warning === 'cycle'
+                                ? 'Connection cycle — resolve this item on the canvas'
+                                : 'Multiple structural parents — resolve this item on the canvas'}
+                            ><AlertTriangle size={11} /></span>
+                          ) : null}
+                        </span>
                       </button>
                     )}
                     <button type="button" className="layer-control" aria-label={`${node.hidden ? 'Show' : 'Hide'} ${node.data.name}`} onClick={() => toggleNodeVisibility(node.id)}>
@@ -3227,7 +3328,7 @@ function EditorInner() {
                       {node.data.locked ? <Lock size={12} /> : <Unlock size={12} />}
                     </button>
                   </div>
-                  {node.data.kind === 'vector' && expanded ? (
+                  {!structureRow && node.data.kind === 'vector' && expanded ? (
                     <ul className="path-list" aria-label={`${node.data.name} paths`}>
                       {node.data.paths.map((path) => (
                         <li key={path.id}>
@@ -3255,7 +3356,8 @@ function EditorInner() {
                       ))}
                     </ul>
                   ) : null}
-                </li>
+                  </li>
+                </Fragment>
               );
             })}
           </ul>}

@@ -174,7 +174,7 @@ export function applyCanvasCommandProposal(
         if (sourceNode.data.locked || targetNode.data.locked) throw new Error(`Connector ${id} has a locked endpoint.`);
         const dataPatch = patch.data === undefined ? undefined : ensureRecord(patch.data, 'Connector data patch');
         if (dataPatch && (Object.keys(dataPatch).some((key) => key !== 'relationship')
-          || !['hierarchy', 'reference', 'sequence'].includes(String(dataPatch.relationship)))) {
+          || !['hierarchy', 'attachment', 'reference', 'sequence'].includes(String(dataPatch.relationship)))) {
           throw new Error('Connector relationship metadata is invalid.');
         }
         if (patch.type !== undefined && patch.type !== 'smoothstep') {

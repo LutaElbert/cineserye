@@ -286,8 +286,73 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .cinema-add-entry small { color: var(--muted); font-size: 7px; line-height: 1.4; }
 .cinema-add-entry button { display: flex; align-items: center; gap: 4px; min-block-size: 31px; padding-inline: 9px; border: 1px solid #d5d2ff; border-radius: 8px; background: white; color: var(--accent); font-size: 9px; font-weight: 680; }
 
+.layer-view-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  margin: 8px 9px 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f3f4f6;
+}
+.layer-view-switch button {
+  min-block-size: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #626771;
+  font-size: 9px;
+  font-weight: 690;
+}
+.layer-view-switch button[aria-pressed="true"] {
+  background: white;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(28, 30, 35, .08);
+}
+.layer-view-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .layer-list, .path-list { list-style: none; margin: 0; padding: 0; }
 .layer-list { flex: 1; margin: 10px 8px; overflow: auto; scrollbar-width: thin; }
+.structure-list { padding-block-end: 8px; }
+.structure-item .layer-row {
+  margin-inline-start: calc((min(var(--structure-depth), 4) - 1) * 13px);
+  position: relative;
+}
+.structure-item:not(.depth-1) .layer-row::before {
+  position: absolute;
+  inset-block: 7px;
+  inset-inline-start: -7px;
+  inline-size: 1px;
+  border-radius: 999px;
+  background: #e2e3e8;
+  content: '';
+}
+.structure-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 4px 4px;
+  padding: 8px 8px 4px;
+  border-block-start: 1px solid var(--line);
+  color: #777b84;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.structure-section-label small {
+  min-inline-size: 18px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #eff0f3;
+  color: #757983;
+  text-align: center;
+  font-size: 7px;
+  letter-spacing: 0;
+}
 .layer-row {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 28px 28px;
@@ -329,6 +394,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   color: #747883;
 }
 .layer-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.layer-name-group { display: flex; align-items: center; gap: 5px; min-inline-size: 0; }
+.layer-name-group .layer-name { flex: 1; min-inline-size: 0; }
+.structure-warning { display: grid; flex: 0 0 auto; place-items: center; color: #b06c1a; }
 .cinema-layer-glyph {
   display: grid;
   place-items: center;
