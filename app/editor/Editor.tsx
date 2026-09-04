@@ -116,7 +116,7 @@ import {
   planCinemaHierarchyLayout,
   resolveCinemaHierarchyInsertion,
 } from './cinema-hierarchy';
-import { planAcceptedCinemaDraftInsertion } from './cinema-workspace-placement';
+import { planCinemaDraftInsertion } from './cinema-workspace-placement';
 import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
@@ -2132,40 +2132,46 @@ function EditorInner() {
         locked: false,
       },
     };
+    const semanticParentId = hierarchyInsertion?.parentId ?? relativeLayout?.parentId ?? null;
+    const sourceRole = source?.data.kind === 'concept'
+      ? cinemaDraftRole(source.data.domainType, source.data.eyebrow)
+      : null;
+    const semanticPlacement = semanticParentId && sourceRole
+      ? planCinemaDraftInsertion(
+        nodesRef.current,
+        edgesRef.current,
+        cinemaRef.current,
+        { parentId: semanticParentId },
+        role,
+        nextNode,
+      )
+      : null;
+    if (semanticPlacement) nextNode = { ...nextNode, position: semanticPlacement.position };
     const hierarchyEdge: EditorEdge | null = hierarchyInsertion ? {
       id: crypto.randomUUID(),
       source: hierarchyInsertion.parentId,
       target: newId,
-      sourceHandle: 'bottom',
-      targetHandle: 'top',
+      sourceHandle: semanticPlacement?.sourceHandle,
+      targetHandle: semanticPlacement?.targetHandle,
       type: 'smoothstep',
       animated: false,
       markerEnd: { type: MarkerType.ArrowClosed },
       style: { stroke: '#a9adb7', strokeWidth: 1.5 },
       data: { label: '', kind: 'default', relationship: 'hierarchy' },
     } : null;
-    const acceptedCinemaPosition = hierarchyInsertion && (role === 'scene' || role === 'shot')
-      ? planAcceptedCinemaDraftInsertion(
-        nodesRef.current,
-        edgesRef.current,
-        cinemaRef.current,
-        hierarchyInsertion,
-        role,
-        nextNode,
-      )
-      : null;
-    const hierarchyLayout = hierarchyInsertion && hierarchyEdge && !acceptedCinemaPosition
+    const hierarchyLayout = hierarchyInsertion && hierarchyEdge && !semanticPlacement
       ? planCinemaHierarchyLayout(
         [...nodesRef.current, nextNode],
         [...edgesRef.current, hierarchyEdge],
         { ...hierarchyInsertion, newNodeId: newId },
       )
       : null;
-    const plannedPosition = acceptedCinemaPosition ?? hierarchyLayout?.positions.get(newId);
+    const plannedPosition = hierarchyLayout?.positions.get(newId);
     if (plannedPosition) nextNode = { ...nextNode, position: plannedPosition };
     const commands: CanvasCommandProposal['commands'] = [];
     for (const node of nodesRef.current) {
-      const moved = hierarchyLayout?.positions.get(node.id) ?? relativeLayout?.positions.get(node.id);
+      const moved = hierarchyLayout?.positions.get(node.id)
+        ?? (!semanticPlacement ? relativeLayout?.positions.get(node.id) : undefined);
       if (moved && (moved.x !== node.position.x || moved.y !== node.position.y)) {
         commands.push({ type: 'update-node', id: node.id, patch: { position: moved } });
       }
@@ -2200,8 +2206,8 @@ function EditorInner() {
           id: crypto.randomUUID(),
           source: relativeLayout.parentId,
           target: newId,
-          sourceHandle: 'bottom',
-          targetHandle: 'top',
+          sourceHandle: semanticPlacement ? semanticPlacement.sourceHandle : 'bottom',
+          targetHandle: semanticPlacement ? semanticPlacement.targetHandle : 'top',
           type: 'smoothstep',
           animated: false,
           markerEnd: { type: MarkerType.ArrowClosed },

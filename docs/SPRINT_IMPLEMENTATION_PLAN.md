@@ -37,6 +37,8 @@ Mixed accepted-plan/manual-creation layout hardening is complete and verified in
 
 Unified draft/production navigation is tracked in [Unified Project Outline Implementation Plan](./UNIFIED_PROJECT_OUTLINE_PLAN.md). It keeps one automatic Project Outline before, during, and after planning while retaining Layers as the flat technical view.
 
+Parent-aware typed-layer routing is tracked in [Parent-Aware Cinema Layout Implementation Plan](./PARENT_AWARE_LAYOUT_PLAN.md). New cinema layers inherit their parent and sibling lane without changing unrelated or accepted canvas content.
+
 ### Verified Sprint 10 closure
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).

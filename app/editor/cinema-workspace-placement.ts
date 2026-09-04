@@ -1,6 +1,6 @@
 import type { CinemaProjectData } from '../domain/cinema/project-data';
-import { cinemaDraftRole } from '../domain/cinema/manual-creation';
-import { isCinemaHierarchyEdge, type CinemaHierarchyInsertion } from './cinema-hierarchy';
+import { cinemaDraftRole, type CinemaDraftRole } from '../domain/cinema/manual-creation';
+import type { CinemaHierarchyInsertion } from './cinema-hierarchy';
 import {
   CONCEPT_BRANCH_GAP,
   CONCEPT_LEVEL_GAP,
@@ -11,105 +11,175 @@ import {
 } from './node-layout';
 import type { EditorEdge, EditorNode } from './types';
 
+export type CinemaConnectionDirection = 'horizontal' | 'vertical';
+
+export type CinemaDraftPlacement = {
+  position: NodePosition;
+  direction: CinemaConnectionDirection;
+  sourceHandle?: 'bottom';
+  targetHandle?: 'top';
+};
+
 function role(node: EditorNode | undefined) {
   return node?.data.kind === 'concept'
     ? cinemaDraftRole(node.data.domainType, node.data.eyebrow)
     : null;
 }
 
-function acceptedHostIds(cinema: CinemaProjectData) {
-  return new Set([
-    ...(cinema.projectNodeId ? [cinema.projectNodeId] : []),
-    ...Object.values(cinema.scenes).map((scene) => scene.nodeId),
-    ...Object.values(cinema.shots).map((shot) => shot.nodeId),
-    ...Object.values(cinema.characters).map((character) => character.nodeId),
-    ...Object.values(cinema.assets).map((asset) => asset.nodeId),
-    ...Object.values(cinema.agentRuns).map((run) => run.nodeId),
-  ]);
+function isSemanticParentEdge(edge: EditorEdge) {
+  const relationship = edge.data?.relationship;
+  return relationship !== 'reference' && relationship !== 'sequence';
 }
 
-function structuralDescendantIds(nodes: EditorNode[], edges: EditorEdge[], rootId: string) {
-  const children = new Map<string, string[]>();
-  for (const edge of edges.filter((candidate) => isCinemaHierarchyEdge(nodes, candidate))) {
-    const list = children.get(edge.source) ?? [];
-    list.push(edge.target);
-    children.set(edge.source, list);
-  }
-  const result = new Set<string>();
-  const pending = [rootId];
-  while (pending.length) {
-    const current = pending.pop()!;
-    if (result.has(current)) continue;
-    result.add(current);
-    pending.push(...(children.get(current) ?? []));
-  }
-  return result;
+function edgeDirection(edge: EditorEdge | undefined): CinemaConnectionDirection {
+  return edge?.sourceHandle === 'bottom' && edge.targetHandle === 'top'
+    ? 'vertical'
+    : 'horizontal';
 }
 
-function avoidVisibleCollisions(nodes: EditorNode[], newNode: EditorNode, desired: NodePosition) {
+function directRoleChildren(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  parentId: string,
+  expectedRole: CinemaDraftRole,
+) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return edges
+    .filter((edge) => edge.source === parentId && isSemanticParentEdge(edge))
+    .map((edge) => byId.get(edge.target))
+    .filter((node): node is EditorNode => Boolean(node && role(node) === expectedRole));
+}
+
+function cinemaRoleNodeIds(
+  cinema: CinemaProjectData | undefined,
+  parentId: string,
+  expectedRole: CinemaDraftRole,
+) {
+  if (!cinema) return [];
+  if (expectedRole === 'scene') return Object.values(cinema.scenes).map((scene) => scene.nodeId);
+
+  const scene = Object.values(cinema.scenes).find((candidate) => candidate.nodeId === parentId);
+  if (!scene) return [];
+  if (expectedRole === 'shot') {
+    return scene.shotIds
+      .map((shotId) => cinema.shots[shotId]?.nodeId)
+      .filter((nodeId): nodeId is string => Boolean(nodeId));
+  }
+  if (expectedRole === 'character') {
+    return Object.values(cinema.characters)
+      .filter((character) => character.sceneIds.includes(scene.id))
+      .map((character) => character.nodeId);
+  }
+  if (expectedRole === 'location' || expectedRole === 'prop' || expectedRole === 'visual-element') {
+    return Object.values(cinema.assets)
+      .filter((asset) => asset.category === expectedRole && asset.sceneIds.includes(scene.id))
+      .map((asset) => asset.nodeId);
+  }
+  return [];
+}
+
+function roleLaneNodes(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  cinema: CinemaProjectData | undefined,
+  parentId: string,
+  expectedRole: CinemaDraftRole,
+) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const candidates = [
+    ...directRoleChildren(nodes, edges, parentId, expectedRole),
+    ...cinemaRoleNodeIds(cinema, parentId, expectedRole)
+      .map((id) => byId.get(id))
+      .filter((node): node is EditorNode => Boolean(node)),
+  ];
+  return [...new Map(candidates.map((node) => [node.id, node])).values()]
+    .filter((node) => !node.hidden);
+}
+
+function inferDirection(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  parentId: string,
+  expectedRole: CinemaDraftRole,
+) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const outgoing = edges.filter((edge) => edge.source === parentId && isSemanticParentEdge(edge));
+  const sameRole = outgoing.find((edge) => role(byId.get(edge.target)) === expectedRole);
+  return edgeDirection(sameRole ?? outgoing[0]);
+}
+
+function avoidVisibleCollisions(
+  nodes: EditorNode[],
+  newNode: EditorNode,
+  desired: NodePosition,
+  direction: CinemaConnectionDirection,
+) {
   let position = desired;
   const obstacles = nodes.filter((node) => node.id !== newNode.id && !node.hidden).map(nodeRectangle);
   for (let pass = 0; pass <= obstacles.length; pass += 1) {
     const candidate = { ...position, ...editorNodeDimensions(newNode) };
     const collisions = obstacles.filter((obstacle) => rectanglesOverlap(candidate, obstacle, CONCEPT_BRANCH_GAP));
     if (!collisions.length) return position;
-    position = {
-      ...position,
-      y: Math.max(...collisions.map((collision) => collision.y + collision.height)) + CONCEPT_BRANCH_GAP,
-    };
+    position = direction === 'horizontal'
+      ? {
+        ...position,
+        y: Math.max(...collisions.map((collision) => collision.y + collision.height)) + CONCEPT_BRANCH_GAP,
+      }
+      : {
+        ...position,
+        x: Math.max(...collisions.map((collision) => collision.x + collision.width)) + CONCEPT_BRANCH_GAP,
+      };
   }
   return position;
 }
 
 /**
- * Adds to a canvas containing an accepted horizontal cinema package without
- * invoking the generic top-down hierarchy reflow. Existing accepted hosts are
- * deliberately treated as fixed; only the new draft receives a position.
+ * Places one new typed cinema node in its parent's established lane. Existing
+ * nodes never move: the semantic parent and its connector direction are the
+ * stable anchors, while the new node is appended on the lane's free axis.
  */
-export function planAcceptedCinemaDraftInsertion(
+export function planCinemaDraftInsertion(
   nodes: EditorNode[],
   edges: EditorEdge[],
   cinema: CinemaProjectData | undefined,
-  insertion: CinemaHierarchyInsertion,
-  newRole: 'scene' | 'shot',
+  insertion: Pick<CinemaHierarchyInsertion, 'parentId'>,
+  newRole: CinemaDraftRole,
   newNode: EditorNode,
-): NodePosition | null {
-  if (!cinema?.activeRevisionId || !cinema.projectNodeId || cinema.projectNodeId !== insertion.rootId) return null;
-  const byId = new Map(nodes.map((node) => [node.id, node]));
-  const parent = byId.get(insertion.parentId);
+): CinemaDraftPlacement | null {
+  const parent = nodes.find((node) => node.id === insertion.parentId);
   if (!parent) return null;
 
-  if (newRole === 'shot') {
-    const manualShotIds = edges
-      .filter((edge) => edge.source === parent.id && isCinemaHierarchyEdge(nodes, edge))
-      .map((edge) => edge.target)
-      .filter((id) => role(byId.get(id)) === 'shot');
-    const localNodes = [parent, ...manualShotIds.map((id) => byId.get(id)).filter((node): node is EditorNode => Boolean(node))];
-    const localBottom = Math.max(...localNodes.map((node) => node.position.y + editorNodeDimensions(node).height));
-    return avoidVisibleCollisions(nodes, newNode, {
-      x: parent.position.x,
-      y: localBottom + CONCEPT_LEVEL_GAP,
-    });
+  const direction = inferDirection(nodes, edges, parent.id, newRole);
+  const lane = roleLaneNodes(nodes, edges, cinema, parent.id, newRole);
+  const parentSize = editorNodeDimensions(parent);
+  let desired: NodePosition;
+
+  if (direction === 'horizontal') {
+    desired = lane.length
+      ? {
+        x: lane[0].position.x,
+        y: Math.max(...lane.map((node) => node.position.y + editorNodeDimensions(node).height))
+          + CONCEPT_BRANCH_GAP,
+      }
+      : {
+        x: parent.position.x + parentSize.width + CONCEPT_LEVEL_GAP,
+        y: parent.position.y,
+      };
+  } else {
+    desired = lane.length
+      ? {
+        x: Math.max(...lane.map((node) => node.position.x + editorNodeDimensions(node).width))
+          + CONCEPT_BRANCH_GAP,
+        y: lane[0].position.y,
+      }
+      : {
+        x: parent.position.x,
+        y: parent.position.y + parentSize.height + CONCEPT_LEVEL_GAP,
+      };
   }
 
-  const projectIds = acceptedHostIds(cinema);
-  for (const id of structuralDescendantIds(nodes, edges, insertion.rootId)) projectIds.add(id);
-  const projectNodes = [...projectIds]
-    .map((id) => byId.get(id))
-    .filter((node): node is EditorNode => Boolean(node && !node.hidden));
-  const projectBottom = Math.max(
-    parent.position.y + editorNodeDimensions(parent).height,
-    ...projectNodes.map((node) => node.position.y + editorNodeDimensions(node).height),
-  );
-  const selected = byId.get(insertion.selectedId);
-  const existingScene = projectNodes.find((node) => role(node) === 'scene');
-  const root = byId.get(insertion.rootId);
-  const sceneX = role(selected) === 'scene'
-    ? selected!.position.x
-    : existingScene?.position.x
-      ?? ((root?.position.x ?? parent.position.x) + (root ? editorNodeDimensions(root).width : 0) + CONCEPT_BRANCH_GAP);
-  return avoidVisibleCollisions(nodes, newNode, {
-    x: sceneX,
-    y: projectBottom + CONCEPT_LEVEL_GAP,
-  });
+  const position = avoidVisibleCollisions(nodes, newNode, desired, direction);
+  return direction === 'vertical'
+    ? { position, direction, sourceHandle: 'bottom', targetHandle: 'top' }
+    : { position, direction };
 }

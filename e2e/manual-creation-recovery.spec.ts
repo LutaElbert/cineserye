@@ -136,6 +136,16 @@ test('keeps new scenes and shots connected to semantic parents without overlappi
   await expect(page.getByLabel(/Connector from Shot 01 to Shot/)).toHaveCount(0);
   await expect(page.getByLabel(/Connector from Scene 01 to Scene 02/)).toHaveCount(0);
   await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
+  const initialLaneBoxes = await Promise.all([
+    canvasNode(page, 'Scene 01').boundingBox(),
+    canvasNode(page, 'Scene 02').boundingBox(),
+    canvasNode(page, 'Shot 01').boundingBox(),
+    canvasNode(page, 'Shot 02').boundingBox(),
+  ]);
+  expect(Math.abs(initialLaneBoxes[0]!.x - initialLaneBoxes[1]!.x)).toBeLessThan(3);
+  expect(initialLaneBoxes[1]!.y).toBeGreaterThan(initialLaneBoxes[0]!.y);
+  expect(Math.abs(initialLaneBoxes[2]!.x - initialLaneBoxes[3]!.x)).toBeLessThan(3);
+  expect(initialLaneBoxes[3]!.y).toBeGreaterThan(initialLaneBoxes[2]!.y);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Shot 04', exact: true })).toHaveCount(0);
@@ -188,7 +198,7 @@ test('keeps new scenes and shots connected to semantic parents without overlappi
   ]));
   for (const edge of persistedHierarchy) {
     expect(edge).toMatchObject({
-      sourceHandle: 'bottom', targetHandle: 'top', type: 'smoothstep', relationship: 'hierarchy',
+      sourceHandle: null, targetHandle: null, type: 'smoothstep', relationship: 'hierarchy',
     });
   }
 
@@ -232,6 +242,13 @@ test('keeps an accepted plan stable when adding a manual shot and next scene', a
   expect((await visibleCinemaHierarchyOverlaps(page)).filter((pair) => (
     pair.includes('Shot 07') || pair.includes('Scene 02')
   ))).toEqual([]);
+  await page.getByRole('button', { name: 'Fit View' }).click();
+  const acceptedSceneLane = await Promise.all([
+    canvasNode(page, 'Scene 01 · The Abandoned Cinema').boundingBox(),
+    canvasNode(page, 'Scene 02').boundingBox(),
+  ]);
+  expect(Math.abs(acceptedSceneLane[0]!.x - acceptedSceneLane[1]!.x)).toBeLessThan(3);
+  expect(acceptedSceneLane[1]!.y).toBeGreaterThan(acceptedSceneLane[0]!.y);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(canvasNode(page, 'Scene 02')).toHaveCount(0);

@@ -3,16 +3,16 @@ import {
   MOCK_CINEMA_PROJECT_DATA,
   MOCK_SHOT_PLAN_PROPOSAL,
 } from '../domain/cinema/mock/reel-knows-tomorrow';
+import type { CinemaDraftRole } from '../domain/cinema/manual-creation';
 import { applyCanvasCommandProposal } from './canvas-commands';
-import { resolveCinemaHierarchyInsertion } from './cinema-hierarchy';
 import { initialDocument } from './initial-document';
 import { nodeRectangle, rectanglesOverlap } from './node-layout';
 import { conceptTitleFromPlainText } from './rich-text';
-import { planAcceptedCinemaDraftInsertion } from './cinema-workspace-placement';
+import { planCinemaDraftInsertion } from './cinema-workspace-placement';
 import type { EditorEdge, EditorNode } from './types';
 
-function draft(id: string, role: 'scene' | 'shot'): EditorNode {
-  const label = role === 'scene' ? 'Scene 02' : 'Shot 07';
+function draft(id: string, draftRole: CinemaDraftRole): EditorNode {
+  const label = `${draftRole} draft`;
   return {
     id,
     type: 'concept',
@@ -21,9 +21,9 @@ function draft(id: string, role: 'scene' | 'shot'): EditorNode {
     draggable: true,
     deletable: true,
     data: {
-      kind: 'concept', domainType: `cinema.${role}`, name: label, label,
+      kind: 'concept', domainType: `cinema.${draftRole}`, name: label, label,
       title: conceptTitleFromPlainText(label), body: { type: 'doc', content: [{ type: 'paragraph' }] },
-      eyebrow: role, tone: role === 'shot' ? 'mint' : 'ink', collapsed: false,
+      eyebrow: draftRole, tone: draftRole === 'shot' ? 'mint' : 'ink', collapsed: false,
       horizontalAlign: 'left', verticalAlign: 'top', opacity: 1, locked: false,
     },
   };
@@ -35,53 +35,111 @@ function acceptedDocument() {
   return document;
 }
 
-describe('accepted cinema additive layout', () => {
-  it('places a manual shot below its scene without moving accepted hosts', () => {
-    const document = acceptedDocument();
-    const newShot = draft('manual-shot-07', 'shot');
-    const insertion = resolveCinemaHierarchyInsertion(document.nodes, document.edges, 'scene-01', 'shot');
-    const before = structuredClone(document.nodes.map((node) => ({ id: node.id, position: node.position })));
-    const position = planAcceptedCinemaDraftInsertion(
-      document.nodes, document.edges, document.cinema, insertion, 'shot', newShot,
-    );
+function expectCollisionFree(nodes: EditorNode[], node: EditorNode, position: { x: number; y: number }) {
+  const placed = { ...node, position };
+  expect(nodes.some((candidate) => rectanglesOverlap(
+    nodeRectangle(placed), nodeRectangle(candidate), 44,
+  ))).toBe(false);
+}
 
-    expect(position).not.toBeNull();
-    expect(position!.x).toBe(document.nodes.find((node) => node.id === 'scene-01')!.position.x);
-    expect(document.nodes.map((node) => ({ id: node.id, position: node.position }))).toEqual(before);
-    const placed = { ...newShot, position: position! };
-    expect(document.nodes.some((node) => rectanglesOverlap(nodeRectangle(placed), nodeRectangle(node), 44))).toBe(false);
-  });
-
-  it('places the next scene below the complete accepted workspace and manual shot', () => {
-    const document = acceptedDocument();
-    const manualShot = draft('manual-shot-07', 'shot');
-    const shotInsertion = resolveCinemaHierarchyInsertion(document.nodes, document.edges, 'scene-01', 'shot');
-    manualShot.position = planAcceptedCinemaDraftInsertion(
-      document.nodes, document.edges, document.cinema, shotInsertion, 'shot', manualShot,
+describe('parent-aware cinema insertion', () => {
+  it('appends scene and shot siblings in horizontal parent lanes without moving existing nodes', () => {
+    const before = structuredClone(initialDocument.nodes.map((node) => ({ id: node.id, position: node.position })));
+    const scene = draft('scene-02', 'scene');
+    const scenePlacement = planCinemaDraftInsertion(
+      initialDocument.nodes, initialDocument.edges, undefined,
+      { parentId: 'story-premise' }, 'scene', scene,
     )!;
-    const shotEdge: EditorEdge = {
-      id: 'scene-manual-shot', source: 'scene-01', target: manualShot.id,
-      data: { label: '', kind: 'default', relationship: 'hierarchy' },
-    };
-    const nodes = [...document.nodes, manualShot];
-    const edges = [...document.edges, shotEdge];
-    const newScene = draft('manual-scene-02', 'scene');
-    const insertion = resolveCinemaHierarchyInsertion(nodes, edges, 'scene-01', 'scene');
-    const position = planAcceptedCinemaDraftInsertion(nodes, edges, document.cinema, insertion, 'scene', newScene);
+    const shot = draft('shot-02', 'shot');
+    const shotPlacement = planCinemaDraftInsertion(
+      initialDocument.nodes, initialDocument.edges, undefined,
+      { parentId: 'scene-01' }, 'shot', shot,
+    )!;
 
-    expect(position).not.toBeNull();
-    const placed = { ...newScene, position: position! };
-    expect(nodes.some((node) => rectanglesOverlap(nodeRectangle(placed), nodeRectangle(node), 44))).toBe(false);
-    expect(position!.y).toBeGreaterThan(Math.max(...nodes.map((node) => (
-      node.position.y + nodeRectangle(node).height
-    ))));
+    expect(scenePlacement.direction).toBe('horizontal');
+    expect(scenePlacement.sourceHandle).toBeUndefined();
+    expect(scenePlacement.targetHandle).toBeUndefined();
+    expect(scenePlacement.position.x).toBe(initialDocument.nodes.find((node) => node.id === 'scene-01')!.position.x);
+    expect(scenePlacement.position.y).toBeGreaterThan(initialDocument.nodes.find((node) => node.id === 'scene-01')!.position.y);
+    expect(shotPlacement.direction).toBe('horizontal');
+    expect(shotPlacement.position.x).toBe(initialDocument.nodes.find((node) => node.id === 'shot-01')!.position.x);
+    expectCollisionFree(initialDocument.nodes, scene, scenePlacement.position);
+    expectCollisionFree(initialDocument.nodes, shot, shotPlacement.position);
+    expect(initialDocument.nodes.map((node) => ({ id: node.id, position: node.position }))).toEqual(before);
   });
 
-  it('leaves an unplanned document to the generic hierarchy layout', () => {
-    const newScene = draft('manual-scene-02', 'scene');
-    const insertion = resolveCinemaHierarchyInsertion(initialDocument.nodes, initialDocument.edges, 'scene-01', 'scene');
-    expect(planAcceptedCinemaDraftInsertion(
-      initialDocument.nodes, initialDocument.edges, undefined, insertion, 'scene', newScene,
+  it('joins accepted shot, prop, and scene lanes while keeping accepted hosts fixed', () => {
+    const document = acceptedDocument();
+    const before = structuredClone(document.nodes.map((node) => ({ id: node.id, position: node.position })));
+    const cases: Array<{ role: CinemaDraftRole; parentId: string; laneNodeId: string }> = [
+      { role: 'shot', parentId: 'scene-01', laneNodeId: 'cine-shot-01' },
+      { role: 'prop', parentId: 'scene-01', laneNodeId: 'cine-asset-projector' },
+      { role: 'scene', parentId: 'story-premise', laneNodeId: 'scene-01' },
+    ];
+
+    for (const item of cases) {
+      const node = draft(`manual-${item.role}`, item.role);
+      const placement = planCinemaDraftInsertion(
+        document.nodes, document.edges, document.cinema,
+        { parentId: item.parentId }, item.role, node,
+      )!;
+      expect(placement.direction).toBe('horizontal');
+      expect(placement.position.x).toBe(document.nodes.find((candidate) => candidate.id === item.laneNodeId)!.position.x);
+      expectCollisionFree(document.nodes, node, placement.position);
+    }
+    expect(document.nodes.map((node) => ({ id: node.id, position: node.position }))).toEqual(before);
+  });
+
+  it('applies the same parent route policy to every production layer and notes', () => {
+    for (const draftRole of ['character', 'location', 'prop', 'visual-element', 'note'] as const) {
+      const node = draft(`manual-${draftRole}`, draftRole);
+      const placement = planCinemaDraftInsertion(
+        initialDocument.nodes, initialDocument.edges, undefined,
+        { parentId: 'scene-01' }, draftRole, node,
+      )!;
+      expect(placement.direction).toBe('horizontal');
+      expect(placement.sourceHandle).toBeUndefined();
+      expect(placement.targetHandle).toBeUndefined();
+      expect(placement.position.x).toBeGreaterThan(initialDocument.nodes.find((candidate) => candidate.id === 'scene-01')!.position.x);
+      expectCollisionFree(initialDocument.nodes, node, placement.position);
+    }
+  });
+
+  it('preserves an explicit vertical legacy branch and places its next sibling across the row', () => {
+    const verticalEdge: EditorEdge = {
+      ...initialDocument.edges[0], sourceHandle: 'bottom', targetHandle: 'top',
+    };
+    const scene = draft('scene-02', 'scene');
+    const placement = planCinemaDraftInsertion(
+      initialDocument.nodes, [verticalEdge, initialDocument.edges[1]], undefined,
+      { parentId: 'story-premise' }, 'scene', scene,
+    )!;
+
+    expect(placement).toMatchObject({ direction: 'vertical', sourceHandle: 'bottom', targetHandle: 'top' });
+    expect(placement.position.y).toBe(initialDocument.nodes.find((node) => node.id === 'scene-01')!.position.y);
+    expect(placement.position.x).toBeGreaterThan(initialDocument.nodes.find((node) => node.id === 'scene-01')!.position.x);
+    expectCollisionFree(initialDocument.nodes, scene, placement.position);
+  });
+
+  it('ignores reference and sequence edges when inferring the parent route', () => {
+    const distractingEdges: EditorEdge[] = [
+      {
+        id: 'reference', source: 'story-premise', target: 'shot-01',
+        sourceHandle: 'bottom', targetHandle: 'top', data: { relationship: 'reference', kind: 'default', label: '' },
+      },
+      ...initialDocument.edges,
+    ];
+    const placement = planCinemaDraftInsertion(
+      initialDocument.nodes, distractingEdges, undefined,
+      { parentId: 'story-premise' }, 'scene', draft('scene-02', 'scene'),
+    )!;
+    expect(placement.direction).toBe('horizontal');
+  });
+
+  it('returns null when the semantic parent is unavailable', () => {
+    expect(planCinemaDraftInsertion(
+      initialDocument.nodes, initialDocument.edges, undefined,
+      { parentId: 'missing' }, 'note', draft('note-02', 'note'),
     )).toBeNull();
   });
 });
