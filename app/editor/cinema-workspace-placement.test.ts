@@ -6,7 +6,11 @@ import {
 import type { CinemaDraftRole } from '../domain/cinema/manual-creation';
 import { applyCanvasCommandProposal } from './canvas-commands';
 import { initialDocument } from './initial-document';
-import { nodeRectangle, rectanglesOverlap } from './node-layout';
+import {
+  CONCEPT_LEVEL_GAP,
+  nodeRectangle,
+  rectanglesOverlap,
+} from './node-layout';
 import { conceptTitleFromPlainText } from './rich-text';
 import {
   planCinemaDraftInsertion,
@@ -212,7 +216,7 @@ describe('parent-aware cinema insertion', () => {
     expect(placement).toMatchObject({ direction: 'vertical', sourceHandle: 'bottom', targetHandle: 'top' });
     expect(placement.position.y).toBe(initialDocument.nodes.find((node) => node.id === 'scene-01')!.position.y);
     expect(placement.position.x).toBeGreaterThan(initialDocument.nodes.find((node) => node.id === 'scene-01')!.position.x);
-    expectCollisionFree(initialDocument.nodes, scene, placement.position);
+    expectAllCollisionFree(withPositions([...initialDocument.nodes, scene], placement.positions));
   });
 
   it('ignores reference and sequence edges when inferring the parent route', () => {
@@ -250,6 +254,31 @@ describe('parent-aware cinema insertion', () => {
     expect(placement.edgeDirections.get(verticalScene02.id)).toBe('horizontal');
   });
 
+  it('places a new Scene in the dominant sibling lane instead of a dragged Scene 01 lane', () => {
+    const scene01 = numberedScene('scene-01', 1, 120, 480);
+    const alignedScenes = [
+      numberedScene('scene-02', 2, 520, 120),
+      numberedScene('scene-03', 3, 520, 232),
+      numberedScene('scene-04', 4, 520, 344),
+    ];
+    const story = { ...initialDocument.nodes[0], position: { x: 120, y: 250 } };
+    const nodes = [story, scene01, ...alignedScenes];
+    const edges = [scene01, ...alignedScenes]
+      .map((scene) => hierarchyEdge(`story-${scene.id}`, story.id, scene.id));
+    const placement = planCinemaDraftInsertion(
+      nodes,
+      edges,
+      undefined,
+      { parentId: story.id },
+      'scene',
+      numberedScene('scene-05', 5, 0, 0),
+    )!;
+
+    expect(placement.direction).toBe('horizontal');
+    expect(placement.position.x).toBe(520);
+    expect(placement.positions.get(scene01.id)?.x).toBe(520);
+  });
+
   it('returns null when the semantic parent is unavailable', () => {
     expect(planCinemaDraftInsertion(
       initialDocument.nodes, initialDocument.edges, undefined,
@@ -259,12 +288,99 @@ describe('parent-aware cinema insertion', () => {
 });
 
 describe('cinema workspace reorganization', () => {
+  it('restores a dragged Scene 01 to the right-facing lane supported by four siblings', () => {
+    const story = { ...initialDocument.nodes[0], position: { x: 230, y: 300 } };
+    const scenes = [
+      numberedScene('scene-01', 1, 180, 500),
+      numberedScene('scene-02', 2, 530, 150),
+      numberedScene('scene-03', 3, 530, 270),
+      numberedScene('scene-04', 4, 530, 390),
+      numberedScene('scene-05', 5, 530, 510),
+    ];
+    const nodes = [story, ...scenes];
+    const edges = scenes.map((scene) => hierarchyEdge(`story-${scene.id}`, story.id, scene.id));
+
+    const layout = planCinemaWorkspaceReorganization(nodes, edges);
+    const arranged = withPositions(nodes, layout.positions);
+    const arrangedScenes = scenes.map((scene) => arranged.find((node) => node.id === scene.id)!);
+
+    expect(new Set(arrangedScenes.map((scene) => scene.position.x))).toEqual(new Set([530]));
+    expect(arrangedScenes.map((scene) => scene.position.y)).toEqual([150, 262, 374, 486, 598]);
+    const arrangedStory = arranged.find((node) => node.id === story.id)!;
+    expect(arrangedStory.position.y + 34).toBe((150 + 598 + 68) / 2);
+    expect(arrangedStory.position.x + 220 + CONCEPT_LEVEL_GAP).toBeLessThanOrEqual(530);
+  });
+
+  it('uses a three-Scene bottom lane and orders all siblings from left to right', () => {
+    const story = { ...initialDocument.nodes[0], position: { x: 400, y: 80 } };
+    const scenes = [
+      numberedScene('scene-01', 1, 100, 500),
+      numberedScene('scene-02', 2, 364, 500),
+      numberedScene('scene-03', 3, 628, 500),
+      numberedScene('scene-04', 4, 900, 250),
+      numberedScene('scene-05', 5, 1200, 800),
+    ];
+    const nodes = [story, ...scenes];
+    const edges = scenes.map((scene) => ({
+      ...hierarchyEdge(`story-${scene.id}`, story.id, scene.id),
+      sourceHandle: 'bottom',
+      targetHandle: 'top',
+    }));
+
+    const layout = planCinemaWorkspaceReorganization(nodes, edges);
+    const arranged = withPositions(nodes, layout.positions);
+    const arrangedScenes = scenes.map((scene) => arranged.find((node) => node.id === scene.id)!);
+
+    expect(new Set(arrangedScenes.map((scene) => scene.position.y))).toEqual(new Set([500]));
+    expect(arrangedScenes.map((scene) => scene.position.x)).toEqual([100, 364, 628, 892, 1156]);
+    const arrangedStory = arranged.find((node) => node.id === story.id)!;
+    expect(arrangedStory.position.x + 110).toBe((100 + 1156 + 220) / 2);
+    expect(arrangedStory.position.y + 68 + CONCEPT_LEVEL_GAP).toBeLessThanOrEqual(500);
+
+    const reapplied = planCinemaWorkspaceReorganization(arranged, edges);
+    expect(reapplied.positions.size).toBe(0);
+    expect(reapplied.edgeDirections.size).toBe(0);
+  });
+
+  it('treats minor drift as one lane and prefers the canonical lane in a support tie', () => {
+    const story = initialDocument.nodes[0];
+    const scenes = [
+      numberedScene('scene-01', 1, 500, 100),
+      numberedScene('scene-02', 2, 515, 212),
+      numberedScene('scene-03', 3, 490, 324),
+      numberedScene('scene-04', 4, 800, 436),
+      numberedScene('scene-05', 5, 800, 548),
+      numberedScene('scene-06', 6, 1100, 660),
+    ];
+    const nodes = [story, ...scenes];
+    const edges = scenes.map((scene) => hierarchyEdge(`story-${scene.id}`, story.id, scene.id));
+    const layout = planCinemaWorkspaceReorganization(nodes, edges);
+    const arranged = withPositions(nodes, layout.positions);
+
+    expect(new Set(scenes.map((scene) => arranged.find((node) => node.id === scene.id)!.position.x)))
+      .toEqual(new Set([500]));
+
+    const tiedScenes = [
+      numberedScene('scene-01', 1, 400, 100),
+      numberedScene('scene-02', 2, 400, 212),
+      numberedScene('scene-03', 3, 700, 324),
+      numberedScene('scene-04', 4, 700, 436),
+    ];
+    const tiedNodes = [story, ...tiedScenes];
+    const tiedEdges = tiedScenes.map((scene) => hierarchyEdge(`tie-${scene.id}`, story.id, scene.id));
+    const tiedLayout = planCinemaWorkspaceReorganization(tiedNodes, tiedEdges);
+    const tiedArranged = withPositions(tiedNodes, tiedLayout.positions);
+    expect(new Set(tiedScenes.map((scene) => (
+      tiedArranged.find((node) => node.id === scene.id)!.position.x
+    )))).toEqual(new Set([400]));
+  });
+
   it('uses Scene 01 as the canonical axis and repairs a mixed-direction five-scene hierarchy', () => {
     const scenes = [
       numberedScene('scene-02', 2, 40, 250),
-      numberedScene('scene-03', 3, 220, 390),
-      numberedScene('scene-04', 4, 700, 390),
-      numberedScene('scene-05', 5, 700, 500),
+      numberedScene('scene-03', 3, 450, 390),
+      numberedScene('scene-04', 4, 450, 500),
+      numberedScene('scene-05', 5, 450, 610),
     ];
     const nodes = [...initialDocument.nodes, ...scenes];
     const mixedEdges: EditorEdge[] = [
@@ -338,7 +454,7 @@ describe('cinema workspace reorganization', () => {
     expect(second.positions.size).toBe(0);
   });
 
-  it('keeps locked scene bands fixed and preserves explicit vertical legacy routing', () => {
+  it('keeps locked scene bands fixed while organizing explicit vertical routing', () => {
     const scene02 = { ...draft('scene-02', 'scene'), position: { x: 900, y: 20 } };
     const lockedScene = {
       ...initialDocument.nodes[1],
@@ -355,13 +471,15 @@ describe('cinema workspace reorganization', () => {
       : edge);
     const verticalLayout = planCinemaWorkspaceReorganization(lockedNodes, verticalEdges);
     expect(verticalLayout.handled).toBe(true);
-    expect(verticalLayout.positions.size).toBe(0);
+    expect(verticalLayout.positions.has(lockedScene.id)).toBe(false);
+    expect(withPositions(lockedNodes, verticalLayout.positions)
+      .find((node) => node.id === scene02.id)!.position.y).toBe(lockedScene.position.y);
 
     const mixedVerticalEdges = horizontalEdges.map((edge) => edge.target === 'scene-01'
       ? { ...edge, sourceHandle: 'bottom', targetHandle: 'top' }
       : edge);
     const mixedVerticalLayout = planCinemaWorkspaceReorganization(lockedNodes, mixedVerticalEdges);
-    expect(mixedVerticalLayout.positions.size).toBe(0);
+    expect(mixedVerticalLayout.positions.has(lockedScene.id)).toBe(false);
     expect(mixedVerticalLayout.edgeDirections.get('story-scene-02')).toBe('vertical');
 
     const lockedStory = {

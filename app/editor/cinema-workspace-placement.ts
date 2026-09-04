@@ -28,6 +28,8 @@ export type CinemaWorkspaceLayout = {
   edgeDirections: Map<string, CinemaConnectionDirection>;
 };
 
+const SCENE_LANE_ALIGNMENT_TOLERANCE = 32;
+
 function role(node: EditorNode | undefined) {
   return node?.data.kind === 'concept'
     ? cinemaDraftRole(node.data.domainType, node.data.eyebrow)
@@ -94,7 +96,7 @@ function positionedRectangle(node: EditorNode, positions: Map<string, NodePositi
   return { ...(positions.get(node.id) ?? node.position), ...editorNodeDimensions(node) };
 }
 
-function branchBounds(
+function branchSpatialBounds(
   nodes: EditorNode[],
   edges: EditorEdge[],
   rootId: string,
@@ -106,9 +108,21 @@ function branchBounds(
     .map((node) => positionedRectangle(node, positions));
   if (!rectangles.length) return null;
   return {
+    left: Math.min(...rectangles.map((rectangle) => rectangle.x)),
+    right: Math.max(...rectangles.map((rectangle) => rectangle.x + rectangle.width)),
     top: Math.min(...rectangles.map((rectangle) => rectangle.y)),
     bottom: Math.max(...rectangles.map((rectangle) => rectangle.y + rectangle.height)),
   };
+}
+
+function branchBounds(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  rootId: string,
+  positions: Map<string, NodePosition>,
+) {
+  const bounds = branchSpatialBounds(nodes, edges, rootId, positions);
+  return bounds ? { top: bounds.top, bottom: bounds.bottom } : null;
 }
 
 function edgeDirection(edge: EditorEdge | undefined): CinemaConnectionDirection {
@@ -198,6 +212,51 @@ function scenesInNarrativeLayoutOrder(
       ? leftNumber - rightNumber
       : scenes.indexOf(left) - scenes.indexOf(right);
   });
+}
+
+function dominantSceneLane(
+  scenes: EditorNode[],
+  canonicalScene: EditorNode,
+  direction: CinemaConnectionDirection,
+) {
+  const laneCoordinate = (scene: EditorNode) => (
+    direction === 'horizontal' ? scene.position.x : scene.position.y
+  );
+  const runCoordinate = (scene: EditorNode) => (
+    direction === 'horizontal' ? scene.position.y : scene.position.x
+  );
+  const candidates = scenes.map((scene, index) => {
+    const coordinate = laneCoordinate(scene);
+    const members = scenes.filter((candidate) => (
+      Math.abs(laneCoordinate(candidate) - coordinate) <= SCENE_LANE_ALIGNMENT_TOLERANCE
+    ));
+    return {
+      coordinate,
+      members,
+      support: members.length,
+      containsCanonical: members.some((member) => member.id === canonicalScene.id),
+      memberMovementCost: members.reduce((total, member) => (
+        total + Math.abs(laneCoordinate(member) - coordinate)
+      ), 0),
+      movementCost: scenes.reduce((total, candidate) => (
+        total + Math.abs(laneCoordinate(candidate) - coordinate)
+      ), 0),
+      index,
+    };
+  });
+  candidates.sort((left, right) => (
+    right.support - left.support
+    || Number(right.containsCanonical) - Number(left.containsCanonical)
+    || left.memberMovementCost - right.memberMovementCost
+    || left.movementCost - right.movementCost
+    || left.coordinate - right.coordinate
+    || left.index - right.index
+  ));
+  const selected = candidates[0];
+  return {
+    coordinate: selected.coordinate,
+    start: Math.min(...selected.members.map(runCoordinate)),
+  };
 }
 
 function orderedProductionChildren(
@@ -326,7 +385,8 @@ function avoidVisibleCollisions(
 }
 
 /**
- * Reflows editable cinema drafts around the first Story -> Scene route. Provider-owned
+ * Reflows editable cinema drafts using the first narrative Story -> Scene route for
+ * orientation and the strongest aligned sibling cluster for placement. Provider-owned
  * and locked nodes are anchors; unrelated graph branches never participate.
  */
 export function planCinemaWorkspaceReorganization(
@@ -374,13 +434,73 @@ export function planCinemaWorkspaceReorganization(
         : edge.sourceHandle == null && edge.targetHandle == null;
       if (!alreadyCanonical) edgeDirections.set(edge.id, direction);
     }
+    const dominantLane = dominantSceneLane(layoutScenes, canonicalScene, direction);
 
-    // Keep explicit bottom -> top legacy trees on their established axis. Typed
-    // insertion already extends these horizontally and must not silently rotate them.
-    if (direction === 'vertical') continue;
+    if (direction === 'horizontal') {
+      const sceneLaneX = dominantLane.coordinate;
+      let cursorTop = dominantLane.start;
+      for (const scene of layoutScenes) {
+        const branchIds = semanticDescendantIds(nodes, edges, scene.id);
+        const branchHasAnchor = [...branchIds].some((id) => {
+          const node = byId.get(id);
+          return Boolean(node && !movable(node));
+        });
+        if (branchHasAnchor) {
+          const bounds = branchBounds(nodes, edges, scene.id, positions);
+          if (bounds) cursorTop = Math.max(cursorTop, bounds.bottom + CONCEPT_BRANCH_GAP);
+          continue;
+        }
 
-    const sceneLaneX = canonicalScene.position.x;
-    let cursorTop = canonicalScene.position.y;
+        const sceneSize = editorNodeDimensions(scene);
+        const children = orderedProductionChildren(nodes, edges, cinema, scene.id);
+        if (!children.length) {
+          positions.set(scene.id, { x: sceneLaneX, y: cursorTop });
+          cursorTop += sceneSize.height + CONCEPT_BRANCH_GAP;
+          continue;
+        }
+
+        const childLaneX = Math.max(
+          children[0].position.x,
+          sceneLaneX + sceneSize.width + CONCEPT_LEVEL_GAP,
+        );
+        let childCursor = cursorTop;
+        for (const child of children) {
+          const bounds = branchBounds(nodes, edges, child.id, positions);
+          if (!bounds) continue;
+          const current = currentPosition(child);
+          moveBranch(child.id, { x: childLaneX - current.x, y: childCursor - bounds.top });
+          const movedBounds = branchBounds(nodes, edges, child.id, positions);
+          childCursor = (movedBounds?.bottom ?? childCursor + editorNodeDimensions(child).height)
+            + CONCEPT_BRANCH_GAP;
+        }
+
+        const childRectangles = children.map((child) => positionedRectangle(child, positions));
+        const childTop = Math.min(...childRectangles.map((rectangle) => rectangle.y));
+        const childBottom = Math.max(...childRectangles.map((rectangle) => rectangle.y + rectangle.height));
+        positions.set(scene.id, {
+          x: sceneLaneX,
+          y: childTop + (childBottom - childTop - sceneSize.height) / 2,
+        });
+        const bandBounds = branchBounds(nodes, edges, scene.id, positions);
+        cursorTop = (bandBounds?.bottom ?? childBottom) + CONCEPT_BRANCH_GAP;
+      }
+
+      if (movable(story)) {
+        const sceneRectangles = layoutScenes.map((scene) => positionedRectangle(scene, positions));
+        const top = Math.min(...sceneRectangles.map((rectangle) => rectangle.y));
+        const bottom = Math.max(...sceneRectangles.map((rectangle) => rectangle.y + rectangle.height));
+        const storyHeight = editorNodeDimensions(story).height;
+        const storyWidth = editorNodeDimensions(story).width;
+        positions.set(story.id, {
+          x: Math.min(story.position.x, sceneLaneX - storyWidth - CONCEPT_LEVEL_GAP),
+          y: top + (bottom - top - storyHeight) / 2,
+        });
+      }
+      continue;
+    }
+
+    const sceneLaneY = dominantLane.coordinate;
+    let cursorLeft = dominantLane.start;
     for (const scene of layoutScenes) {
       const branchIds = semanticDescendantIds(nodes, edges, scene.id);
       const branchHasAnchor = [...branchIds].some((id) => {
@@ -388,54 +508,54 @@ export function planCinemaWorkspaceReorganization(
         return Boolean(node && !movable(node));
       });
       if (branchHasAnchor) {
-        const bounds = branchBounds(nodes, edges, scene.id, positions);
-        if (bounds) cursorTop = Math.max(cursorTop, bounds.bottom + CONCEPT_BRANCH_GAP);
+        const bounds = branchSpatialBounds(nodes, edges, scene.id, positions);
+        if (bounds) cursorLeft = Math.max(cursorLeft, bounds.right + CONCEPT_BRANCH_GAP);
         continue;
       }
 
       const sceneSize = editorNodeDimensions(scene);
       const children = orderedProductionChildren(nodes, edges, cinema, scene.id);
       if (!children.length) {
-        positions.set(scene.id, { x: sceneLaneX, y: cursorTop });
-        cursorTop += sceneSize.height + CONCEPT_BRANCH_GAP;
+        positions.set(scene.id, { x: cursorLeft, y: sceneLaneY });
+        cursorLeft += sceneSize.width + CONCEPT_BRANCH_GAP;
         continue;
       }
 
-      const childLaneX = Math.max(
-        children[0].position.x,
-        sceneLaneX + sceneSize.width + CONCEPT_LEVEL_GAP,
+      const childLaneY = Math.max(
+        children[0].position.y,
+        sceneLaneY + sceneSize.height + CONCEPT_LEVEL_GAP,
       );
-      let childCursor = cursorTop;
+      let childCursor = cursorLeft;
       for (const child of children) {
-        const bounds = branchBounds(nodes, edges, child.id, positions);
+        const bounds = branchSpatialBounds(nodes, edges, child.id, positions);
         if (!bounds) continue;
         const current = currentPosition(child);
-        moveBranch(child.id, { x: childLaneX - current.x, y: childCursor - bounds.top });
-        const movedBounds = branchBounds(nodes, edges, child.id, positions);
-        childCursor = (movedBounds?.bottom ?? childCursor + editorNodeDimensions(child).height)
+        moveBranch(child.id, { x: childCursor - bounds.left, y: childLaneY - current.y });
+        const movedBounds = branchSpatialBounds(nodes, edges, child.id, positions);
+        childCursor = (movedBounds?.right ?? childCursor + editorNodeDimensions(child).width)
           + CONCEPT_BRANCH_GAP;
       }
 
       const childRectangles = children.map((child) => positionedRectangle(child, positions));
-      const childTop = Math.min(...childRectangles.map((rectangle) => rectangle.y));
-      const childBottom = Math.max(...childRectangles.map((rectangle) => rectangle.y + rectangle.height));
+      const childLeft = Math.min(...childRectangles.map((rectangle) => rectangle.x));
+      const childRight = Math.max(...childRectangles.map((rectangle) => rectangle.x + rectangle.width));
       positions.set(scene.id, {
-        x: sceneLaneX,
-        y: childTop + (childBottom - childTop - sceneSize.height) / 2,
+        x: childLeft + (childRight - childLeft - sceneSize.width) / 2,
+        y: sceneLaneY,
       });
-      const bandBounds = branchBounds(nodes, edges, scene.id, positions);
-      cursorTop = (bandBounds?.bottom ?? childBottom) + CONCEPT_BRANCH_GAP;
+      const bandBounds = branchSpatialBounds(nodes, edges, scene.id, positions);
+      cursorLeft = (bandBounds?.right ?? childRight) + CONCEPT_BRANCH_GAP;
     }
 
     if (movable(story)) {
       const sceneRectangles = layoutScenes.map((scene) => positionedRectangle(scene, positions));
-      const top = Math.min(...sceneRectangles.map((rectangle) => rectangle.y));
-      const bottom = Math.max(...sceneRectangles.map((rectangle) => rectangle.y + rectangle.height));
+      const left = Math.min(...sceneRectangles.map((rectangle) => rectangle.x));
+      const right = Math.max(...sceneRectangles.map((rectangle) => rectangle.x + rectangle.width));
       const storyHeight = editorNodeDimensions(story).height;
       const storyWidth = editorNodeDimensions(story).width;
       positions.set(story.id, {
-        x: Math.min(story.position.x, sceneLaneX - storyWidth - CONCEPT_LEVEL_GAP),
-        y: top + (bottom - top - storyHeight) / 2,
+        x: left + (right - left - storyWidth) / 2,
+        y: Math.min(story.position.y, sceneLaneY - storyHeight - CONCEPT_LEVEL_GAP),
       });
     }
   }
@@ -465,13 +585,23 @@ export function planCinemaDraftInsertion(
 
   const direction = inferDirection(nodes, edges, cinema, parent.id, newRole);
   const lane = roleLaneNodes(nodes, edges, cinema, parent.id, newRole);
+  const narrativeSceneLane = newRole === 'scene'
+    ? orderedSceneChildren(nodes, edges, cinema, parent.id)
+    : [];
+  const insertionSceneLane = narrativeSceneLane.length
+    ? dominantSceneLane(
+      narrativeSceneLane,
+      canonicalSceneChild(narrativeSceneLane, cinema),
+      direction,
+    )
+    : null;
   const parentSize = editorNodeDimensions(parent);
   let desired: NodePosition;
 
   if (direction === 'horizontal') {
     desired = lane.length
       ? {
-        x: lane[0].position.x,
+        x: insertionSceneLane?.coordinate ?? lane[0].position.x,
         y: newRole === 'scene'
           ? Math.max(...lane.map((node) => (
             branchBounds(nodes, edges, node.id, new Map())?.bottom
@@ -489,7 +619,7 @@ export function planCinemaDraftInsertion(
       ? {
         x: Math.max(...lane.map((node) => node.position.x + editorNodeDimensions(node).width))
           + CONCEPT_BRANCH_GAP,
-        y: lane[0].position.y,
+        y: insertionSceneLane?.coordinate ?? lane[0].position.y,
       }
       : {
         x: parent.position.x,
