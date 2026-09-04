@@ -155,6 +155,43 @@ test('keeps layers and properties usable on a phone viewport', async ({ page }) 
   await page.getByRole('button', { name: 'Open properties panel' }).click();
   await expect(page.locator('.inspector-panel')).toHaveClass(/panel-open/);
   await expect(page.getByRole('heading', { name: 'Properties' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close properties panel' }).click();
+  await expect(page.locator('.inspector-panel')).not.toHaveClass(/panel-open/);
+  await page.getByRole('button', { name: 'Open properties panel' }).click();
+  await expect(page.locator('.inspector-panel')).toHaveClass(/panel-open/);
+});
+
+test('toggles desktop Properties without clearing the current selection', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEditor(page);
+  await page.getByRole('button', { name: 'Story Premise', exact: true }).click();
+
+  const shell = page.locator('main.editor-shell');
+  const inspector = page.locator('.inspector-panel');
+  const canvas = page.getByRole('region', { name: 'Canvas workspace' });
+  const toggle = page.getByRole('button', { name: 'Toggle properties panel' });
+  const selectedStory = page.locator('.react-flow__node.selected').filter({ hasText: 'Story Premise' });
+  const canvasBefore = await canvas.boundingBox();
+
+  await expect(inspector).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(selectedStory).toHaveCount(1);
+  await inspector.getByRole('button', { name: 'Close properties panel' }).click();
+
+  await expect(shell).toHaveClass(/inspector-closed/);
+  await expect(inspector).toBeHidden();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(selectedStory).toHaveCount(1);
+  const canvasAfter = await canvas.boundingBox();
+  expect(canvasBefore).toBeTruthy();
+  expect(canvasAfter).toBeTruthy();
+  expect(canvasAfter!.width).toBeGreaterThan(canvasBefore!.width + 300);
+
+  await toggle.click();
+  await expect(shell).not.toHaveClass(/inspector-closed/);
+  await expect(inspector).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(selectedStory).toHaveCount(1);
 });
 
 test('edits rich concept text directly with formatting, commit, cancel, undo, and persistence', async ({ page }) => {

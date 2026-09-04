@@ -702,6 +702,7 @@ function EditorInner() {
   const [backupOpen, setBackupOpen] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [workspaceView, setWorkspaceView] = useState<EditorWorkspaceView>('canvas');
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [renamingLayerId, setRenamingLayerId] = useState<string | null>(null);
@@ -3140,7 +3141,7 @@ function EditorInner() {
         <ProposedNodeIdsContext.Provider value={previewNodeIds}>
           <NodeActionContext.Provider value={nodeActionValue}>
         <main
-        className="editor-shell cinema-outline-active"
+        className={`editor-shell cinema-outline-active ${inspectorOpen ? '' : 'inspector-closed'}`}
         aria-label={APP_CONFIG.editorAriaLabel}
         aria-busy={!hydrated}
         data-ready={hydrated ? 'true' : 'false'}
@@ -3185,6 +3186,15 @@ function EditorInner() {
               onClick={() => setMobilePanel((current) => current === 'layers' ? null : 'layers')}
             >
               <Layers3 size={16} />
+            </button>
+            <button
+              type="button"
+              className="icon-button desktop-inspector-button"
+              aria-label="Toggle properties panel"
+              aria-expanded={inspectorOpen}
+              onClick={() => setInspectorOpen((current) => !current)}
+            >
+              <SlidersHorizontal size={16} />
             </button>
             <button
               type="button"
@@ -3741,7 +3751,15 @@ function EditorInner() {
                   : selectedNode
                     ? <span className="selection-kind">{selectedCinemaDetail?.kind ?? selectedNode.data.kind}</span>
                     : null}
-              <button type="button" className="icon-button panel-close-button" aria-label="Close properties panel" onClick={() => setMobilePanel(null)}><X size={16} /></button>
+              <button
+                type="button"
+                className="icon-button panel-close-button inspector-close-button"
+                aria-label="Close properties panel"
+                onClick={() => {
+                  if (window.matchMedia('(max-width: 1020px)').matches) setMobilePanel(null);
+                  else setInspectorOpen(false);
+                }}
+              ><X size={16} /></button>
             </div>
           </div>
           {selectedVectorPath ? (
