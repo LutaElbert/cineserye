@@ -16,6 +16,7 @@ export type CinemaConnectionDirection = 'horizontal' | 'vertical';
 export type CinemaDraftPlacement = {
   position: NodePosition;
   positions: Map<string, NodePosition>;
+  edgeDirections: Map<string, CinemaConnectionDirection>;
   direction: CinemaConnectionDirection;
   sourceHandle?: 'bottom';
   targetHandle?: 'top';
@@ -24,6 +25,7 @@ export type CinemaDraftPlacement = {
 export type CinemaWorkspaceLayout = {
   handled: boolean;
   positions: Map<string, NodePosition>;
+  edgeDirections: Map<string, CinemaConnectionDirection>;
 };
 
 function role(node: EditorNode | undefined) {
@@ -168,6 +170,36 @@ function orderedSceneChildren(
     ));
 }
 
+function canonicalSceneChild(
+  scenes: EditorNode[],
+  cinema: CinemaProjectData | undefined,
+) {
+  const firstProductionNodeId = cinema?.sceneOrder
+    .map((sceneId) => cinema.scenes[sceneId]?.nodeId)
+    .find((nodeId) => scenes.some((scene) => scene.id === nodeId));
+  if (firstProductionNodeId) {
+    return scenes.find((scene) => scene.id === firstProductionNodeId) ?? scenes[0];
+  }
+  return [...scenes].sort((left, right) => (
+    numberedOrder(left, 'scene') - numberedOrder(right, 'scene')
+    || scenes.indexOf(left) - scenes.indexOf(right)
+  ))[0];
+}
+
+function scenesInNarrativeLayoutOrder(
+  scenes: EditorNode[],
+  cinema: CinemaProjectData | undefined,
+) {
+  if (cinema?.sceneOrder.length) return scenes;
+  return [...scenes].sort((left, right) => {
+    const leftNumber = numberedOrder(left, 'scene');
+    const rightNumber = numberedOrder(right, 'scene');
+    return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+      ? leftNumber - rightNumber
+      : scenes.indexOf(left) - scenes.indexOf(right);
+  });
+}
+
 function orderedProductionChildren(
   nodes: EditorNode[],
   edges: EditorEdge[],
@@ -250,12 +282,21 @@ function roleLaneNodes(
 function inferDirection(
   nodes: EditorNode[],
   edges: EditorEdge[],
+  cinema: CinemaProjectData | undefined,
   parentId: string,
   expectedRole: CinemaDraftRole,
 ) {
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const outgoing = edges.filter((edge) => edge.source === parentId && isSemanticParentEdge(edge));
-  const sameRole = outgoing.find((edge) => role(byId.get(edge.target)) === expectedRole);
+  const orderedTargets = expectedRole === 'scene'
+    ? orderedSceneChildren(nodes, edges, cinema, parentId)
+    : orderedProductionChildren(nodes, edges, cinema, parentId)
+      .filter((node) => role(node) === expectedRole);
+  const canonicalTargetId = expectedRole === 'scene'
+    ? canonicalSceneChild(orderedTargets, cinema)?.id
+    : orderedTargets[0]?.id;
+  const sameRole = outgoing.find((edge) => edge.target === canonicalTargetId)
+    ?? outgoing.find((edge) => role(byId.get(edge.target)) === expectedRole);
   return edgeDirection(sameRole ?? outgoing[0]);
 }
 
@@ -294,6 +335,7 @@ export function planCinemaWorkspaceReorganization(
   cinema?: CinemaProjectData,
 ): CinemaWorkspaceLayout {
   const positions = new Map<string, NodePosition>();
+  const edgeDirections = new Map<string, CinemaConnectionDirection>();
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const fixedIds = cinemaHostIds(cinema);
   const stories = nodes.filter((node) => !node.hidden && role(node) === 'story');
@@ -314,15 +356,32 @@ export function planCinemaWorkspaceReorganization(
     const scenes = orderedSceneChildren(nodes, edges, cinema, story.id);
     if (!scenes.length) continue;
     handled = true;
-    const direction = inferDirection(nodes, edges, story.id, 'scene');
+    const canonicalScene = canonicalSceneChild(scenes, cinema);
+    const layoutScenes = scenesInNarrativeLayoutOrder(scenes, cinema);
+    const canonicalEdge = edges.find((edge) => (
+      edge.source === story.id
+      && edge.target === canonicalScene.id
+      && isStructuralEdge(nodes, edge)
+    ));
+    const direction = edgeDirection(canonicalEdge);
+    const sceneIds = new Set(scenes.map((scene) => scene.id));
+    for (const edge of edges) {
+      if (edge.source !== story.id || !sceneIds.has(edge.target) || !isStructuralEdge(nodes, edge)) continue;
+      const target = byId.get(edge.target);
+      if (!target || !movable(story) || !movable(target)) continue;
+      const alreadyCanonical = direction === 'vertical'
+        ? edge.sourceHandle === 'bottom' && edge.targetHandle === 'top'
+        : edge.sourceHandle == null && edge.targetHandle == null;
+      if (!alreadyCanonical) edgeDirections.set(edge.id, direction);
+    }
 
     // Keep explicit bottom -> top legacy trees on their established axis. Typed
     // insertion already extends these horizontally and must not silently rotate them.
     if (direction === 'vertical') continue;
 
-    const sceneLaneX = scenes[0].position.x;
-    let cursorTop = scenes[0].position.y;
-    for (const scene of scenes) {
+    const sceneLaneX = canonicalScene.position.x;
+    let cursorTop = canonicalScene.position.y;
+    for (const scene of layoutScenes) {
       const branchIds = semanticDescendantIds(nodes, edges, scene.id);
       const branchHasAnchor = [...branchIds].some((id) => {
         const node = byId.get(id);
@@ -369,7 +428,7 @@ export function planCinemaWorkspaceReorganization(
     }
 
     if (movable(story)) {
-      const sceneRectangles = scenes.map((scene) => positionedRectangle(scene, positions));
+      const sceneRectangles = layoutScenes.map((scene) => positionedRectangle(scene, positions));
       const top = Math.min(...sceneRectangles.map((rectangle) => rectangle.y));
       const bottom = Math.max(...sceneRectangles.map((rectangle) => rectangle.y + rectangle.height));
       const storyHeight = editorNodeDimensions(story).height;
@@ -385,7 +444,7 @@ export function planCinemaWorkspaceReorganization(
     const node = byId.get(id);
     if (!node || (position.x === node.position.x && position.y === node.position.y)) positions.delete(id);
   }
-  return { handled, positions };
+  return { handled, positions, edgeDirections };
 }
 
 /**
@@ -404,7 +463,7 @@ export function planCinemaDraftInsertion(
   const parent = nodes.find((node) => node.id === insertion.parentId);
   if (!parent) return null;
 
-  const direction = inferDirection(nodes, edges, parent.id, newRole);
+  const direction = inferDirection(nodes, edges, cinema, parent.id, newRole);
   const lane = roleLaneNodes(nodes, edges, cinema, parent.id, newRole);
   const parentSize = editorNodeDimensions(parent);
   let desired: NodePosition;
@@ -527,6 +586,13 @@ export function planCinemaDraftInsertion(
 
   const finalPosition = positions.get(newNode.id) ?? position;
   return direction === 'vertical'
-    ? { position: finalPosition, positions, direction, sourceHandle: 'bottom', targetHandle: 'top' }
-    : { position: finalPosition, positions, direction };
+    ? {
+      position: finalPosition,
+      positions,
+      edgeDirections: reorganization.edgeDirections,
+      direction,
+      sourceHandle: 'bottom',
+      targetHandle: 'top',
+    }
+    : { position: finalPosition, positions, edgeDirections: reorganization.edgeDirections, direction };
 }

@@ -119,6 +119,7 @@ import {
 import {
   planCinemaDraftInsertion,
   planCinemaWorkspaceReorganization,
+  type CinemaConnectionDirection,
 } from './cinema-workspace-placement';
 import {
   CINEMA_HIERARCHY_BUS_EDGE_TYPE,
@@ -523,6 +524,19 @@ const nodeTypes = {
 const edgeTypes = {
   [CINEMA_HIERARCHY_BUS_EDGE_TYPE]: CinemaHierarchyBusEdge,
 };
+
+function withCinemaConnectionDirection(
+  edge: EditorEdge,
+  direction: CinemaConnectionDirection,
+): EditorEdge {
+  if (direction === 'vertical') {
+    return { ...edge, sourceHandle: 'bottom', targetHandle: 'top', type: 'smoothstep' };
+  }
+  const next = { ...edge, type: 'smoothstep' };
+  delete next.sourceHandle;
+  delete next.targetHandle;
+  return next;
+}
 
 function cloneSnapshot(
   nodes: EditorNode[],
@@ -2035,7 +2049,7 @@ function EditorInner() {
     const positions = cinemaLayout.handled
       ? cinemaLayout.positions
       : tidyGraphPositions(nodesRef.current, edgesRef.current);
-    if (!positions.size) {
+    if (!positions.size && !cinemaLayout.edgeDirections.size) {
       announce(cinemaLayout.handled ? 'Project hierarchy is already organized.' : 'Diagram is already organized.');
       return;
     }
@@ -2043,6 +2057,12 @@ function EditorInner() {
     setNodes((current) => current.map((node) => node.data.locked || !positions.has(node.id)
       ? node
       : { ...node, position: positions.get(node.id)! }));
+    if (cinemaLayout.edgeDirections.size) {
+      setEdges((current) => current.map((edge) => {
+        const direction = cinemaLayout.edgeDirections.get(edge.id);
+        return direction ? withCinemaConnectionDirection(edge, direction) : edge;
+      }));
+    }
     window.setTimeout(() => fitView({ duration: 320, padding: 0.22 }), 0);
     announce(cinemaLayout.handled ? 'Project hierarchy reorganized.' : 'Diagram layout tidied.', 'success');
   }, [announce, fitView, recordHistory]);
@@ -2198,6 +2218,18 @@ function EditorInner() {
       if (moved && (moved.x !== node.position.x || moved.y !== node.position.y)) {
         commands.push({ type: 'update-node', id: node.id, patch: { position: moved } });
       }
+    }
+    for (const [edgeId, direction] of semanticPlacement?.edgeDirections ?? []) {
+      if (!edgesRef.current.some((edge) => edge.id === edgeId)) continue;
+      commands.push({
+        type: 'update-edge',
+        id: edgeId,
+        patch: {
+          sourceHandle: direction === 'vertical' ? 'bottom' : null,
+          targetHandle: direction === 'vertical' ? 'top' : null,
+          type: 'smoothstep',
+        },
+      });
     }
     if (hierarchyLayout) {
       const nodeById = new Map(nodesRef.current.map((node) => [node.id, node]));

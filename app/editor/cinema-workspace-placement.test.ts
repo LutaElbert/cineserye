@@ -230,6 +230,26 @@ describe('parent-aware cinema insertion', () => {
     expect(placement.direction).toBe('horizontal');
   });
 
+  it('normalizes existing mixed Scene siblings while inserting the next Scene', () => {
+    const scene02 = numberedScene('scene-02', 2, 40, 250);
+    const verticalScene02 = {
+      ...hierarchyEdge('story-scene-02', 'story-premise', scene02.id),
+      sourceHandle: 'bottom',
+      targetHandle: 'top',
+    };
+    const placement = planCinemaDraftInsertion(
+      [...initialDocument.nodes, scene02],
+      [verticalScene02, ...initialDocument.edges],
+      undefined,
+      { parentId: 'story-premise' },
+      'scene',
+      numberedScene('scene-03', 3, 0, 0),
+    )!;
+
+    expect(placement.direction).toBe('horizontal');
+    expect(placement.edgeDirections.get(verticalScene02.id)).toBe('horizontal');
+  });
+
   it('returns null when the semantic parent is unavailable', () => {
     expect(planCinemaDraftInsertion(
       initialDocument.nodes, initialDocument.edges, undefined,
@@ -239,6 +259,45 @@ describe('parent-aware cinema insertion', () => {
 });
 
 describe('cinema workspace reorganization', () => {
+  it('uses Scene 01 as the canonical axis and repairs a mixed-direction five-scene hierarchy', () => {
+    const scenes = [
+      numberedScene('scene-02', 2, 40, 250),
+      numberedScene('scene-03', 3, 220, 390),
+      numberedScene('scene-04', 4, 700, 390),
+      numberedScene('scene-05', 5, 700, 500),
+    ];
+    const nodes = [...initialDocument.nodes, ...scenes];
+    const mixedEdges: EditorEdge[] = [
+      { ...hierarchyEdge('story-scene-02', 'story-premise', 'scene-02'), sourceHandle: 'bottom', targetHandle: 'top' },
+      { ...hierarchyEdge('story-scene-03', 'story-premise', 'scene-03'), sourceHandle: 'bottom', targetHandle: 'top' },
+      ...initialDocument.edges,
+      hierarchyEdge('story-scene-04', 'story-premise', 'scene-04'),
+      { ...hierarchyEdge('story-scene-05', 'story-premise', 'scene-05'), sourceHandle: 'bottom', targetHandle: 'top' },
+      {
+        id: 'reference-distraction', source: 'story-premise', target: 'shot-01',
+        sourceHandle: 'bottom', targetHandle: 'top',
+        data: { label: '', kind: 'default', relationship: 'reference' },
+      },
+    ];
+
+    const layout = planCinemaWorkspaceReorganization(nodes, mixedEdges);
+    const arranged = withPositions(nodes, layout.positions);
+    const arrangedScenes = ['scene-01', 'scene-02', 'scene-03', 'scene-04', 'scene-05']
+      .map((id) => arranged.find((node) => node.id === id)!);
+
+    expect(layout.handled).toBe(true);
+    expect([...layout.edgeDirections]).toEqual([
+      ['story-scene-02', 'horizontal'],
+      ['story-scene-03', 'horizontal'],
+      ['story-scene-05', 'horizontal'],
+    ]);
+    expect(layout.edgeDirections.has('reference-distraction')).toBe(false);
+    expect(new Set(arrangedScenes.map((scene) => scene.position.x))).toEqual(new Set([450]));
+    expect(arrangedScenes.map((scene) => scene.position.y)).toEqual(
+      [...arrangedScenes.map((scene) => scene.position.y)].sort((left, right) => left - right),
+    );
+  });
+
   it('repairs a disordered five-scene lane and centers Story against the scene cards', () => {
     const scenes = [
       numberedScene('scene-02', 2, 640, 740),
@@ -297,6 +356,23 @@ describe('cinema workspace reorganization', () => {
     const verticalLayout = planCinemaWorkspaceReorganization(lockedNodes, verticalEdges);
     expect(verticalLayout.handled).toBe(true);
     expect(verticalLayout.positions.size).toBe(0);
+
+    const mixedVerticalEdges = horizontalEdges.map((edge) => edge.target === 'scene-01'
+      ? { ...edge, sourceHandle: 'bottom', targetHandle: 'top' }
+      : edge);
+    const mixedVerticalLayout = planCinemaWorkspaceReorganization(lockedNodes, mixedVerticalEdges);
+    expect(mixedVerticalLayout.positions.size).toBe(0);
+    expect(mixedVerticalLayout.edgeDirections.get('story-scene-02')).toBe('vertical');
+
+    const lockedStory = {
+      ...lockedNodes[0],
+      data: { ...lockedNodes[0].data, locked: true },
+    };
+    const protectedLayout = planCinemaWorkspaceReorganization(
+      lockedNodes.map((node) => node.id === lockedStory.id ? lockedStory : node),
+      mixedVerticalEdges,
+    );
+    expect(protectedLayout.edgeDirections.size).toBe(0);
   });
 
   it('recognizes legacy hierarchy edges without letting reference or sequence links participate', () => {

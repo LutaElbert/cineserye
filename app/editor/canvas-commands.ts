@@ -181,7 +181,7 @@ export function applyCanvasCommandProposal(
           throw new Error('Connector routing type is invalid.');
         }
         for (const handle of [patch.sourceHandle, patch.targetHandle]) {
-          if (handle !== undefined && handle !== 'bottom' && handle !== 'top' && handle !== 'left' && handle !== 'right') {
+          if (handle !== undefined && handle !== null && handle !== 'bottom' && handle !== 'top' && handle !== 'left' && handle !== 'right') {
             throw new Error('Connector handle is invalid.');
           }
         }
@@ -191,13 +191,30 @@ export function applyCanvasCommandProposal(
             ...(current.data ?? { label: '', kind: 'default' }),
             relationship: dataPatch.relationship as NonNullable<EditorEdge['data']>['relationship'],
           };
-        next.edges[index] = {
+        let updatedEdge: EditorEdge = {
           ...current,
-          ...(patch.sourceHandle === undefined ? {} : { sourceHandle: String(patch.sourceHandle) }),
-          ...(patch.targetHandle === undefined ? {} : { targetHandle: String(patch.targetHandle) }),
           ...(patch.type === undefined ? {} : { type: patch.type as EditorEdge['type'] }),
           ...(nextData === undefined ? {} : { data: nextData }),
         };
+        if (patch.sourceHandle !== undefined) {
+          if (patch.sourceHandle === null) {
+            updatedEdge = Object.fromEntries(
+              Object.entries(updatedEdge).filter(([key]) => key !== 'sourceHandle'),
+            ) as EditorEdge;
+          } else {
+            updatedEdge.sourceHandle = String(patch.sourceHandle);
+          }
+        }
+        if (patch.targetHandle !== undefined) {
+          if (patch.targetHandle === null) {
+            updatedEdge = Object.fromEntries(
+              Object.entries(updatedEdge).filter(([key]) => key !== 'targetHandle'),
+            ) as EditorEdge;
+          } else {
+            updatedEdge.targetHandle = String(patch.targetHandle);
+          }
+        }
+        next.edges[index] = updatedEdge;
         affectedNodeIds.add(current.source);
         affectedNodeIds.add(current.target);
         affectedEdgeIds.add(id);

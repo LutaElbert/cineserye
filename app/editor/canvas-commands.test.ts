@@ -141,6 +141,26 @@ describe('validated canvas command boundary', () => {
     expect(result.affectedEdgeIds).toEqual([source.edges[0].id]);
   });
 
+  it('clears explicit connector handles when normalizing a hierarchy back to horizontal', () => {
+    const source = structuredClone(initialDocument);
+    source.edges[0].sourceHandle = 'bottom';
+    source.edges[0].targetHandle = 'top';
+    const result = applyCanvasCommandProposal(source, {
+      version: 1,
+      proposalId: 'clear-hierarchy-handles',
+      summary: 'Use the default horizontal handles',
+      commands: [{
+        type: 'update-edge',
+        id: source.edges[0].id,
+        patch: { sourceHandle: null, targetHandle: null, type: 'smoothstep' },
+      }],
+    });
+
+    expect(result.document.edges[0].sourceHandle).toBeUndefined();
+    expect(result.document.edges[0].targetHandle).toBeUndefined();
+    expect(result.document.edges[0].type).toBe('smoothstep');
+  });
+
   it('accepts explicit attachment metadata for non-hierarchy children', () => {
     const result = applyCanvasCommandProposal(initialDocument, {
       version: 1,

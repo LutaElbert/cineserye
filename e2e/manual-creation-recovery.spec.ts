@@ -399,6 +399,116 @@ test('routes direct Story to Scene siblings through one derived hierarchy spine'
   await expect(page.getByLabel('Connector from Story Premise to Scene 03')).toHaveAttribute('data-cinema-trunk-x', firstTrunk!);
 });
 
+test('sparkle repairs mixed Story connector directions and scattered Scene positions atomically', async ({ page }) => {
+  await openEditor(page);
+  for (let sceneNumber = 1; sceneNumber < 5; sceneNumber += 1) {
+    await page.getByRole('button', { name: `Scene ${String(sceneNumber).padStart(2, '0')}`, exact: true }).click();
+    await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+    await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  }
+  await waitForSaved(page);
+
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open('cineserye-local');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction('documents', 'readwrite');
+      const store = transaction.objectStore('documents');
+      const stored = store.get('current');
+      stored.onerror = () => reject(stored.error);
+      stored.onsuccess = () => {
+        const document = stored.result as {
+          nodes: Array<{ id: string; position: { x: number; y: number }; data: { name: string } }>;
+          edges: Array<{ source: string; target: string; sourceHandle?: string; targetHandle?: string }>;
+        };
+        const nodeByName = new Map(document.nodes.map((node) => [node.data.name, node]));
+        const storyId = nodeByName.get('Story Premise')!.id;
+        const scattered = new Map([
+          ['Story Premise', { x: 260, y: 140 }],
+          ['Scene 01', { x: 490, y: 140 }],
+          ['Scene 02', { x: 40, y: 250 }],
+          ['Scene 03', { x: 220, y: 390 }],
+          ['Scene 04', { x: 490, y: 390 }],
+          ['Scene 05', { x: 490, y: 500 }],
+        ]);
+        for (const node of document.nodes) node.position = scattered.get(node.data.name) ?? node.position;
+        const sceneEdges = document.edges.filter((edge) => edge.source === storyId && (
+          nodeByName.get('Scene 01')?.id === edge.target
+          || nodeByName.get('Scene 02')?.id === edge.target
+          || nodeByName.get('Scene 03')?.id === edge.target
+          || nodeByName.get('Scene 04')?.id === edge.target
+          || nodeByName.get('Scene 05')?.id === edge.target
+        ));
+        for (const edge of sceneEdges) {
+          const targetName = document.nodes.find((node) => node.id === edge.target)!.data.name;
+          if (targetName === 'Scene 02' || targetName === 'Scene 03' || targetName === 'Scene 05') {
+            edge.sourceHandle = 'bottom';
+            edge.targetHandle = 'top';
+          } else {
+            delete edge.sourceHandle;
+            delete edge.targetHandle;
+          }
+        }
+        document.edges = [
+          ...sceneEdges.filter((edge) => edge.target === nodeByName.get('Scene 02')!.id),
+          ...document.edges.filter((edge) => !sceneEdges.includes(edge)),
+          ...sceneEdges.filter((edge) => edge.target !== nodeByName.get('Scene 02')!.id),
+        ];
+        store.put(document);
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    };
+  }));
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+
+  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  const modelPosition = async (name: string) => {
+    await outline.getByRole('button', { name, exact: true }).click();
+    const inspector = page.locator('.inspector-panel');
+    return {
+      x: Number(await inspector.getByRole('spinbutton', { name: 'X', exact: true }).inputValue()),
+      y: Number(await inspector.getByRole('spinbutton', { name: 'Y', exact: true }).inputValue()),
+    };
+  };
+  expect(await modelPosition('Scene 02')).toEqual({ x: 40, y: 250 });
+  await page.getByRole('button', { name: 'Reorganize project layout' }).click();
+  await expect(page.getByText('Project hierarchy reorganized.')).toBeVisible();
+
+  const arrangedScenes = [];
+  for (let sceneNumber = 1; sceneNumber <= 5; sceneNumber += 1) {
+    arrangedScenes.push(await modelPosition(`Scene ${String(sceneNumber).padStart(2, '0')}`));
+  }
+  expect(new Set(arrangedScenes.map((position) => position.x)).size).toBe(1);
+  expect(arrangedScenes.map((position) => position.y)).toEqual(
+    [...arrangedScenes.map((position) => position.y)].sort((left, right) => left - right),
+  );
+  const connectors = Array.from({ length: 5 }, (_, index) => page.getByLabel(
+    `Connector from Story Premise to Scene ${String(index + 1).padStart(2, '0')}`,
+  ));
+  const sharedTrunk = await connectors[0].getAttribute('data-cinema-trunk-x');
+  expect(sharedTrunk).toBeTruthy();
+  for (const connector of connectors) {
+    await expect(connector).toHaveAttribute('data-cinema-route', 'story-scene-bus');
+    await expect(connector).toHaveAttribute('data-cinema-trunk-x', sharedTrunk!);
+  }
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  expect(await modelPosition('Scene 02')).toEqual({ x: 40, y: 250 });
+  await expect(page.getByLabel('Connector from Story Premise to Scene 02')).not.toHaveAttribute('data-cinema-route', 'story-scene-bus');
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  expect((await modelPosition('Scene 02')).x).toBe(arrangedScenes[1].x);
+  await expect(page.getByLabel('Connector from Story Premise to Scene 02')).toHaveAttribute('data-cinema-route', 'story-scene-bus');
+
+  await waitForSaved(page);
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Scene 05')).toHaveAttribute('data-cinema-trunk-x', sharedTrunk!);
+});
+
 test('reorganizes a disordered draft hierarchy by narrative order as one undoable action', async ({ page }) => {
   await openEditor(page);
   const outline = page.getByRole('navigation', { name: 'Project outline' });
