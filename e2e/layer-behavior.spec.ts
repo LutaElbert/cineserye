@@ -496,6 +496,49 @@ test('locked layers reject canvas editing, renaming, and new connections', async
   await expect(page.locator('.react-flow__edge')).toHaveCount(edgeCount);
 });
 
+test('locked layers remain selectable from the canvas so they can be inspected and unlocked', async ({ page }) => {
+  await openEditor(page);
+  const scene = canvasNode(page, 'Scene 01');
+  const shot = canvasNode(page, 'Shot 01');
+
+  await scene.click();
+  await shot.click({ modifiers: ['Meta'] });
+  await page.getByRole('button', { name: 'Lock selected layers', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Unlock selected layers', exact: true })).toBeVisible();
+
+  // A plain click on one member of a locked multi-selection must isolate it.
+  // Otherwise the user cannot reach its inspector to unlock it.
+  await scene.click();
+  await expect(scene).toHaveClass(/selected/);
+  await expect(shot).not.toHaveClass(/selected/);
+  await expect(page.locator('.inspector-panel').getByLabel('Name')).toHaveValue('Scene 01');
+  await expect(page.locator('.inspector-panel').getByLabel('Lock layer')).toBeChecked();
+
+  // Clearing and selecting a locked layer again must work from the canvas too.
+  await page.locator('.react-flow__pane').click({ position: { x: 24, y: 24 } });
+  await expect(scene).not.toHaveClass(/selected/);
+  await expect(shot).not.toHaveClass(/selected/);
+
+  await shot.click();
+  await expect(shot).toHaveClass(/selected/);
+  await expect(page.locator('.inspector-panel').getByLabel('Name')).toHaveValue('Shot 01');
+  await expect(page.locator('.inspector-panel').getByLabel('Lock layer')).toBeChecked();
+  const lockedTransform = (await shot.getAttribute('style'))?.match(/transform:\s*[^;]+/)?.[0];
+  const lockedBox = await shot.boundingBox();
+  expect(lockedTransform).toBeTruthy();
+  expect(lockedBox).toBeTruthy();
+  await page.mouse.move(lockedBox!.x + lockedBox!.width / 2, lockedBox!.y + lockedBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(lockedBox!.x + lockedBox!.width / 2 + 80, lockedBox!.y + lockedBox!.height / 2 + 40, { steps: 8 });
+  await page.mouse.up();
+  expect(await shot.getAttribute('style')).toContain(lockedTransform!);
+
+  await scene.click({ modifiers: ['Meta'] });
+  await expect(page.getByRole('button', { name: 'Unlock selected layers', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Unlock selected layers', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Lock selected layers', exact: true })).toBeVisible();
+});
+
 test('connection rules reject self and duplicate edges but allow reverse cycles', async ({ page }) => {
   await openEditor(page);
   const originalEdgeCount = await page.locator('.react-flow__edge').count();

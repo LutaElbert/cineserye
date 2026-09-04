@@ -3522,6 +3522,13 @@ function EditorInner() {
             edgeTypes={edgeTypes}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
+            onNodeClick={(event, node) => {
+              if (mockProposalPreview || toolMode !== 'select' || temporaryPanActive) return;
+              if (selectedNodeCount > 1 && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+                selectNode(node.id);
+                layerSelectionAnchorRef.current = node.id;
+              }
+            }}
             onConnect={handleConnect}
             onReconnect={handleReconnect}
             onBeforeDelete={handleBeforeDelete}
