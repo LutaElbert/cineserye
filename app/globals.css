@@ -469,11 +469,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   padding: 0 7px 0 1px;
   text-align: start;
 }
-.outline-summary-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 720; }
+.outline-summary-main > span:not(.outline-status-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 720; }
 .outline-project-row { border-block-end: 1px solid #eceef2; border-radius: 0; color: #343740; }
 .outline-project-children { margin-inline-start: 7px; padding-inline-start: 5px; border-inline-start: 1px solid #dfe1e7; }
 .outline-scene-row { grid-template-columns: 25px minmax(0, 1fr) auto; margin-block: 7px 5px; background: #f8f8fa; }
-.outline-scene-row .outline-summary-main span { font-weight: 690; }
+.outline-scene-row .outline-summary-main > span:not(.outline-status-badge) { font-weight: 690; }
+.outline-scene-end { position: relative; display: grid; min-inline-size: 58px; min-block-size: 38px; align-items: center; }
 .outline-scene-metrics {
   display: grid;
   gap: 1px;
@@ -483,6 +484,24 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   font-size: 7px;
   font-variant-numeric: tabular-nums;
 }
+.outline-scene-actions {
+  position: absolute;
+  inset: 0 4px 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  inline-size: 52px;
+  opacity: 0;
+  pointer-events: none;
+}
+.outline-scene-actions .layer-control { inline-size: 24px; block-size: 26px; }
+.outline-scene-actions .layer-control:disabled { opacity: .3; cursor: not-allowed; }
+.outline-scene-row:hover .outline-scene-metrics,
+.outline-scene-row.active .outline-scene-metrics,
+.outline-scene-row:focus-within .outline-scene-metrics { opacity: 0; }
+.outline-scene-row:hover .outline-scene-actions,
+.outline-scene-row.active .outline-scene-actions,
+.outline-scene-row:focus-within .outline-scene-actions { opacity: 1; pointer-events: auto; }
 .outline-scene-metrics span:last-child { color: #585c65; font-size: 8px; font-weight: 720; }
 .outline-scene-children { margin-inline-start: 7px; padding-inline-start: 6px; border-inline-start: 1px solid #e5e6eb; }
 .outline-group { margin-block: 3px; }
@@ -530,6 +549,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .outline-item-row.active .outline-item-name { font-weight: 700; }
 .outline-item-metric { color: #8a8e97; font-size: 7px; font-weight: 690; font-variant-numeric: tabular-nums; }
 .outline-status-badge { max-inline-size: 72px; overflow: hidden; padding: 2px 5px; border: 1px solid #d8dbe2; border-radius: 999px; background: #f5f6f8; color: #686c76; text-overflow: ellipsis; white-space: nowrap; font-size: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.outline-summary-main > .outline-status-badge { font-size: 6px; font-weight: 800; }
 .outline-status-badge.status-draft, .outline-status-badge.status-proposed { border-color: #d8d5ff; background: #f5f4ff; color: var(--accent); }
 .outline-status-badge.status-production { border-color: #cbe8d9; background: #f0faf5; color: #24785c; }
 .outline-status-badge.status-attention { border-color: #ead7b1; background: #fff9ea; color: #8a641a; }
@@ -537,7 +557,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .outline-item-actions .layer-control { inline-size: 24px; block-size: 26px; }
 .outline-item-actions .layer-control:disabled { opacity: .3; cursor: not-allowed; }
 .outline-empty { margin: 18px 12px; color: var(--muted); font-size: 10px; text-align: center; }
-.outline-scene-empty { margin: 7px 8px 11px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.outline-scene-empty { display: grid; gap: 6px; margin: 7px 8px 11px; color: var(--muted); font-size: 8px; line-height: 1.45; }
+.outline-scene-empty button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-block-size: 28px; padding: 5px 8px; border: 1px dashed #d5d2ff; border-radius: 8px; background: #faf9ff; color: var(--accent); font: inherit; font-size: 8px; font-weight: 760; cursor: pointer; }
+.outline-scene-empty button:hover:not(:disabled), .outline-scene-empty button:focus-visible { border-style: solid; background: var(--accent-soft); }
+.outline-scene-empty button:disabled { border-color: #e1e2e7; background: #f7f7f8; color: #a2a5ad; cursor: not-allowed; }
 .outline-attention { margin-block-start: 10px; padding-block-start: 6px; border-block-start: 1px solid var(--line); }
 .layer-renaming input {
   min-inline-size: 0;

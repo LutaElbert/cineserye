@@ -7,9 +7,11 @@ import {
   Eye,
   EyeOff,
   Film,
+  ListVideo,
   Lock,
   MapPin,
   Package,
+  Plus,
   Sparkles,
   StickyNote,
   Unlock,
@@ -34,6 +36,7 @@ type UnifiedProjectOutlineProps = {
   onToggleBranch: (id: UnifiedOutlineBranchId) => void;
   onSelectNode: (id: string, additive?: boolean) => void;
   onFocusNodes: (ids: string[]) => void;
+  onAddToScene: (id: string) => void;
   onToggleVisibility: (id: string) => void;
   onToggleLock: (id: string) => void;
 };
@@ -42,7 +45,7 @@ function groupIcon(id: UnifiedOutlineGroupId) {
   if (id === 'planning') return <Bot size={12} />;
   if (id === 'characters') return <UserRound size={12} />;
   if (id === 'locations') return <MapPin size={12} />;
-  if (id === 'shots') return <Clapperboard size={12} />;
+  if (id === 'shots') return <ListVideo size={12} />;
   if (id === 'visual-elements') return <Sparkles size={12} />;
   if (id === 'notes') return <StickyNote size={12} />;
   return <Package size={12} />;
@@ -124,13 +127,18 @@ function SceneBranch({
   onToggleBranch,
   onSelectNode,
   onFocusNodes,
+  onAddToScene,
   onToggleVisibility,
   onToggleLock,
 }: Omit<UnifiedProjectOutlineProps, 'model'> & { scene: UnifiedOutlineScene }) {
   const statusId = useId();
   const sceneBranchId = `scene:${scene.item.nodeId}`;
   const sceneExpanded = searchActive || !collapsedBranches.has(sceneBranchId);
-  return <>
+  const secondaryMetric = scene.expectedCostLabel.trim().toLocaleLowerCase()
+    === scene.item.statusLabel.trim().toLocaleLowerCase()
+    ? null
+    : scene.expectedCostLabel;
+  return <section className="outline-scene-branch" aria-label={`${scene.item.title} outline`}>
     <div className={`outline-summary-row outline-scene-row ${selectedNodeId === scene.item.nodeId ? 'active' : ''}`}>
       <button
         type="button"
@@ -146,10 +154,32 @@ function SceneBranch({
         <span>{scene.item.title}</span>
         <span id={statusId} className={statusClass(scene.item)}>{scene.item.statusLabel}</span>
       </button>
-      <button type="button" className="outline-scene-metrics" aria-label={`Focus ${scene.item.title} nodes`} onClick={() => onFocusNodes(scene.nodeIds)}>
-        <span>{scene.shotCount} {scene.shotCount === 1 ? 'shot' : 'shots'} · {scene.targetDurationSeconds}s</span>
-        <span>{scene.expectedCostLabel}</span>
-      </button>
+      <div className="outline-scene-end">
+        <button type="button" className="outline-scene-metrics" aria-label={`Focus ${scene.item.title} nodes`} onClick={() => onFocusNodes(scene.nodeIds)}>
+          <span>{scene.shotCount} {scene.shotCount === 1 ? 'shot' : 'shots'} · {scene.targetDurationSeconds}s</span>
+          {secondaryMetric ? <span>{secondaryMetric}</span> : null}
+        </button>
+        <div className="outline-scene-actions" aria-label={`${scene.item.title} controls`}>
+          <button
+            type="button"
+            className="layer-control"
+            aria-label={`${scene.item.hidden ? 'Show' : 'Hide'} ${scene.item.title}`}
+            disabled={proposalPreview}
+            onClick={() => onToggleVisibility(scene.item.nodeId)}
+          >
+            {scene.item.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+          </button>
+          <button
+            type="button"
+            className="layer-control"
+            aria-label={`${scene.item.locked ? 'Unlock' : 'Lock'} ${scene.item.title}`}
+            disabled={proposalPreview}
+            onClick={() => onToggleLock(scene.item.nodeId)}
+          >
+            {scene.item.locked ? <Lock size={12} /> : <Unlock size={12} />}
+          </button>
+        </div>
+      </div>
     </div>
 
     {sceneExpanded ? (
@@ -194,10 +224,22 @@ function SceneBranch({
             </section>
           );
         })}
-        {!scene.groups.length ? <p className="outline-scene-empty">Add a shot, character, location, prop, visual element, or note.</p> : null}
+        {!scene.groups.length ? (
+          <div className="outline-scene-empty">
+            <span>No shots or production elements yet.</span>
+            <button
+              type="button"
+              aria-label={`Add shot or asset to ${scene.item.title}`}
+              disabled={proposalPreview || scene.item.locked}
+              onClick={() => onAddToScene(scene.item.nodeId)}
+            >
+              <Plus size={11} aria-hidden="true" /> Add shot or asset
+            </button>
+          </div>
+        ) : null}
       </div>
     ) : null}
-  </>;
+  </section>;
 }
 
 export function UnifiedProjectOutline(props: UnifiedProjectOutlineProps) {

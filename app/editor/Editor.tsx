@@ -3029,6 +3029,13 @@ function EditorInner() {
     }
     window.setTimeout(() => fitView({ nodes: [{ id }], duration: 280, padding: 0.6, maxZoom: 1.35 }), 0);
   }, [fitView, mockProposalPreview, revealAndSelectNode, selectNode]);
+  const openSceneCreationPalette = useCallback((id: string) => {
+    const scene = nodesRef.current.find((node) => node.id === id);
+    if (!scene || scene.data.locked || mockProposalPreview) return;
+    selectNode(id);
+    layerSelectionAnchorRef.current = id;
+    setCreationPaletteOpen(true);
+  }, [mockProposalPreview, selectNode]);
   const focusOutlineNodes = useCallback((ids: string[]) => {
     if (!ids.length) return;
     fitView({ nodes: ids.map((id) => ({ id })), duration: 300, padding: 0.3, maxZoom: 1.2 });
@@ -3319,6 +3326,7 @@ function EditorInner() {
               onToggleBranch={toggleOutlineBranch}
               onSelectNode={handleOutlineSelection}
               onFocusNodes={focusOutlineNodes}
+              onAddToScene={openSceneCreationPalette}
               onToggleVisibility={toggleNodeVisibility}
               onToggleLock={toggleNodeLock}
             />

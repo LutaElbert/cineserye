@@ -65,6 +65,50 @@ test('creates typed cinema drafts with contextual relationships and reversible c
   await expect(page.getByText('Converted to prop.')).toBeVisible();
 });
 
+test('project outline keeps statuses compact and makes empty scenes actionable', async ({ page }) => {
+  await openEditor(page);
+  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  const sceneBranch = (name: string) => outline.getByRole('region', { name: `${name} outline`, exact: true });
+  const sceneRow = (name: string) => sceneBranch(name).locator('.outline-scene-row');
+
+  const scene01 = sceneRow('Scene 01');
+  await expect(scene01.getByText('Draft', { exact: true })).toHaveCount(1);
+  await expect(scene01.locator('.outline-status-badge')).toHaveCSS('font-size', '6px');
+  await expect(outline.locator('.outline-group').filter({ hasText: 'Shots' }).locator('.lucide-list-video')).toBeVisible();
+
+  await outline.getByRole('button', { name: 'Scene 01', exact: true }).click();
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+
+  const scene02 = sceneBranch('Scene 02');
+  const scene02Row = sceneRow('Scene 02');
+  const addToScene = scene02.getByRole('button', { name: 'Add shot or asset to Scene 02', exact: true });
+  await expect(scene02Row.getByText('Draft', { exact: true })).toHaveCount(1);
+  await expect(scene02Row).toContainText('0 shots · 0s');
+  await expect(addToScene).toBeEnabled();
+
+  await scene02Row.hover();
+  await scene02Row.getByRole('button', { name: 'Lock Scene 02', exact: true }).click();
+  await expect(addToScene).toBeDisabled();
+  await scene02Row.getByRole('button', { name: 'Unlock Scene 02', exact: true }).click();
+  await expect(addToScene).toBeEnabled();
+
+  await addToScene.click();
+  const palette = page.getByRole('dialog', { name: 'Add a filmmaking layer' });
+  await expect(palette).toBeVisible();
+  await palette.getByRole('button', { name: /^Prop(?: |$)/ }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await expect(page.getByLabel('Connector from Scene 02 to Prop 01')).toBeVisible();
+  await expect(scene02.getByRole('button', { name: 'Add shot or asset to Scene 02', exact: true })).toHaveCount(0);
+  await expect(outline.getByRole('region', { name: 'Props 1' })).toBeVisible();
+
+  await scene02Row.hover();
+  await scene02Row.getByRole('button', { name: 'Hide Scene 02', exact: true }).click();
+  await expect(canvasNode(page, 'Scene 02')).toHaveCount(0);
+  await scene02Row.getByRole('button', { name: 'Show Scene 02', exact: true }).click();
+  await expect(canvasNode(page, 'Scene 02')).toBeVisible();
+});
+
 test('guards an empty canvas and supports undo plus persisted recovery', async ({ page }) => {
   await openEditor(page);
   const selectAllAndDelete = async () => {
