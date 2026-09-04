@@ -170,8 +170,11 @@ function orderedSceneChildren(
       .map((sceneId, index) => [cinema?.scenes[sceneId]?.nodeId, index] as const)
       .filter((entry): entry is readonly [string, number] => Boolean(entry[0])),
   );
-  const candidates = directStructuralChildren(nodes, edges, storyId)
-    .filter((node) => role(node) === 'scene');
+  const candidates = [...new Map(
+    directStructuralChildren(nodes, edges, storyId)
+      .filter((node) => role(node) === 'scene')
+      .map((node) => [node.id, node]),
+  ).values()];
   const edgeOrder = new Map(candidates.map((node, index) => [node.id, index]));
   return candidates
     .sort((left, right) => (
@@ -212,6 +215,43 @@ function scenesInNarrativeLayoutOrder(
       ? leftNumber - rightNumber
       : scenes.indexOf(left) - scenes.indexOf(right);
   });
+}
+
+function directStorySceneEdge(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  storyId: string,
+  sceneId: string,
+) {
+  return edges
+    .filter((edge) => (
+      edge.source === storyId
+      && edge.target === sceneId
+      && isStructuralEdge(nodes, edge)
+    ))
+    .sort((left, right) => (
+      Number(right.data?.relationship === 'hierarchy')
+      - Number(left.data?.relationship === 'hierarchy')
+      || left.id.localeCompare(right.id)
+    ))[0];
+}
+
+function dominantSceneDirection(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  storyId: string,
+  scenes: EditorNode[],
+  canonicalScene: EditorNode,
+): CinemaConnectionDirection {
+  const directions = scenes.map((scene) => edgeDirection(
+    directStorySceneEdge(nodes, edges, storyId, scene.id),
+  ));
+  const horizontalVotes = directions.filter((direction) => direction === 'horizontal').length;
+  const verticalVotes = directions.length - horizontalVotes;
+  if (horizontalVotes !== verticalVotes) {
+    return horizontalVotes > verticalVotes ? 'horizontal' : 'vertical';
+  }
+  return edgeDirection(directStorySceneEdge(nodes, edges, storyId, canonicalScene.id));
 }
 
 function dominantSceneLane(
@@ -354,6 +394,10 @@ function inferDirection(
   const canonicalTargetId = expectedRole === 'scene'
     ? canonicalSceneChild(orderedTargets, cinema)?.id
     : orderedTargets[0]?.id;
+  if (expectedRole === 'scene' && orderedTargets.length && canonicalTargetId) {
+    const canonicalScene = orderedTargets.find((node) => node.id === canonicalTargetId)!;
+    return dominantSceneDirection(nodes, edges, parentId, orderedTargets, canonicalScene);
+  }
   const sameRole = outgoing.find((edge) => edge.target === canonicalTargetId)
     ?? outgoing.find((edge) => role(byId.get(edge.target)) === expectedRole);
   return edgeDirection(sameRole ?? outgoing[0]);
@@ -385,9 +429,10 @@ function avoidVisibleCollisions(
 }
 
 /**
- * Reflows editable cinema drafts using the first narrative Story -> Scene route for
- * orientation and the strongest aligned sibling cluster for placement. Provider-owned
- * and locked nodes are anchors; unrelated graph branches never participate.
+ * Reflows editable cinema drafts using one orientation vote per visible direct Scene
+ * and the strongest aligned sibling cluster for placement. The first narrative Scene
+ * breaks orientation ties. Provider-owned and locked nodes are anchors; unrelated graph
+ * branches never participate.
  */
 export function planCinemaWorkspaceReorganization(
   nodes: EditorNode[],
@@ -418,12 +463,7 @@ export function planCinemaWorkspaceReorganization(
     handled = true;
     const canonicalScene = canonicalSceneChild(scenes, cinema);
     const layoutScenes = scenesInNarrativeLayoutOrder(scenes, cinema);
-    const canonicalEdge = edges.find((edge) => (
-      edge.source === story.id
-      && edge.target === canonicalScene.id
-      && isStructuralEdge(nodes, edge)
-    ));
-    const direction = edgeDirection(canonicalEdge);
+    const direction = dominantSceneDirection(nodes, edges, story.id, scenes, canonicalScene);
     const sceneIds = new Set(scenes.map((scene) => scene.id));
     for (const edge of edges) {
       if (edge.source !== story.id || !sceneIds.has(edge.target) || !isStructuralEdge(nodes, edge)) continue;
@@ -698,6 +738,7 @@ export function planCinemaDraftInsertion(
     id: `layout-workspace-${newNode.id}`,
     source: parent.id,
     target: newNode.id,
+    ...(direction === 'vertical' ? { sourceHandle: 'bottom', targetHandle: 'top' } : {}),
     data: {
       label: '', kind: 'default',
       relationship: newRole === 'scene' || newRole === 'shot' ? 'hierarchy' : 'attachment',

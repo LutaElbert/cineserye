@@ -279,6 +279,97 @@ describe('parent-aware cinema insertion', () => {
     expect(placement.positions.get(scene01.id)?.x).toBe(520);
   });
 
+  it('uses the direct-Scene orientation majority when inserting the next Scene', () => {
+    const story = { ...initialDocument.nodes[0], position: { x: 230, y: 300 } };
+    const scenes = [
+      numberedScene('scene-01', 1, 180, 500),
+      numberedScene('scene-02', 2, 530, 150),
+      numberedScene('scene-03', 3, 350, 500),
+      numberedScene('scene-04', 4, 530, 390),
+      numberedScene('scene-05', 5, 530, 510),
+    ];
+    const verticalIds = new Set(['scene-01', 'scene-03']);
+    const edges = scenes.map((scene) => ({
+      ...hierarchyEdge(`story-${scene.id}`, story.id, scene.id),
+      ...(verticalIds.has(scene.id) ? { sourceHandle: 'bottom', targetHandle: 'top' } : {}),
+    }));
+    const placement = planCinemaDraftInsertion(
+      [story, ...scenes],
+      edges,
+      undefined,
+      { parentId: story.id },
+      'scene',
+      numberedScene('scene-06', 6, 0, 0),
+    )!;
+
+    expect(placement.direction).toBe('horizontal');
+    expect(placement.position.x).toBe(530);
+    expect([...placement.edgeDirections]).toEqual([
+      ['story-scene-01', 'horizontal'],
+      ['story-scene-03', 'horizontal'],
+    ]);
+  });
+
+  it('keeps a bottom-facing majority stable while inserting the next Scene', () => {
+    const story = { ...initialDocument.nodes[0], position: { x: 400, y: 80 } };
+    const scenes = [
+      numberedScene('scene-01', 1, 100, 500),
+      numberedScene('scene-02', 2, 364, 500),
+      numberedScene('scene-03', 3, 628, 500),
+      numberedScene('scene-04', 4, 900, 250),
+      numberedScene('scene-05', 5, 1200, 800),
+    ];
+    const verticalIds = new Set(['scene-01', 'scene-02', 'scene-03']);
+    const edges = scenes.map((scene) => ({
+      ...hierarchyEdge(`story-${scene.id}`, story.id, scene.id),
+      ...(verticalIds.has(scene.id) ? { sourceHandle: 'bottom', targetHandle: 'top' } : {}),
+    }));
+    const placement = planCinemaDraftInsertion(
+      [story, ...scenes], edges, undefined,
+      { parentId: story.id }, 'scene', numberedScene('scene-06', 6, 0, 0),
+    )!;
+
+    expect(placement).toMatchObject({
+      direction: 'vertical', sourceHandle: 'bottom', targetHandle: 'top',
+    });
+    expect(placement.position.y).toBe(500);
+    expect(placement.edgeDirections.get('story-scene-04')).toBe('vertical');
+    expect(placement.edgeDirections.get('story-scene-05')).toBe('vertical');
+  });
+
+  it('uses production order to break an even orientation vote', () => {
+    const scenes = [
+      numberedScene('scene-01', 1, 100, 500),
+      numberedScene('scene-02', 2, 500, 100),
+      numberedScene('scene-03', 3, 500, 212),
+      numberedScene('scene-04', 4, 364, 500),
+    ];
+    const story = initialDocument.nodes[0];
+    const edges = scenes.map((scene) => ({
+      ...hierarchyEdge(`story-${scene.id}`, story.id, scene.id),
+      ...(['scene-01', 'scene-04'].includes(scene.id)
+        ? { sourceHandle: 'bottom', targetHandle: 'top' }
+        : {}),
+    }));
+    const cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
+    const baseScene = cinema.scenes['scene-01'];
+    cinema.scenes = Object.fromEntries(scenes.map((scene) => [scene.id, {
+      ...baseScene,
+      id: scene.id,
+      nodeId: scene.id,
+      title: scene.data.name,
+      shotIds: [],
+    }]));
+    cinema.sceneOrder = ['scene-02', 'scene-01', 'scene-03', 'scene-04'];
+
+    const placement = planCinemaDraftInsertion(
+      [story, ...scenes], edges, cinema,
+      { parentId: story.id }, 'scene', numberedScene('scene-05', 5, 0, 0),
+    )!;
+
+    expect(placement.direction).toBe('horizontal');
+  });
+
   it('returns null when the semantic parent is unavailable', () => {
     expect(planCinemaDraftInsertion(
       initialDocument.nodes, initialDocument.edges, undefined,
@@ -375,20 +466,23 @@ describe('cinema workspace reorganization', () => {
     )))).toEqual(new Set([400]));
   });
 
-  it('uses Scene 01 as the canonical axis and repairs a mixed-direction five-scene hierarchy', () => {
+  it('uses a three-to-two right-facing majority even when Scene 01 is bottom-facing', () => {
+    const story = { ...initialDocument.nodes[0], position: { x: 230, y: 300 } };
     const scenes = [
-      numberedScene('scene-02', 2, 40, 250),
-      numberedScene('scene-03', 3, 450, 390),
-      numberedScene('scene-04', 4, 450, 500),
-      numberedScene('scene-05', 5, 450, 610),
+      numberedScene('scene-01', 1, 180, 500),
+      numberedScene('scene-02', 2, 530, 150),
+      numberedScene('scene-03', 3, 350, 500),
+      numberedScene('scene-04', 4, 530, 390),
+      numberedScene('scene-05', 5, 530, 510),
     ];
-    const nodes = [...initialDocument.nodes, ...scenes];
+    const nodes = [story, ...scenes, initialDocument.nodes[2]];
     const mixedEdges: EditorEdge[] = [
-      { ...hierarchyEdge('story-scene-02', 'story-premise', 'scene-02'), sourceHandle: 'bottom', targetHandle: 'top' },
+      { ...hierarchyEdge('story-scene-01', 'story-premise', 'scene-01'), sourceHandle: 'bottom', targetHandle: 'top' },
+      hierarchyEdge('story-scene-02', 'story-premise', 'scene-02'),
       { ...hierarchyEdge('story-scene-03', 'story-premise', 'scene-03'), sourceHandle: 'bottom', targetHandle: 'top' },
-      ...initialDocument.edges,
       hierarchyEdge('story-scene-04', 'story-premise', 'scene-04'),
-      { ...hierarchyEdge('story-scene-05', 'story-premise', 'scene-05'), sourceHandle: 'bottom', targetHandle: 'top' },
+      hierarchyEdge('story-scene-05', 'story-premise', 'scene-05'),
+      hierarchyEdge('scene-shot-01', 'scene-01', 'shot-01'),
       {
         id: 'reference-distraction', source: 'story-premise', target: 'shot-01',
         sourceHandle: 'bottom', targetHandle: 'top',
@@ -403,15 +497,76 @@ describe('cinema workspace reorganization', () => {
 
     expect(layout.handled).toBe(true);
     expect([...layout.edgeDirections]).toEqual([
-      ['story-scene-02', 'horizontal'],
+      ['story-scene-01', 'horizontal'],
       ['story-scene-03', 'horizontal'],
-      ['story-scene-05', 'horizontal'],
     ]);
     expect(layout.edgeDirections.has('reference-distraction')).toBe(false);
-    expect(new Set(arrangedScenes.map((scene) => scene.position.x))).toEqual(new Set([450]));
-    expect(arrangedScenes.map((scene) => scene.position.y)).toEqual(
-      [...arrangedScenes.map((scene) => scene.position.y)].sort((left, right) => left - right),
-    );
+    expect(new Set(arrangedScenes.map((scene) => scene.position.x))).toEqual(new Set([530]));
+    expect(arrangedScenes.map((scene) => scene.position.y)).toEqual([150, 262, 374, 486, 598]);
+
+    const normalizedEdges = mixedEdges.map((edge) => layout.edgeDirections.get(edge.id) === 'horizontal'
+      ? { ...edge, sourceHandle: undefined, targetHandle: undefined }
+      : edge);
+    const reapplied = planCinemaWorkspaceReorganization(arranged, normalizedEdges);
+    expect(reapplied.positions.size).toBe(0);
+    expect(reapplied.edgeDirections.size).toBe(0);
+  });
+
+  it('uses a three-to-two bottom-facing majority and normalizes the two right connectors', () => {
+    const story = { ...initialDocument.nodes[0], position: { x: 400, y: 80 } };
+    const scenes = [
+      numberedScene('scene-01', 1, 100, 500),
+      numberedScene('scene-02', 2, 364, 500),
+      numberedScene('scene-03', 3, 628, 500),
+      numberedScene('scene-04', 4, 900, 250),
+      numberedScene('scene-05', 5, 1200, 800),
+    ];
+    const verticalIds = new Set(['scene-01', 'scene-02', 'scene-03']);
+    const edges = scenes.map((scene) => ({
+      ...hierarchyEdge(`story-${scene.id}`, story.id, scene.id),
+      ...(verticalIds.has(scene.id) ? { sourceHandle: 'bottom', targetHandle: 'top' } : {}),
+    }));
+    const layout = planCinemaWorkspaceReorganization([story, ...scenes], edges);
+    const arranged = withPositions([story, ...scenes], layout.positions);
+    const arrangedScenes = scenes.map((scene) => arranged.find((node) => node.id === scene.id)!);
+
+    expect([...layout.edgeDirections]).toEqual([
+      ['story-scene-04', 'vertical'],
+      ['story-scene-05', 'vertical'],
+    ]);
+    expect(new Set(arrangedScenes.map((scene) => scene.position.y))).toEqual(new Set([500]));
+    expect(arrangedScenes.map((scene) => scene.position.x)).toEqual([100, 364, 628, 892, 1156]);
+  });
+
+  it('counts each visible Scene once and ignores edge order, hidden Scenes, and non-structural links', () => {
+    const story = initialDocument.nodes[0];
+    const scene01 = numberedScene('scene-01', 1, 500, 100);
+    const scene02 = numberedScene('scene-02', 2, 500, 212);
+    const scene03 = numberedScene('scene-03', 3, 120, 500);
+    const hiddenScene = { ...numberedScene('scene-04', 4, 364, 500), hidden: true };
+    const edges: EditorEdge[] = [
+      { ...hierarchyEdge('z-scene-03-duplicate', story.id, scene03.id), sourceHandle: 'bottom', targetHandle: 'top' },
+      { ...hierarchyEdge('story-scene-03', story.id, scene03.id), sourceHandle: 'bottom', targetHandle: 'top' },
+      { ...hierarchyEdge('story-hidden-scene', story.id, hiddenScene.id), sourceHandle: 'bottom', targetHandle: 'top' },
+      { ...hierarchyEdge('story-scene-01', story.id, scene01.id), sourceHandle: 'right' },
+      hierarchyEdge('story-scene-02', story.id, scene02.id),
+      {
+        id: 'sequence-distraction', source: story.id, target: scene03.id,
+        sourceHandle: 'bottom', targetHandle: 'top',
+        data: { label: '', kind: 'default', relationship: 'sequence' },
+      },
+    ];
+    const nodes = [story, scene01, scene02, scene03, hiddenScene];
+    const first = planCinemaWorkspaceReorganization(nodes, edges);
+    const reordered = planCinemaWorkspaceReorganization(nodes, [...edges].reverse());
+
+    expect(new Set(withPositions(nodes, first.positions)
+      .filter((node) => !node.hidden && node.id !== story.id)
+      .map((node) => node.position.x))).toEqual(new Set([500]));
+    expect([...first.positions].sort()).toEqual([...reordered.positions].sort());
+    expect([...first.edgeDirections].sort()).toEqual([...reordered.edgeDirections].sort());
+    expect(first.edgeDirections.has('story-hidden-scene')).toBe(false);
+    expect(first.edgeDirections.has('sequence-distraction')).toBe(false);
   });
 
   it('repairs a disordered five-scene lane and centers Story against the scene cards', () => {
@@ -491,6 +646,32 @@ describe('cinema workspace reorganization', () => {
       mixedVerticalEdges,
     );
     expect(protectedLayout.edgeDirections.size).toBe(0);
+  });
+
+  it('keeps accepted provider-owned hosts and their connectors protected while they still vote', () => {
+    const document = acceptedDocument();
+    const acceptedScene = document.nodes.find((node) => node.id === 'scene-01')!;
+    const scene02 = numberedScene('scene-02', 2, 364, acceptedScene.position.y);
+    const scene03 = numberedScene('scene-03', 3, 628, acceptedScene.position.y);
+    const nodes = [...document.nodes, scene02, scene03];
+    const edges = [
+      ...document.edges,
+      {
+        ...hierarchyEdge('story-scene-02', 'story-premise', scene02.id),
+        sourceHandle: 'bottom', targetHandle: 'top',
+      },
+      {
+        ...hierarchyEdge('story-scene-03', 'story-premise', scene03.id),
+        sourceHandle: 'bottom', targetHandle: 'top',
+      },
+    ];
+    const layout = planCinemaWorkspaceReorganization(nodes, edges, document.cinema);
+
+    expect(layout.positions.has('story-premise')).toBe(false);
+    expect(layout.positions.has(acceptedScene.id)).toBe(false);
+    expect(layout.edgeDirections.size).toBe(0);
+    expect(withPositions(nodes, layout.positions).find((node) => node.id === scene02.id)!.position.y)
+      .toBe(acceptedScene.position.y);
   });
 
   it('recognizes legacy hierarchy edges without letting reference or sequence links participate', () => {

@@ -428,7 +428,7 @@ test('sparkle repairs mixed Story connector directions and scattered Scene posit
           ['Story Premise', { x: 230, y: 300 }],
           ['Scene 01', { x: 180, y: 500 }],
           ['Scene 02', { x: 530, y: 150 }],
-          ['Scene 03', { x: 530, y: 270 }],
+          ['Scene 03', { x: 350, y: 500 }],
           ['Scene 04', { x: 530, y: 390 }],
           ['Scene 05', { x: 530, y: 510 }],
         ]);
@@ -442,7 +442,7 @@ test('sparkle repairs mixed Story connector directions and scattered Scene posit
         ));
         for (const edge of sceneEdges) {
           const targetName = document.nodes.find((node) => node.id === edge.target)!.data.name;
-          if (targetName === 'Scene 02' || targetName === 'Scene 03' || targetName === 'Scene 05') {
+          if (targetName === 'Scene 01' || targetName === 'Scene 03') {
             edge.sourceHandle = 'bottom';
             edge.targetHandle = 'top';
           } else {
@@ -451,9 +451,9 @@ test('sparkle repairs mixed Story connector directions and scattered Scene posit
           }
         }
         document.edges = [
-          ...sceneEdges.filter((edge) => edge.target === nodeByName.get('Scene 02')!.id),
+          ...sceneEdges.filter((edge) => edge.target === nodeByName.get('Scene 01')!.id),
           ...document.edges.filter((edge) => !sceneEdges.includes(edge)),
-          ...sceneEdges.filter((edge) => edge.target !== nodeByName.get('Scene 02')!.id),
+          ...sceneEdges.filter((edge) => edge.target !== nodeByName.get('Scene 01')!.id),
         ];
         store.put(document);
       };
@@ -498,10 +498,10 @@ test('sparkle repairs mixed Story connector directions and scattered Scene posit
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   expect(await modelPosition('Scene 01')).toEqual({ x: 180, y: 500 });
-  await expect(page.getByLabel('Connector from Story Premise to Scene 02')).not.toHaveAttribute('data-cinema-route', 'story-scene-bus');
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).not.toHaveAttribute('data-cinema-route', 'story-scene-bus');
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   expect((await modelPosition('Scene 01')).x).toBe(530);
-  await expect(page.getByLabel('Connector from Story Premise to Scene 02')).toHaveAttribute('data-cinema-route', 'story-scene-bus');
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toHaveAttribute('data-cinema-route', 'story-scene-bus');
 
   await waitForSaved(page);
   await page.reload();
@@ -548,8 +548,14 @@ test('sparkle restores outlier Scenes to a dominant bottom row', async ({ page }
         )));
         for (const edge of document.edges) {
           if (edge.source !== storyId || !sceneIds.has(edge.target)) continue;
-          edge.sourceHandle = 'bottom';
-          edge.targetHandle = 'top';
+          const targetName = document.nodes.find((node) => node.id === edge.target)!.data.name;
+          if (targetName === 'Scene 01' || targetName === 'Scene 02' || targetName === 'Scene 03') {
+            edge.sourceHandle = 'bottom';
+            edge.targetHandle = 'top';
+          } else {
+            delete edge.sourceHandle;
+            delete edge.targetHandle;
+          }
         }
         store.put(document);
       };

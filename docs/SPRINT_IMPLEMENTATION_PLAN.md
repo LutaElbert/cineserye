@@ -22,6 +22,8 @@
 
 **Current dominant-lane hardening:** [dominant hierarchy lane](DOMINANT_HIERARCHY_LANE_PLAN.md) — connector orientation and sibling-supported lane placement are resolved independently so one dragged Scene cannot distort the hierarchy
 
+**Current orientation-vote hardening:** [dominant hierarchy orientation](DOMINANT_HIERARCHY_ORIENTATION_PLAN.md) — each visible direct Scene gets one orientation vote; the first narrative Scene breaks ties instead of overriding a sibling majority
+
 **Execution status (2026-09-02):** Sprints 1–10 are implemented. Sprint 8 provides a fixture-first continuity audit with bounded findings and fingerprint-checked corrections. Sprint 9's fail-closed live boundary requires `elbertluta@gmail.com`, project/quota project `cineserye`, explicit consent, an operator ceiling, and a local enable switch; its credit-consuming live smoke is correctly recorded as **Not run** pending fresh authorization. Sprint 10 adds separate development/holdout grades, no-content retention, a 100-run fixture soak, spend governance, and a readiness report. Deployment, autonomous/background mutation, authentication, collaboration, and required live media generation remain outside this roadmap.
 
 | Sprint | Status | Acceptance evidence |
