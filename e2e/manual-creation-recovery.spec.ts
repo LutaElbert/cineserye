@@ -332,6 +332,73 @@ test('centers a draft scene against three shots and moves the next draft scene b
   await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
 });
 
+test('routes direct Story to Scene siblings through one derived hierarchy spine', async ({ page }) => {
+  await openEditor(page);
+  const initialConnector = page.getByLabel('Connector from Story Premise to Scene 01');
+  await expect(initialConnector).not.toHaveAttribute('data-cinema-route', 'story-scene-bus');
+
+  await page.getByRole('button', { name: 'Scene 01', exact: true }).click();
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  const scene01Connector = page.getByLabel('Connector from Story Premise to Scene 01');
+  const scene02Connector = page.getByLabel('Connector from Story Premise to Scene 02');
+  await expect(scene01Connector).toHaveAttribute('data-cinema-route', 'story-scene-bus');
+  await expect(scene02Connector).toHaveAttribute('data-cinema-route', 'story-scene-bus');
+  const firstTrunk = await scene01Connector.getAttribute('data-cinema-trunk-x');
+  expect(firstTrunk).toBeTruthy();
+  await expect(scene02Connector).toHaveAttribute('data-cinema-trunk-x', firstTrunk!);
+  await expect(page.getByLabel(/Connector from Scene 01 to Scene 02/)).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Scene 02', exact: true }).click();
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  const scene03Connector = page.getByLabel('Connector from Story Premise to Scene 03');
+  await expect(scene03Connector).toHaveAttribute('data-cinema-route', 'story-scene-bus');
+  await expect(scene03Connector).toHaveAttribute('data-cinema-trunk-x', firstTrunk!);
+
+  await waitForSaved(page);
+  const persistedSceneEdges = await page.evaluate(() => new Promise<Array<{
+    type?: string;
+    relationship?: string;
+    cinemaRoute?: string;
+  }>>((resolve, reject) => {
+    const request = indexedDB.open('cineserye-local');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      const stored = database.transaction('documents', 'readonly').objectStore('documents').get('current');
+      stored.onerror = () => reject(stored.error);
+      stored.onsuccess = () => {
+        const document = stored.result as {
+          nodes: Array<{ id: string; data: { domainType?: string } }>;
+          edges: Array<{ target: string; type?: string; data?: { relationship?: string; cinemaRoute?: string } }>;
+        };
+        const sceneNodeIds = new Set(document.nodes
+          .filter((node) => node.data.domainType === 'cinema.scene')
+          .map((node) => node.id));
+        resolve(document.edges
+          .filter((edge) => sceneNodeIds.has(edge.target))
+          .map((edge) => ({
+            type: edge.type,
+            relationship: edge.data?.relationship,
+            cinemaRoute: edge.data?.cinemaRoute,
+          })));
+      };
+    };
+  }));
+  expect(persistedSceneEdges).toHaveLength(3);
+  expect(persistedSceneEdges.every((edge) => (
+    edge.type === 'smoothstep'
+    && edge.relationship === 'hierarchy'
+    && edge.cinemaRoute === undefined
+  ))).toBe(true);
+
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await expect(page.getByLabel('Connector from Story Premise to Scene 01')).toHaveAttribute('data-cinema-trunk-x', firstTrunk!);
+  await expect(page.getByLabel('Connector from Story Premise to Scene 03')).toHaveAttribute('data-cinema-trunk-x', firstTrunk!);
+});
+
 test('reorganizes a disordered draft hierarchy by narrative order as one undoable action', async ({ page }) => {
   await openEditor(page);
   const outline = page.getByRole('navigation', { name: 'Project outline' });

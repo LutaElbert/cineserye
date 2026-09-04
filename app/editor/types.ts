@@ -81,6 +81,9 @@ export type EditorEdgeData = Record<string, unknown> & {
   kind: ConnectorKind;
   /** Product semantics are optional so generic and legacy canvas connectors remain valid. */
   relationship?: 'hierarchy' | 'attachment' | 'reference' | 'sequence';
+  /** Derived canvas-only route metadata; document sanitization intentionally drops these fields. */
+  cinemaRoute?: 'story-scene-bus';
+  cinemaRouteTrunkX?: number;
 };
 export type EditorEdge = Edge<EditorEdgeData>;
 

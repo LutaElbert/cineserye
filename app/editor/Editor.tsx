@@ -121,6 +121,11 @@ import {
   planCinemaWorkspaceReorganization,
 } from './cinema-workspace-placement';
 import {
+  CINEMA_HIERARCHY_BUS_EDGE_TYPE,
+  planCinemaHierarchyBusRoutes,
+} from './cinema-edge-routing';
+import { CinemaHierarchyBusEdge } from './CinemaHierarchyBusEdge';
+import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
   clearPendingCinemaProposals,
@@ -513,6 +518,10 @@ const nodeTypes = {
   concept: ConceptNode,
   raster: RasterNode,
   vector: VectorNode,
+};
+
+const edgeTypes = {
+  [CINEMA_HIERARCHY_BUS_EDGE_TYPE]: CinemaHierarchyBusEdge,
 };
 
 function cloneSnapshot(
@@ -3037,19 +3046,40 @@ function EditorInner() {
     () => {
       const nodeNames = new Map(presentedNodes.map((node) => [node.id, node.data.name]));
       const affectedEdgeIds = new Set(mockProposalPreview?.affectedEdgeIds ?? []);
-      return presentedEdges
-        .filter((edge) => !collapsedNodeIds.has(edge.source) && !collapsedNodeIds.has(edge.target))
-        .map((edge) => ({
+      const visibleEdges = presentedEdges
+        .filter((edge) => !collapsedNodeIds.has(edge.source) && !collapsedNodeIds.has(edge.target));
+      const routes = planCinemaHierarchyBusRoutes(canvasNodes, visibleEdges);
+      return visibleEdges.map((edge) => {
+        const route = routes.get(edge.id);
+        const affected = affectedEdgeIds.has(edge.id);
+        return ({
           ...edge,
-          ...(affectedEdgeIds.has(edge.id) ? {
-            className: 'proposal-ghost-edge',
+          ...(route && !affected ? {
+            type: CINEMA_HIERARCHY_BUS_EDGE_TYPE,
+            className: [edge.className, 'cinema-hierarchy-bus-edge'].filter(Boolean).join(' '),
+            data: {
+              label: edge.data?.label ?? '',
+              kind: edge.data?.kind ?? 'default',
+              ...edge.data,
+              cinemaRoute: route.kind,
+              cinemaRouteTrunkX: route.trunkX,
+            },
+            domAttributes: {
+              ...edge.domAttributes,
+              'data-cinema-route': route.kind,
+              'data-cinema-trunk-x': String(route.trunkX),
+            },
+          } : {}),
+          ...(affected ? {
+            className: [edge.className, 'proposal-ghost-edge'].filter(Boolean).join(' '),
             animated: true,
             style: { stroke: '#716af2', strokeWidth: 1.75, strokeDasharray: '6 5' },
           } : {}),
           ariaLabel: `Connector from ${nodeNames.get(edge.source) ?? edge.source} to ${nodeNames.get(edge.target) ?? edge.target}${edge.data?.label ? `: ${edge.data.label}` : ''}`,
-        }));
+        });
+      });
     },
-    [collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
+    [canvasNodes, collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
   );
   const planningActionDisabled = mockProposalStage === 'planning'
     ? false
@@ -3447,6 +3477,7 @@ function EditorInner() {
             nodes={canvasNodes}
             edges={canvasEdges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
             onConnect={handleConnect}
