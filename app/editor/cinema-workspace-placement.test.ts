@@ -42,6 +42,10 @@ function expectCollisionFree(nodes: EditorNode[], node: EditorNode, position: { 
   ))).toBe(false);
 }
 
+function hierarchyEdge(id: string, source: string, target: string): EditorEdge {
+  return { id, source, target, data: { label: '', kind: 'default', relationship: 'hierarchy' } };
+}
+
 describe('parent-aware cinema insertion', () => {
   it('appends scene and shot siblings in horizontal parent lanes without moving existing nodes', () => {
     const before = structuredClone(initialDocument.nodes.map((node) => ({ id: node.id, position: node.position })));
@@ -103,6 +107,66 @@ describe('parent-aware cinema insertion', () => {
       expect(placement.position.x).toBeGreaterThan(initialDocument.nodes.find((candidate) => candidate.id === 'scene-01')!.position.x);
       expectCollisionFree(initialDocument.nodes, node, placement.position);
     }
+  });
+
+  it('centers a draft scene against three shots and shifts its later draft scene band', () => {
+    const scene02 = { ...draft('scene-02', 'scene'), position: { x: 450, y: 322 } };
+    const scene03 = { ...draft('scene-03', 'scene'), position: { x: 450, y: 434 } };
+    const shot07 = { ...draft('shot-07', 'shot'), position: { x: 770, y: 322 } };
+    const shot08 = { ...draft('shot-08', 'shot'), position: { x: 770, y: 434 } };
+    const nodes = [...initialDocument.nodes, scene02, scene03, shot07, shot08];
+    const edges = [
+      ...initialDocument.edges,
+      hierarchyEdge('story-scene-02', 'story-premise', 'scene-02'),
+      hierarchyEdge('story-scene-03', 'story-premise', 'scene-03'),
+      hierarchyEdge('scene-02-shot-07', 'scene-02', 'shot-07'),
+      hierarchyEdge('scene-02-shot-08', 'scene-02', 'shot-08'),
+    ];
+    const shot09 = draft('shot-09', 'shot');
+    const placement = planCinemaDraftInsertion(
+      nodes, edges, undefined, { parentId: 'scene-02' }, 'shot', shot09,
+    )!;
+    const scenePosition = placement.positions.get('scene-02')!;
+    const sceneCenter = scenePosition.y + 34;
+    const groupTop = shot07.position.y;
+    const groupBottom = placement.position.y + 68;
+
+    expect(placement.position.x).toBe(shot07.position.x);
+    expect(sceneCenter).toBe((groupTop + groupBottom) / 2);
+    expect(placement.positions.get('scene-03')!.y).toBeGreaterThan(groupBottom);
+    expect(placement.positions.has('story-premise')).toBe(false);
+    expect(placement.positions.has('scene-01')).toBe(false);
+  });
+
+  it('places a new scene below the preceding scene complete subtree', () => {
+    const lowNote = { ...draft('low-note', 'note'), position: { x: 770, y: 700 } };
+    const nodes = [...initialDocument.nodes, lowNote];
+    const edges = [...initialDocument.edges, hierarchyEdge('scene-note', 'scene-01', 'low-note')];
+    const nextScene = draft('scene-02', 'scene');
+    const placement = planCinemaDraftInsertion(
+      nodes, edges, undefined, { parentId: 'story-premise' }, 'scene', nextScene,
+    )!;
+    expect(placement.position.y).toBeGreaterThan(lowNote.position.y + 68);
+  });
+
+  it('does not center an accepted or locked scene host', () => {
+    const accepted = acceptedDocument();
+    const acceptedPlacement = planCinemaDraftInsertion(
+      accepted.nodes, accepted.edges, accepted.cinema,
+      { parentId: 'scene-01' }, 'note', draft('accepted-note', 'note'),
+    )!;
+    expect(acceptedPlacement.positions.has('scene-01')).toBe(false);
+
+    const lockedScene = {
+      ...initialDocument.nodes.find((node) => node.id === 'scene-01')!,
+      data: { ...initialDocument.nodes.find((node) => node.id === 'scene-01')!.data, locked: true },
+    };
+    const nodes = initialDocument.nodes.map((node) => node.id === lockedScene.id ? lockedScene : node);
+    const lockedPlacement = planCinemaDraftInsertion(
+      nodes, initialDocument.edges, undefined,
+      { parentId: 'scene-01' }, 'shot', draft('locked-shot', 'shot'),
+    )!;
+    expect(lockedPlacement.positions.has('scene-01')).toBe(false);
   });
 
   it('preserves an explicit vertical legacy branch and places its next sibling across the row', () => {

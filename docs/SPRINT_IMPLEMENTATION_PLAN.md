@@ -39,6 +39,8 @@ Unified draft/production navigation is tracked in [Unified Project Outline Imple
 
 Parent-aware typed-layer routing is tracked in [Parent-Aware Cinema Layout Implementation Plan](./PARENT_AWARE_LAYOUT_PLAN.md). New cinema layers inherit their parent and sibling lane without changing unrelated or accepted canvas content.
 
+Scene-owned subtree centering is tracked in [Scene Production Bands Implementation Plan](./SCENE_PRODUCTION_BANDS_PLAN.md). Draft scenes center against their production-child lanes and reserve enough vertical space for later scene bands.
+
 ### Verified Sprint 10 closure
 
 - Compatibility: Vinext reports **100%** (9 supported, 0 partial, 0 issues).

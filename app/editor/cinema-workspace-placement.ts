@@ -15,6 +15,7 @@ export type CinemaConnectionDirection = 'horizontal' | 'vertical';
 
 export type CinemaDraftPlacement = {
   position: NodePosition;
+  positions: Map<string, NodePosition>;
   direction: CinemaConnectionDirection;
   sourceHandle?: 'bottom';
   targetHandle?: 'top';
@@ -29,6 +30,61 @@ function role(node: EditorNode | undefined) {
 function isSemanticParentEdge(edge: EditorEdge) {
   const relationship = edge.data?.relationship;
   return relationship !== 'reference' && relationship !== 'sequence';
+}
+
+function isStructuralEdge(edge: EditorEdge) {
+  return edge.data?.relationship === 'hierarchy' || edge.data?.relationship === 'attachment';
+}
+
+function cinemaHostIds(cinema: CinemaProjectData | undefined) {
+  if (!cinema?.activeRevisionId) return new Set<string>();
+  return new Set([
+    ...(cinema.projectNodeId ? [cinema.projectNodeId] : []),
+    ...Object.values(cinema.scenes).map((scene) => scene.nodeId),
+    ...Object.values(cinema.shots).map((shot) => shot.nodeId),
+    ...Object.values(cinema.characters).map((character) => character.nodeId),
+    ...Object.values(cinema.assets).map((asset) => asset.nodeId),
+    ...Object.values(cinema.agentRuns).map((run) => run.nodeId),
+  ]);
+}
+
+function semanticDescendantIds(edges: EditorEdge[], rootId: string) {
+  const children = new Map<string, string[]>();
+  for (const edge of edges.filter(isStructuralEdge)) {
+    const list = children.get(edge.source) ?? [];
+    list.push(edge.target);
+    children.set(edge.source, list);
+  }
+  const result = new Set<string>();
+  const pending = [rootId];
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (result.has(current)) continue;
+    result.add(current);
+    pending.push(...(children.get(current) ?? []));
+  }
+  return result;
+}
+
+function positionedRectangle(node: EditorNode, positions: Map<string, NodePosition>) {
+  return { ...(positions.get(node.id) ?? node.position), ...editorNodeDimensions(node) };
+}
+
+function branchBounds(
+  nodes: EditorNode[],
+  edges: EditorEdge[],
+  rootId: string,
+  positions: Map<string, NodePosition>,
+) {
+  const descendants = semanticDescendantIds(edges, rootId);
+  const rectangles = nodes
+    .filter((node) => descendants.has(node.id) && !node.hidden)
+    .map((node) => positionedRectangle(node, positions));
+  if (!rectangles.length) return null;
+  return {
+    top: Math.min(...rectangles.map((rectangle) => rectangle.y)),
+    bottom: Math.max(...rectangles.map((rectangle) => rectangle.y + rectangle.height)),
+  };
 }
 
 function edgeDirection(edge: EditorEdge | undefined): CinemaConnectionDirection {
@@ -158,8 +214,13 @@ export function planCinemaDraftInsertion(
     desired = lane.length
       ? {
         x: lane[0].position.x,
-        y: Math.max(...lane.map((node) => node.position.y + editorNodeDimensions(node).height))
-          + CONCEPT_BRANCH_GAP,
+        y: newRole === 'scene'
+          ? Math.max(...lane.map((node) => (
+            branchBounds(nodes, edges, node.id, new Map())?.bottom
+              ?? node.position.y + editorNodeDimensions(node).height
+          ))) + CONCEPT_BRANCH_GAP
+          : Math.max(...lane.map((node) => node.position.y + editorNodeDimensions(node).height))
+            + CONCEPT_BRANCH_GAP,
       }
       : {
         x: parent.position.x + parentSize.width + CONCEPT_LEVEL_GAP,
@@ -179,7 +240,74 @@ export function planCinemaDraftInsertion(
   }
 
   const position = avoidVisibleCollisions(nodes, newNode, desired, direction);
+  const positions = new Map<string, NodePosition>([[newNode.id, position]]);
+
+  if (direction === 'horizontal' && role(parent) === 'scene') {
+    const fixedIds = cinemaHostIds(cinema);
+    const parentIsMovable = !parent.data.locked && !fixedIds.has(parent.id);
+    const virtualNode = { ...newNode, position };
+    const virtualEdge: EditorEdge = {
+      id: `layout-${newNode.id}`,
+      source: parent.id,
+      target: newNode.id,
+      data: { label: '', kind: 'default', relationship: 'attachment' },
+    };
+    const layoutNodes = [...nodes, virtualNode];
+    const layoutEdges = [...edges, virtualEdge];
+    const byId = new Map(layoutNodes.map((node) => [node.id, node]));
+    const children = layoutEdges
+      .filter((edge) => edge.source === parent.id && isStructuralEdge(edge))
+      .map((edge) => byId.get(edge.target))
+      .filter((node): node is EditorNode => Boolean(node && !node.hidden));
+
+    if (parentIsMovable && children.length) {
+      const childRectangles = children.map((child) => positionedRectangle(child, positions));
+      const childTop = Math.min(...childRectangles.map((rectangle) => rectangle.y));
+      const childBottom = Math.max(...childRectangles.map((rectangle) => rectangle.y + rectangle.height));
+      const parentHeight = editorNodeDimensions(parent).height;
+      positions.set(parent.id, {
+        x: parent.position.x,
+        y: childTop + (childBottom - childTop - parentHeight) / 2,
+      });
+
+      const storyEdge = edges.find((edge) => (
+        edge.target === parent.id
+        && isStructuralEdge(edge)
+        && role(nodes.find((node) => node.id === edge.source)) === 'story'
+      ));
+      if (storyEdge) {
+        const sceneIds = edges
+          .filter((edge) => edge.source === storyEdge.source && isStructuralEdge(edge))
+          .map((edge) => edge.target)
+          .filter((id) => role(byId.get(id)) === 'scene');
+        const currentIndex = sceneIds.indexOf(parent.id);
+        let cursorBottom = branchBounds(layoutNodes, layoutEdges, parent.id, positions)?.bottom
+          ?? positions.get(parent.id)!.y + parentHeight;
+        for (const sceneId of sceneIds.slice(currentIndex + 1)) {
+          const scene = byId.get(sceneId);
+          if (!scene) continue;
+          const bounds = branchBounds(layoutNodes, layoutEdges, sceneId, positions);
+          if (!bounds) continue;
+          const delta = Math.max(0, cursorBottom + CONCEPT_BRANCH_GAP - bounds.top);
+          if (delta > 0 && !scene.data.locked && !fixedIds.has(scene.id)) {
+            for (const descendantId of semanticDescendantIds(layoutEdges, scene.id)) {
+              const descendant = byId.get(descendantId);
+              if (!descendant || descendant.hidden || descendant.data.locked || fixedIds.has(descendant.id)) continue;
+              const current = positions.get(descendant.id) ?? descendant.position;
+              positions.set(descendant.id, { x: current.x, y: current.y + delta });
+            }
+          }
+          cursorBottom = Math.max(
+            cursorBottom,
+            branchBounds(layoutNodes, layoutEdges, scene.id, positions)?.bottom ?? bounds.bottom,
+          );
+        }
+      }
+    }
+  }
+
+  const finalPosition = positions.get(newNode.id) ?? position;
   return direction === 'vertical'
-    ? { position, direction, sourceHandle: 'bottom', targetHandle: 'top' }
-    : { position, direction };
+    ? { position: finalPosition, positions, direction, sourceHandle: 'bottom', targetHandle: 'top' }
+    : { position: finalPosition, positions, direction };
 }

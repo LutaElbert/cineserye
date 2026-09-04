@@ -266,6 +266,72 @@ test('keeps an accepted plan stable when adding a manual shot and next scene', a
   ))).toEqual([]);
 });
 
+test('centers a draft scene against three shots and moves the next draft scene band', async ({ page }) => {
+  await openEditor(page);
+
+  const selectOutline = (name: string) => page.getByRole('navigation', { name: 'Project outline' })
+    .getByRole('button', { name, exact: true })
+    .click();
+  const modelPosition = async (name: string) => {
+    await selectOutline(name);
+    const inspector = page.locator('.inspector-panel');
+    return {
+      x: Number(await inspector.getByRole('spinbutton', { name: 'X', exact: true }).inputValue()),
+      y: Number(await inspector.getByRole('spinbutton', { name: 'Y', exact: true }).inputValue()),
+    };
+  };
+
+  const originalScene01 = await modelPosition('Scene 01');
+  await selectOutline('Scene 01');
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await selectOutline('Scene 02');
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+
+  await selectOutline('Scene 02');
+  await page.getByRole('button', { name: 'Add shot', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await selectOutline('Shot 02');
+  await page.getByRole('button', { name: 'Add next shot', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+
+  const scene03BeforeThirdShot = await modelPosition('Scene 03');
+  await selectOutline('Shot 03');
+  await page.getByRole('button', { name: 'Add next shot', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+
+  const scene02 = await modelPosition('Scene 02');
+  const scene03 = await modelPosition('Scene 03');
+  const shot02 = await modelPosition('Shot 02');
+  const shot03 = await modelPosition('Shot 03');
+  const shot04 = await modelPosition('Shot 04');
+  expect(scene02.y + 34).toBe((shot02.y + shot04.y + 68) / 2);
+  expect(shot02.x).toBe(shot03.x);
+  expect(shot03.x).toBe(shot04.x);
+  expect(scene02.x).toBeLessThan(shot02.x);
+  expect(scene03.y).toBeGreaterThan(shot04.y + 68);
+  expect(scene03.y).toBeGreaterThan(scene03BeforeThirdShot.y);
+  expect(await modelPosition('Scene 01')).toEqual(originalScene01);
+  await expect(page.getByLabel('Connector from Story Premise to Scene 02')).toBeVisible();
+  await expect(page.getByLabel('Connector from Scene 02 to Shot 04')).toBeVisible();
+  await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(canvasNode(page, 'Shot 04')).toHaveCount(0);
+  expect(await modelPosition('Scene 03')).toEqual(scene03BeforeThirdShot);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(canvasNode(page, 'Shot 04')).toBeVisible();
+  expect(await modelPosition('Scene 03')).toEqual(scene03);
+
+  await waitForSaved(page);
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  expect(await modelPosition('Scene 02')).toEqual(scene02);
+  expect(await modelPosition('Scene 03')).toEqual(scene03);
+  await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
+});
+
 test('automatically updates one Project Outline and preserves flat Layers as a separate view', async ({ page }) => {
   await openEditor(page);
   const outline = page.getByRole('navigation', { name: 'Project outline' });

@@ -2171,6 +2171,7 @@ function EditorInner() {
     const commands: CanvasCommandProposal['commands'] = [];
     for (const node of nodesRef.current) {
       const moved = hierarchyLayout?.positions.get(node.id)
+        ?? semanticPlacement?.positions.get(node.id)
         ?? (!semanticPlacement ? relativeLayout?.positions.get(node.id) : undefined);
       if (moved && (moved.x !== node.position.x || moved.y !== node.position.y)) {
         commands.push({ type: 'update-node', id: node.id, patch: { position: moved } });
