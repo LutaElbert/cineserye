@@ -37,7 +37,7 @@ try {
   const adc = readAdcSummary();
   const vertexApiEnabled = gcloud([
     'services', 'list', '--enabled', `--project=${EXPECTED_PROJECT}`, `--account=${EXPECTED_ACCOUNT}`,
-    '--filter=name:aiplatform.googleapis.com', '--format=value(name)',
+    '--filter=config.name:aiplatform.googleapis.com', '--format=value(config.name)',
   ]) === 'aiplatform.googleapis.com';
   const blockers = [
     ...(activeAccounts.length !== 1 || activeAccounts[0] !== EXPECTED_ACCOUNT
