@@ -8,7 +8,10 @@ import { applyCanvasCommandProposal } from './canvas-commands';
 import { initialDocument } from './initial-document';
 import { nodeRectangle, rectanglesOverlap } from './node-layout';
 import { conceptTitleFromPlainText } from './rich-text';
-import { planCinemaDraftInsertion } from './cinema-workspace-placement';
+import {
+  planCinemaDraftInsertion,
+  planCinemaWorkspaceReorganization,
+} from './cinema-workspace-placement';
 import type { EditorEdge, EditorNode } from './types';
 
 function draft(id: string, draftRole: CinemaDraftRole): EditorNode {
@@ -44,6 +47,28 @@ function expectCollisionFree(nodes: EditorNode[], node: EditorNode, position: { 
 
 function hierarchyEdge(id: string, source: string, target: string): EditorEdge {
   return { id, source, target, data: { label: '', kind: 'default', relationship: 'hierarchy' } };
+}
+
+function numberedScene(id: string, number: number, x: number, y: number): EditorNode {
+  const node = draft(id, 'scene');
+  const name = `Scene ${String(number).padStart(2, '0')}`;
+  return {
+    ...node,
+    position: { x, y },
+    data: { ...node.data, name, label: name, title: conceptTitleFromPlainText(name) },
+  };
+}
+
+function withPositions(nodes: EditorNode[], positions: Map<string, { x: number; y: number }>) {
+  return nodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }));
+}
+
+function expectAllCollisionFree(nodes: EditorNode[]) {
+  for (let left = 0; left < nodes.length; left += 1) {
+    for (let right = left + 1; right < nodes.length; right += 1) {
+      expect(rectanglesOverlap(nodeRectangle(nodes[left]), nodeRectangle(nodes[right]), 44)).toBe(false);
+    }
+  }
 }
 
 describe('parent-aware cinema insertion', () => {
@@ -105,7 +130,7 @@ describe('parent-aware cinema insertion', () => {
       expect(placement.sourceHandle).toBeUndefined();
       expect(placement.targetHandle).toBeUndefined();
       expect(placement.position.x).toBeGreaterThan(initialDocument.nodes.find((candidate) => candidate.id === 'scene-01')!.position.x);
-      expectCollisionFree(initialDocument.nodes, node, placement.position);
+      expectAllCollisionFree(withPositions([...initialDocument.nodes, node], placement.positions));
     }
   });
 
@@ -134,7 +159,11 @@ describe('parent-aware cinema insertion', () => {
     expect(placement.position.x).toBe(shot07.position.x);
     expect(sceneCenter).toBe((groupTop + groupBottom) / 2);
     expect(placement.positions.get('scene-03')!.y).toBeGreaterThan(groupBottom);
-    expect(placement.positions.has('story-premise')).toBe(false);
+    const storyPosition = placement.positions.get('story-premise')!;
+    const sceneCards = withPositions([initialDocument.nodes[1], scene02, scene03], placement.positions);
+    const sceneTop = Math.min(...sceneCards.map((scene) => scene.position.y));
+    const sceneBottom = Math.max(...sceneCards.map((scene) => scene.position.y + 68));
+    expect(storyPosition.y + 34).toBe((sceneTop + sceneBottom) / 2);
     expect(placement.positions.has('scene-01')).toBe(false);
   });
 
@@ -146,7 +175,8 @@ describe('parent-aware cinema insertion', () => {
     const placement = planCinemaDraftInsertion(
       nodes, edges, undefined, { parentId: 'story-premise' }, 'scene', nextScene,
     )!;
-    expect(placement.position.y).toBeGreaterThan(lowNote.position.y + 68);
+    const movedNote = placement.positions.get(lowNote.id) ?? lowNote.position;
+    expect(placement.position.y).toBeGreaterThan(movedNote.y + 68);
   });
 
   it('does not center an accepted or locked scene host', () => {
@@ -205,5 +235,89 @@ describe('parent-aware cinema insertion', () => {
       initialDocument.nodes, initialDocument.edges, undefined,
       { parentId: 'missing' }, 'note', draft('note-02', 'note'),
     )).toBeNull();
+  });
+});
+
+describe('cinema workspace reorganization', () => {
+  it('repairs a disordered five-scene lane and centers Story against the scene cards', () => {
+    const scenes = [
+      numberedScene('scene-02', 2, 640, 740),
+      numberedScene('scene-03', 3, 430, 850),
+      numberedScene('scene-04', 4, 700, 420),
+      numberedScene('scene-05', 5, 390, 20),
+    ];
+    const nodes = [...initialDocument.nodes, ...scenes];
+    const edges = [
+      ...initialDocument.edges,
+      ...scenes.map((scene) => hierarchyEdge(`story-${scene.id}`, 'story-premise', scene.id)),
+    ];
+    const layout = planCinemaWorkspaceReorganization(nodes, edges);
+    const arranged = withPositions(nodes, layout.positions);
+    const ordered = ['scene-01', 'scene-02', 'scene-03', 'scene-04', 'scene-05']
+      .map((id) => arranged.find((node) => node.id === id)!);
+
+    expect(layout.handled).toBe(true);
+    expect(new Set(ordered.map((scene) => scene.position.x))).toEqual(new Set([450]));
+    expect(ordered.map((scene) => scene.position.y)).toEqual(
+      [...ordered.map((scene) => scene.position.y)].sort((left, right) => left - right),
+    );
+    const story = arranged.find((node) => node.id === 'story-premise')!;
+    expect(story.position.y + 34).toBe(
+      (ordered[0].position.y + ordered.at(-1)!.position.y + 68) / 2,
+    );
+  });
+
+  it('is deterministic and idempotent after its planned positions are applied', () => {
+    const scene02 = { ...draft('scene-02', 'scene'), position: { x: 900, y: 20 } };
+    const nodes = [...initialDocument.nodes, scene02];
+    const edges = [...initialDocument.edges, hierarchyEdge('story-scene-02', 'story-premise', scene02.id)];
+    const first = planCinemaWorkspaceReorganization(nodes, edges);
+    const second = planCinemaWorkspaceReorganization(withPositions(nodes, first.positions), edges);
+
+    expect([...planCinemaWorkspaceReorganization(nodes, edges).positions]).toEqual([...first.positions]);
+    expect(second.handled).toBe(true);
+    expect(second.positions.size).toBe(0);
+  });
+
+  it('keeps locked scene bands fixed and preserves explicit vertical legacy routing', () => {
+    const scene02 = { ...draft('scene-02', 'scene'), position: { x: 900, y: 20 } };
+    const lockedScene = {
+      ...initialDocument.nodes[1],
+      data: { ...initialDocument.nodes[1].data, locked: true },
+    };
+    const lockedNodes = initialDocument.nodes.map((node) => node.id === lockedScene.id ? lockedScene : node);
+    lockedNodes.push(scene02);
+    const horizontalEdges = [...initialDocument.edges, hierarchyEdge('story-scene-02', 'story-premise', scene02.id)];
+    const lockedLayout = planCinemaWorkspaceReorganization(lockedNodes, horizontalEdges);
+    expect(lockedLayout.positions.has(lockedScene.id)).toBe(false);
+
+    const verticalEdges = horizontalEdges.map((edge) => edge.source === 'story-premise'
+      ? { ...edge, sourceHandle: 'bottom', targetHandle: 'top' }
+      : edge);
+    const verticalLayout = planCinemaWorkspaceReorganization(lockedNodes, verticalEdges);
+    expect(verticalLayout.handled).toBe(true);
+    expect(verticalLayout.positions.size).toBe(0);
+  });
+
+  it('recognizes legacy hierarchy edges without letting reference or sequence links participate', () => {
+    const scene02 = numberedScene('scene-02', 2, 900, 800);
+    const scene03 = numberedScene('scene-03', 3, 380, 40);
+    const nodes = [...initialDocument.nodes, scene02, scene03];
+    const legacyEdges: EditorEdge[] = [
+      ...initialDocument.edges,
+      hierarchyEdge('story-scene-02', 'story-premise', scene02.id),
+      hierarchyEdge('story-scene-03', 'story-premise', scene03.id),
+    ].map((edge) => ({ ...edge, data: { label: '', kind: 'default' as const } }));
+    legacyEdges.push({
+      id: 'reference-distraction', source: 'story-premise', target: 'shot-01',
+      data: { label: '', kind: 'default', relationship: 'reference' },
+    });
+    const layout = planCinemaWorkspaceReorganization(nodes, legacyEdges);
+    const arranged = withPositions(nodes, layout.positions);
+
+    expect(layout.handled).toBe(true);
+    expect(arranged.find((node) => node.id === scene02.id)!.position.y)
+      .toBeLessThan(arranged.find((node) => node.id === scene03.id)!.position.y);
+    expect(layout.positions.has('shot-01')).toBe(false);
   });
 });

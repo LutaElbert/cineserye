@@ -332,6 +332,63 @@ test('centers a draft scene against three shots and moves the next draft scene b
   await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
 });
 
+test('reorganizes a disordered draft hierarchy by narrative order as one undoable action', async ({ page }) => {
+  await openEditor(page);
+  const outline = page.getByRole('navigation', { name: 'Project outline' });
+  const selectOutline = (name: string) => outline.getByRole('button', { name, exact: true }).click();
+  const modelPosition = async (name: string) => {
+    await selectOutline(name);
+    const inspector = page.locator('.inspector-panel');
+    return {
+      x: Number(await inspector.getByRole('spinbutton', { name: 'X', exact: true }).inputValue()),
+      y: Number(await inspector.getByRole('spinbutton', { name: 'Y', exact: true }).inputValue()),
+    };
+  };
+  const setPosition = async (name: string, x: number, y: number) => {
+    await selectOutline(name);
+    const inspector = page.locator('.inspector-panel');
+    await inspector.getByRole('spinbutton', { name: 'X', exact: true }).fill(String(x));
+    await inspector.getByRole('spinbutton', { name: 'X', exact: true }).blur();
+    await inspector.getByRole('spinbutton', { name: 'Y', exact: true }).fill(String(y));
+    await inspector.getByRole('spinbutton', { name: 'Y', exact: true }).blur();
+  };
+
+  await selectOutline('Scene 01');
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await selectOutline('Scene 02');
+  await page.getByRole('button', { name: 'Add next scene', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+
+  await setPosition('Scene 02', 900, 800);
+  await setPosition('Scene 03', 380, 40);
+  const disorderedScene03 = await modelPosition('Scene 03');
+  await page.getByRole('button', { name: 'Reorganize project layout' }).click();
+  await expect(page.getByText('Project hierarchy reorganized.')).toBeVisible();
+
+  const story = await modelPosition('Story Premise');
+  const scene01 = await modelPosition('Scene 01');
+  const scene02 = await modelPosition('Scene 02');
+  const scene03 = await modelPosition('Scene 03');
+  expect(scene01.x).toBe(scene02.x);
+  expect(scene02.x).toBe(scene03.x);
+  expect(scene01.y).toBeLessThan(scene02.y);
+  expect(scene02.y).toBeLessThan(scene03.y);
+  expect(story.y + 34).toBe((scene01.y + scene03.y + 68) / 2);
+  await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  expect(await modelPosition('Scene 03')).toEqual(disorderedScene03);
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  expect(await modelPosition('Scene 03')).toEqual(scene03);
+
+  await waitForSaved(page);
+  await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  expect(await modelPosition('Story Premise')).toEqual(story);
+  expect(await modelPosition('Scene 02')).toEqual(scene02);
+});
+
 test('automatically updates one Project Outline and preserves flat Layers as a separate view', async ({ page }) => {
   await openEditor(page);
   const outline = page.getByRole('navigation', { name: 'Project outline' });

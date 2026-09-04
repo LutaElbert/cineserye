@@ -116,7 +116,10 @@ import {
   planCinemaHierarchyLayout,
   resolveCinemaHierarchyInsertion,
 } from './cinema-hierarchy';
-import { planCinemaDraftInsertion } from './cinema-workspace-placement';
+import {
+  planCinemaDraftInsertion,
+  planCinemaWorkspaceReorganization,
+} from './cinema-workspace-placement';
 import {
   clearLocalRecoveryDocument,
   clearLocalDocument,
@@ -2015,14 +2018,24 @@ function EditorInner() {
   }, [deleteElements]);
 
   const tidyDiagram = useCallback(() => {
-    const positions = tidyGraphPositions(nodesRef.current, edgesRef.current);
-    if (positions.size < 2) return;
+    const cinemaLayout = planCinemaWorkspaceReorganization(
+      nodesRef.current,
+      edgesRef.current,
+      cinemaRef.current,
+    );
+    const positions = cinemaLayout.handled
+      ? cinemaLayout.positions
+      : tidyGraphPositions(nodesRef.current, edgesRef.current);
+    if (!positions.size) {
+      announce(cinemaLayout.handled ? 'Project hierarchy is already organized.' : 'Diagram is already organized.');
+      return;
+    }
     recordHistory();
     setNodes((current) => current.map((node) => node.data.locked || !positions.has(node.id)
       ? node
       : { ...node, position: positions.get(node.id)! }));
     window.setTimeout(() => fitView({ duration: 320, padding: 0.22 }), 0);
-    announce('Diagram layout tidied.', 'success');
+    announce(cinemaLayout.handled ? 'Project hierarchy reorganized.' : 'Diagram layout tidied.', 'success');
   }, [announce, fitView, recordHistory]);
 
   const beginConceptEdit = useCallback((id: string) => {
@@ -3562,7 +3575,7 @@ function EditorInner() {
               <span className="toolbar-divider" />
               <button type="button" className="tool" aria-label="Add filmmaking layer" disabled={Boolean(mockProposalPreview)} onClick={addConceptNode}><TypeIcon size={16} /></button>
               <button type="button" className="tool" aria-label="Connect nodes by dragging their handles" disabled={Boolean(mockProposalPreview)} onClick={() => announce('Drag from a node handle to another node to create a connector.')}><Waypoints size={16} /></button>
-              <button type="button" className="tool" aria-label="Tidy diagram layout" disabled={Boolean(mockProposalPreview)} onClick={tidyDiagram}><Sparkles size={16} /></button>
+              <button type="button" className="tool" aria-label="Reorganize project layout" title="Reorganize project layout" disabled={Boolean(mockProposalPreview)} onClick={tidyDiagram}><Sparkles size={16} /></button>
               <button type="button" className="tool" aria-label="Import image" disabled={Boolean(mockProposalPreview)} onClick={() => fileInputRef.current?.click()}><Upload size={16} /></button>
             </Panel>
             <Panel position="bottom-right" className="zoom-readout">

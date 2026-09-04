@@ -270,12 +270,16 @@ test('typed child and sibling actions follow the existing horizontal parent lane
 
   const parent = canvasNode(page, 'Story Premise');
   const child = canvasNode(page, 'Compact child');
+  const firstScene = canvasNode(page, 'Scene 01');
   const parentBox = await parent.boundingBox();
   const childBox = await child.boundingBox();
+  const firstSceneBox = await firstScene.boundingBox();
   expect(parentBox).toBeTruthy();
   expect(childBox).toBeTruthy();
+  expect(firstSceneBox).toBeTruthy();
   expect(childBox!.height).toBeLessThan(100);
-  expect(childBox!.y).toBeGreaterThan(parentBox!.y + parentBox!.height);
+  expect(Math.abs(childBox!.x - firstSceneBox!.x)).toBeLessThan(3);
+  expect(childBox!.y).toBeGreaterThan(firstSceneBox!.y + firstSceneBox!.height);
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
 
   const parentRight = await parent.locator('.react-flow__handle.source:not([data-handleid])').boundingBox();
@@ -505,8 +509,8 @@ test('connection rules reject self and duplicate edges but allow reverse cycles'
   await expect(page.locator('.react-flow__edge')).toHaveCount(originalEdgeCount + 1);
   await expect(page.getByLabel('Connector from Scene 01 to Story Premise')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Tidy diagram layout' }).click();
-  await expect(page.getByText('Diagram layout tidied.')).toBeVisible();
+  await page.getByRole('button', { name: 'Reorganize project layout' }).click();
+  await expect(page.getByText('Project hierarchy is already organized.')).toBeVisible();
 });
 
 test('reconnects a connector endpoint as one undoable operation', async ({ page }) => {

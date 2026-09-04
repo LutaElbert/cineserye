@@ -100,7 +100,7 @@ test('keeps a 500-layer, 800-connector document responsive and persistent', asyn
   await page.getByPlaceholder('Search layers and notes').fill('');
 
   const tidyStarted = Date.now();
-  await page.getByRole('button', { name: 'Tidy diagram layout' }).click();
+  await page.getByRole('button', { name: 'Reorganize project layout' }).click();
   await expect(page.getByText('Diagram layout tidied.')).toBeVisible({ timeout: 10_000 });
   expect(Date.now() - tidyStarted).toBeLessThan(10_000);
   await waitForSaved(page);

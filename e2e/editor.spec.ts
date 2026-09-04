@@ -267,8 +267,8 @@ test('bulk-arranges selected layers and edits connector labels and styles', asyn
   await page.getByRole('button', { name: 'Align left', exact: true }).click();
   await page.getByRole('button', { name: 'Indigo', exact: true }).click();
 
-  await page.getByRole('button', { name: 'Tidy diagram layout' }).click();
-  await expect(page.getByText('Diagram layout tidied.')).toBeVisible();
+  await page.getByRole('button', { name: 'Reorganize project layout' }).click();
+  await expect(page.getByText('Project hierarchy reorganized.')).toBeVisible();
 
   const edge = page.locator('.react-flow__edge').first();
   await edge.focus();
