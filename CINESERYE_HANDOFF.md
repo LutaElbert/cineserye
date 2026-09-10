@@ -1,9 +1,25 @@
 # Cineserye — single-file continuation handoff
 
-Last updated: 2026-09-10, 18:54 Asia/Manila (10:54 UTC).
+Last updated: 2026-09-10, 21:04 Asia/Manila (13:04 UTC).
 Purpose: private continuity notes for a new Codex task. This is not a public submission update, deployment instruction, or authorization to spend money. No secret values are included. The user explicitly authorized committing and pushing this file to the private `LutaElbert/cineserye` repository. Do not include it in the public hackathon repository or a public release.
 
 ## Read this first
+
+### Active private simplification work — NOT complete
+
+The user subsequently authorized implementing the approved revision-2 `docs/SIMPLIFIED_FLOW_IMPLEMENTATION_PLAN.md` in the **private repository only**. It has 58 acceptance criteria across P0–P7. This authorization does not alter the frozen public submission/reviewer site, authorize live/paid calls, or waive critic, visual-approval or exact-SHA CI gates.
+
+- Private main was merged at `23af84303dd7571932e9faa94c80b2fd9b84d497` (tree identical to `cf695d0`). Implementation is isolated on `codex/simplified-flow` in `/private/tmp/cineserye-simplified-mzUBaY`; the original workspace and its untracked artifacts/videos remain untouched.
+- **P0 is work in progress; P1–P7 have not started.** See `docs/simplified-flow-reviews/P0-attempt-1.md`, `P0-preservation-inventory.md`, and `P0-dependency-audit.md` for actual evidence and gaps. Do not call the whole plan implemented or the baseline green.
+- Fresh-critic creation failed with `agent thread limit reached`; all four existing critics belong to prior completed reviews. No new critic score exists. The approved plan forbids recycling their approval. Continue in a fresh Codex task with access to this private branch/worktree and spawn a new critic for the repair batch before accepting P0.
+- Current repairs: scoped sharp security patch; named built native/Worker CI lanes (no magic port skips); real browser storage-module harness; stable pointer-test geometry; restored note-only/reference and text-discard tools; secondary access to the existing manual story panel; local-blob media CSP allowance. Some stale selectors were migrated without deleting their behavior assertions.
+- Known open failures: Firefox/WebKit sample-video metadata loading still fails in the targeted built-browser run. Worker startup discovery incorrectly returns `runtime: local-node`; the new runner fails closed on this mismatch, so no Worker browser tests ran. Full 480 native matrix is not green; measured baseline task comparison remains incomplete. No GitHub Actions run has been dispatched for this work.
+- 479 offline unit tests passed, five paid/live opt-in tests intentionally skipped; all 15 tests across assembly/storyboard-media/video-media files executed and passed, including a synthetic 60-second silent local render. Original six canvas regressions passed 54 repeated runs across three engines without retries. These limited passes are not P0/P7 acceptance.
+- Audit: high/critical clear, 14 moderate affected dependency entries documented. Build/typecheck/client-boundary passed during repair. Re-run all exact-candidate checks after remaining fixes.
+- Keep GitHub Actions enabled. Before any dispatch/push that triggers CI or merge, reverify the applicable Actions $0 budget and Stop usage control. Never buy minutes or weaken gates. No deployment or public-repository writes occurred.
+- The task-owned initial fixture server on port 3040 was stopped at handoff; built-test runners own random local ports and stop their servers. Do not kill unrelated previews.
+
+### Frozen submitted release
 
 **Current state: submitted to Agentic Cinema on time; reviewer website deployed; hosted AI is NOT enabled or proven end to end. Janet Fang replied that no changes are allowed after the deadline. Further deployment, configuration, code changes, paid testing, and resubmission are prohibited unless the organizer gives new explicit written direction.**
 

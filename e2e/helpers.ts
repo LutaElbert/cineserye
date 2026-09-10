@@ -10,6 +10,10 @@ export async function openEditor(page: Page) {
   }
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  // Hydration and node counts precede the intentional first-run fit animation.
+  // Pointer actionability waits for real visible, stable geometry before tests
+  // measure it or derive a creation point from the current viewport.
+  await page.locator('.react-flow__node').first().hover();
 }
 
 export async function addCinemaDraft(page: Page, role: string, finishEditing = false) {
@@ -44,6 +48,8 @@ export function canvasNode(page: Page, name: string): Locator {
 export async function connectLayers(page: Page, sourceName: string, targetName: string) {
   const sourceHandle = canvasNode(page, sourceName).locator('.react-flow__handle.source').first();
   const targetHandle = canvasNode(page, targetName).locator('.react-flow__handle.target').first();
+  await sourceHandle.hover();
+  await targetHandle.hover();
   const sourceBox = await sourceHandle.boundingBox();
   const targetBox = await targetHandle.boundingBox();
   expect(sourceBox).toBeTruthy();

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openEditor, waitForSaved } from './helpers';
 
 test('reload frames the measured overview once without hiding layers behind Properties', async ({ page }, info) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Use isolated fixture storage.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.setViewportSize({ width: 1366, height: 768 });
   await openEditor(page);
   await waitForSaved(page);

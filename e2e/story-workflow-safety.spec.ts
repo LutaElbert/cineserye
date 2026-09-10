@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { confirmCineseryeDialog, openEditor, waitForSaved } from './helpers';
+import { installStorageHarness } from './storage-harness';
 
 test('SAFE-02 image estimate review shows model and price, and refreshing clears approval without generating', async ({ page }) => {
   let model = 'reviewed-image-model'; let posts = 0;
@@ -45,10 +46,11 @@ test('SAFE-06 changed source cannot be overwritten by accepting a pending plan',
 });
 
 test('SAFE-07 storage transaction protects recovery, checkpoint, pending, and newly reachable media', async ({ page }) => {
+  await installStorageHarness(page);
   await openEditor(page);
   await waitForSaved(page);
   const result = await page.evaluate(async () => {
-    const modulePath = '/app/editor/persistence.ts';
+    const modulePath = '/__test-modules/persistence.js';
     const persistence = await import(/* @vite-ignore */ modulePath) as typeof import('../app/editor/persistence');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('cineserye-local');

@@ -31,7 +31,7 @@ async function usefulBody(page: Page, assistant: Locator, minimum = 100) {
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Isolated fixture only.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.setViewportSize({ width: 735, height: 389 });
   await page.route('**/api/cinema/**', async (route) => {
     if (route.request().method() === 'POST' && /"mode"\s*:\s*"live"/.test(route.request().postData() ?? '')) return route.abort('blockedbyclient');

@@ -23,7 +23,7 @@ async function onePrimary(page: Page, assistant: Locator) {
 }
 
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Use an isolated fixture origin.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.route('**/api/cinema/**', async (route) => {
     if (route.request().method() === 'POST' && /"mode"\s*:\s*"live"/.test(route.request().postData() ?? '')) return route.abort('blockedbyclient');
     await route.continue();

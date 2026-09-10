@@ -24,7 +24,7 @@ async function openEditor(page: Page) {
 }
 
 async function isolate(page: Page) {
-  if (new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040') test.skip(true, 'Independent critic requires the task-owned fixture server on 3040.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.route('**/api/cinema/**', async (route) => {
     const request = route.request();
     if (request.method() === 'POST' && /"mode"\s*:\s*"live"/.test(request.postData() ?? '')) throw new Error('Critic never authorizes live calls.');
@@ -143,7 +143,8 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 900 }, { name: '
     await editor.locator('.storyboard-frame').first().scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath(`${viewport.name}-shot-images.png`) });
     await editor.locator('.storyboard-frame').first().getByRole('button', { name: 'Approve', exact: true }).click();
-    await editor.getByRole('checkbox', { name: /I confirm one 4s 720p silent clip/ }).check();
+    await expect(editor.getByLabel('Video duration')).toHaveValue('8');
+    await editor.getByRole('checkbox', { name: /I confirm one 8s 720p silent clip/ }).check();
     await editor.getByRole('button', { name: 'Generate one clip', exact: true }).click();
     await expect(editor.locator('.video-version')).toHaveCount(1, { timeout: 20_000 });
     await expect.poll(() => editor.locator('.video-version video').evaluate((element: HTMLVideoElement) => element.readyState), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);

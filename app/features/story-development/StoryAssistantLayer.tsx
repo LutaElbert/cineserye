@@ -33,7 +33,7 @@ export function StoryAssistantLayer({ controller, document, getDocument, commit,
   const [editingFacts, setEditingFacts] = useState(false);
   const [questionPage, setQuestionPage] = useState({ key: '', index: 0 });
   const [showHistory, setShowHistory] = useState(false);
-  const [manualDirection, setManualDirection] = useState(false);
+  const [manualDirection, setManualDirection] = useState<false | true | 'full'>(false);
   const [historyError, setHistoryError] = useState('');
   const project = document.cinema!;
   const manifest = reviewStoryReferenceTransfer(project, { kind: 'story', id: project.projectId }, 'story-development', assistantRefLimits);
@@ -128,12 +128,19 @@ export function StoryAssistantLayer({ controller, document, getDocument, commit,
       </div>}
       {historyError && <p className="assistant-shared-notice" role="alert">{historyError}</p>}
       {(controller.error || state.error || locked) && <div className="assistant-shared-notice">{(controller.error || state.error) && <p role="alert">{controller.error || state.error}</p>}{locked && <p role="status">Unlock the Story premise to change its direction.</p>}</div>}
+      {!manualDirection && !showHistory && <details className="assistant-secondary-tools"><summary>Advanced story tools</summary>
+        <button type="button" disabled={locked || controller.busy || historyBusy} onClick={() => setManualDirection('full')}>Edit full brief manually</button>
+      </details>}
       <div className="assistant-stage-host" style={{ display: showPlanning && !showHistory ? undefined : 'none' }}>
         {(state.confirmedBriefVersion || savedReview) && <StoryDevelopmentPanel embedded planningOnly open document={document} getDocument={getDocument} commit={commit} flush={flush} providerMode={providerMode}
           onClose={hide} owner={{ kind: 'story', id: project.projectId }} onAccepted={(ids) => { controller.change((value) => { value.collapsed = false; }); onScenesAccepted?.(ids ?? []); }} onReviseDirection={openManual} />}
       </div>
       <div className="assistant-stage-host" style={{ display: accepted && !manualDirection && !showHistory ? undefined : 'none' }}>{shotPlanning ?? (accepted && <div className="assistant-stage"><div className="assistant-stage-scroll"><h3>Scenes added</h3><p>Your scenes are saved. Scoped shot planning is not available in this workspace yet.</p></div></div>)}</div>
-      {manualDirection && !showHistory && <StoryDevelopmentPanel embedded directionOnly open document={document} getDocument={getDocument} commit={commit} flush={flush} providerMode={providerMode} onClose={() => setManualDirection(false)} onDirectionApproved={() => setManualDirection(false)} owner={{ kind: 'story', id: project.projectId }} />}
+      {manualDirection === 'full' && !showHistory && <section className="assistant-stage-scroll" aria-label="Manual story direction">
+        <button type="button" onClick={() => setManualDirection(false)}>Back to Assistant</button>
+        <StoryDevelopmentPanel embedded open document={document} getDocument={getDocument} commit={commit} flush={flush} providerMode={providerMode} onClose={() => setManualDirection(false)} owner={{ kind: 'story', id: project.projectId }} />
+      </section>}
+      {manualDirection === true && !showHistory && <StoryDevelopmentPanel embedded directionOnly open document={document} getDocument={getDocument} commit={commit} flush={flush} providerMode={providerMode} onClose={() => setManualDirection(false)} onDirectionApproved={() => setManualDirection(false)} owner={{ kind: 'story', id: project.projectId }} />}
       {(showAnalysis || showQuestions) && !manualDirection && !showHistory && <div className="assistant-stage">
         <div ref={scroll} className="assistant-stage-scroll">
           {controller.busy ? <><h3>Understanding your story</h3><p className="assistant-help">Your existing scenes stay unchanged.</p><ol className="assistant-real-progress" aria-label="Analysis progress">{controller.progress.length ? controller.progress.map((step) => <li key={step.step} data-state={step.status}>{step.status === 'completed' ? <Check size={15} /> : <span className="assistant-progress-ring" />}<span>{progressLabels[step.step]}</span></li>) : <li data-state="running"><span className="assistant-progress-ring" /><span>Preparing this approved request</span></li>}</ol></>

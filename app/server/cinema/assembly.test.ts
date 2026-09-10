@@ -19,6 +19,9 @@ describe('decoded assembly validation', () => {
 });
 
 const capability = await localAssemblyCapability();
+if (process.env.CINESERYE_REQUIRE_RENDERER_TESTS === 'true' && !capability.available) {
+  throw new Error(`Required renderer tests cannot run: ${capability.reason}`);
+}
 describe.skipIf(!capability.available)('local FFmpeg renderer (synthetic clips, no providers)', () => {
   let directory: string;
   let first: Blob, second: Blob;

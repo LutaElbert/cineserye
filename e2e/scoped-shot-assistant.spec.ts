@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('idea to accepted three-scene shot plans uses explicit scope and survives reload without redispatch', async ({ page }, info) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Requires isolated fixture server.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   const posts: string[] = [];

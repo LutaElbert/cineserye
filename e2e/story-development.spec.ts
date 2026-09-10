@@ -17,7 +17,7 @@ async function mockLiveCapabilities(page: import('@playwright/test').Page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Use the isolated fixture origin.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.route('**/api/cinema/**', (route) => {
     if (route.request().method() === 'POST' && /"mode"\s*:\s*"live"/.test(route.request().postData() ?? '')) return route.abort('blockedbyclient');
     return route.continue();
@@ -39,7 +39,7 @@ async function story(page: import('@playwright/test').Page) {
   const manual = assistant.getByRole('button', { name: 'Edit full brief manually', exact: true });
   const panel = assistant.getByRole('region', { name: 'Manual story direction', exact: true });
   if (!(await panel.isVisible())) {
-    await assistant.locator('summary').filter({ hasText: /^Advanced options$/ }).click();
+    await assistant.locator('summary').filter({ hasText: /^Advanced story tools$/ }).click();
     await manual.click();
   }
   await expect(panel).toBeVisible(); return panel;

@@ -1,8 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installStorageHarness } from './storage-harness';
 
 // Real browser/IndexedDB and production modules, with no mounted editor autosave
-// or provider UI. These checks run only against an isolated Vite fixture server.
+// or provider UI. Bundled source is served only by the Playwright harness.
 async function storageContext(page: Page) {
+  await installStorageHarness(page);
   await page.route('**/story-data-test', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Storage integration</title>' }));
   await page.goto('/story-data-test');
 }
@@ -10,8 +12,8 @@ async function storageContext(page: Page) {
 test('story data and historical images survive save, checkpoint and portable restore; missing media is atomic', async ({ page }) => {
   await storageContext(page);
   const result = await page.evaluate(async () => {
-    const storagePath = '/app/editor/persistence.ts'; const domainPath = '/app/domain/cinema/project-data.ts';
-    const documentPath = '/app/editor/initial-document.ts'; const backupPath = '/app/editor/document-file.ts';
+    const storagePath = '/__test-modules/persistence.js'; const domainPath = '/__test-modules/project-data.js';
+    const documentPath = '/__test-modules/initial-document.js'; const backupPath = '/__test-modules/document-file.js';
     const storage = await import(storagePath) as typeof import('../app/editor/persistence');
     const domain = await import(domainPath) as typeof import('../app/domain/cinema/project-data');
     const { initialDocument } = await import(documentPath) as typeof import('../app/editor/initial-document');
@@ -54,7 +56,7 @@ test('story data and historical images survive save, checkpoint and portable res
 test('two-tab story compare-and-swap accepts one writer and rejects the stale writer', async ({ page, context }) => {
   await storageContext(page);
   await page.evaluate(async () => {
-    const storagePath = '/app/editor/persistence.ts'; const domainPath = '/app/domain/cinema/project-data.ts'; const docPath = '/app/editor/initial-document.ts';
+    const storagePath = '/__test-modules/persistence.js'; const domainPath = '/__test-modules/project-data.js'; const docPath = '/__test-modules/initial-document.js';
     const storage = await import(storagePath) as typeof import('../app/editor/persistence');
     const domain = await import(domainPath) as typeof import('../app/domain/cinema/project-data');
     const { initialDocument } = await import(docPath) as typeof import('../app/editor/initial-document');
@@ -62,7 +64,7 @@ test('two-tab story compare-and-swap accepts one writer and rejects the stale wr
   });
   const other = await context.newPage(); await storageContext(other);
   const submit = (target: Page, title: string) => target.evaluate(async (title) => {
-    const path = '/app/editor/persistence.ts';
+    const path = '/__test-modules/persistence.js';
     const storage = await import(path) as typeof import('../app/editor/persistence');
     try {
       await storage.commitLocalStoryWorkflow('two-tab-story', 0, (draft) => {
@@ -76,7 +78,7 @@ test('two-tab story compare-and-swap accepts one writer and rejects the stale wr
   expect(outcomes.filter((value) => value === 'saved')).toHaveLength(1);
   expect(outcomes.find((value) => value !== 'saved')).toContain('changed');
   const saved = await page.evaluate(async () => {
-    const path = '/app/editor/persistence.ts';
+    const path = '/__test-modules/persistence.js';
     return (await (await import(path) as typeof import('../app/editor/persistence')).loadLocalDocument())!.cinema!.storyWorkflow!;
   });
   expect(saved.revision).toBe(1); expect(saved.references).toHaveLength(1);

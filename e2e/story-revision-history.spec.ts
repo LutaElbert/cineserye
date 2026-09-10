@@ -40,7 +40,7 @@ async function confirmDirection(page: Page) {
   return assistant;
 }
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Isolated fixture only.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route('**/api/cinema/**', async (route) => {
     if (route.request().method() === 'POST' && /"mode"\s*:\s*"live"/.test(route.request().postData() ?? '')) return route.abort('blockedbyclient');

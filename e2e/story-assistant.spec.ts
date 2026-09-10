@@ -4,7 +4,7 @@ import { createDiagramPng, waitForSaved, openSelectedScenePlanner } from './help
 import { readFile } from 'node:fs/promises';
 
 test.beforeEach(async ({ request }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Assistant verification uses only the task-owned fixture server on 3040.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   const status = await request.get('/api/cinema/provider-status');
   expect((await status.json()).mode).toBe('fixture');
 });

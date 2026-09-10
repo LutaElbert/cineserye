@@ -12,6 +12,8 @@
 /coverage
 /playwright-report/
 /test-results/
+/test-results-p0-*/
+/artifacts/simplified-flow/
 
 # next.js
 /.next/

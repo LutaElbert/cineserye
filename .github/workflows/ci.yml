@@ -8,10 +8,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CINESERYE_E2E_FIXTURE: 'true'
+  CINESERYE_PROVIDER_MODE: fixture
+  CINESERYE_LIVE_ENABLED: 'false'
+  CINESERYE_RUN_VIDEO_SMOKE: '0'
+  CINESERYE_RUN_STORYBOARD_SMOKE: '0'
+  CINESERYE_RUN_VERTEX_SMOKE: '0'
+  CINESERYE_RUN_STORY_LIVE_SMOKE: '0'
+  CINESERYE_REQUIRE_RENDERER_TESTS: 'true'
+  WRANGLER_SEND_METRICS: 'false'
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,26 +34,20 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
+      - name: Require native renderer tools (no capability skips)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm run check:test-environment
       - run: npm run check
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run check:client-boundary
       - run: npm test
       - run: npm run build
       - run: npm audit --audit-level=high
       - run: npx playwright install --with-deps chromium firefox webkit
-      - name: Test the built Cloudflare Worker
-        run: |
-          npx wrangler dev --config dist/server/wrangler.json --port 8787 > /tmp/cineserye-wrangler.log 2>&1 &
-          worker_pid=$!
-          trap 'kill "$worker_pid"' EXIT
-          for attempt in {1..60}; do
-            if curl --fail --silent --show-error http://localhost:8787/ > /dev/null; then
-              break
-            fi
-            if [ "$attempt" -eq 60 ]; then
-              cat /tmp/cineserye-wrangler.log
-              exit 1
-            fi
-            sleep 1
-          done
-          PLAYWRIGHT_BASE_URL=http://localhost:8787 npm run test:e2e
+      - name: Built native Node fixture workflow matrix
+        run: npm run test:built:node
+      - name: Built local Worker compatibility and negative matrix
+        run: npm run test:built:worker
