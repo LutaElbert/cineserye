@@ -23,12 +23,29 @@ export type GenerateStoryboardRequest = {
   settings: { aspectRatio: CinemaAspectRatio; outputCount: number; intent: CinemaStoryboardIntent };
   explicitConfirmation: boolean;
   liveProviderConsent: boolean;
+  approval?: { quoteId: string; contentDigest: string };
 };
+
+export type StoryboardPreflight = {
+  mode: 'fixture' | 'live';
+  model: string;
+  unitCost: number;
+  maxCost: number;
+  maxOutputs: number;
+  quoteId: string;
+  ready: boolean;
+  blockers: string[];
+};
+
+export function storyboardApprovalContent(payload: GenerateStoryboardRequest, quoteId: string) {
+  return { shotId: payload.shotId, revisionId: payload.revisionId, acceptedPlan: payload.acceptedPlan,
+    prompt: payload.prompt, references: payload.references, settings: payload.settings, quoteId };
+}
 
 export type StoryboardProviderFrame = {
   id: string;
   variantIndex: number;
-  seed: number;
+  seed: number | null;
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/svg+xml';
   base64: string;
   width: number;

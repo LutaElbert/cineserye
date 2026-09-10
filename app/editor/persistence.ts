@@ -5,6 +5,8 @@ import type { CanvasCommandProposal } from './canvas-commands';
 import type { CinemaProjectData } from '../domain/cinema/project-data';
 import type { CinemaClientTraceEvent } from '../features/scene-planner/plan-scene-api';
 import { pruneCinemaTraceRecords } from '../server/cinema/telemetry';
+import { unreferencedMediaHashes, type MediaRoot } from './media-reachability';
+import { storyReferenceMediaHashes, updateStoryWorkflow, type StoryWorkflowData } from '../domain/cinema/story-workflow';
 
 const DATABASE_NAME = APP_CONFIG.storage.databaseName;
 const STORE_NAME = 'documents';
@@ -16,6 +18,10 @@ const DOCUMENT_ID = 'current';
 const RECOVERY_DOCUMENT_ID = 'last-non-empty';
 const DATABASE_VERSION = 6;
 const MAX_CHECKPOINTS = 20;
+// Protect blobs involved in local reads/uploads before React metadata commits.
+// These conservative pins last for this page lifetime, never a permanent leak.
+const sessionMediaPins = new Set<string>();
+export function localMediaPins(): ReadonlySet<string> { return sessionMediaPins; }
 
 type StoredDocument = EditorDocument & { id: string };
 
@@ -122,6 +128,7 @@ export async function saveLocalMediaBlob(
   metadata: Pick<LocalMediaBlob, 'mimeType' | 'width' | 'height'>,
 ): Promise<LocalMediaBlob> {
   const hash = await sha256Blob(blob);
+  sessionMediaPins.add(hash);
   const entry: LocalMediaBlob = {
     hash,
     blob,
@@ -165,6 +172,7 @@ export async function saveLocalMediaBlob(
 }
 
 export async function loadLocalMediaBlob(hash: string): Promise<LocalMediaBlob | null> {
+  sessionMediaPins.add(hash);
   const database = await openDatabase();
   try {
     return await new Promise<LocalMediaBlob | null>((resolve, reject) => {
@@ -208,6 +216,46 @@ export async function deleteLocalMediaBlob(hash: string): Promise<void> {
   } finally {
     database.close();
   }
+}
+
+/** Recheck persistent and in-memory reachability within the deletion transaction. */
+export async function collectUnusedLocalMedia(
+  candidates: readonly string[],
+  memoryRoots: () => readonly (MediaRoot | null | undefined)[],
+): Promise<number> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<number>((resolve, reject) => {
+      const transaction = database.transaction(
+        [STORE_NAME, CHECKPOINT_STORE_NAME, PENDING_PROPOSAL_STORE_NAME, MEDIA_STORE_NAME], 'readwrite',
+      );
+      const roots: MediaRoot[] = [];
+      let remaining = 3;
+      let removed = 0;
+      const loaded = () => {
+        if (--remaining !== 0) return;
+        try {
+          const unused = unreferencedMediaHashes(candidates, [...roots, ...memoryRoots()]);
+          for (const hash of unused) {
+            if (sessionMediaPins.has(hash)) continue;
+            transaction.objectStore(MEDIA_STORE_NAME).delete(hash);
+            removed += 1;
+          }
+        } catch { transaction.abort(); }
+      };
+      for (const storeName of [STORE_NAME, CHECKPOINT_STORE_NAME, PENDING_PROPOSAL_STORE_NAME]) {
+        const request = transaction.objectStore(storeName).getAll();
+        request.onsuccess = () => {
+          const entries = request.result as Array<MediaRoot & { document?: MediaRoot }>;
+          roots.push(...entries.map((entry) => entry.document ?? entry));
+          loaded();
+        };
+      }
+      transaction.oncomplete = () => resolve(removed);
+      transaction.onerror = () => reject(transaction.error ?? new Error('Media cleanup failed.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Media cleanup was cancelled.'));
+    });
+  } finally { database.close(); }
 }
 
 export async function saveLocalCinemaTrace(trace: LocalCinemaTrace): Promise<void> {
@@ -357,6 +405,48 @@ export async function saveLocalDocument(document: EditorDocument): Promise<void>
   } finally {
     database.close();
   }
+}
+
+/** Atomic story edit against the latest saved project; future UI must use this
+ * boundary rather than a read/modify/write pair across asynchronous operations. */
+export async function commitLocalStoryWorkflow(projectId: string, expectedRevision: number,
+  change: (draft: StoryWorkflowData) => void): Promise<EditorDocument> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<EditorDocument>((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME, MEDIA_STORE_NAME], 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(DOCUMENT_ID);
+      let result: EditorDocument;
+      let failure: unknown;
+      const fail = (error: unknown) => { failure = error; transaction.abort(); };
+      request.onsuccess = () => {
+        try {
+          const current = validateEditorDocument(request.result);
+          if (current.cinema?.projectId !== projectId) throw new Error('The saved project changed. Reload before editing story data.');
+          result = validateEditorDocument({ ...current, updatedAt: Date.now(),
+            cinema: updateStoryWorkflow(current.cinema, expectedRevision, change) });
+          const hashes = [...storyReferenceMediaHashes(result.cinema?.storyWorkflow)];
+          let remaining = hashes.length;
+          const commit = () => {
+            store.put({ ...result, id: DOCUMENT_ID });
+            if (result.nodes.length) store.put({ ...result, id: RECOVERY_DOCUMENT_ID });
+          };
+          if (!remaining) { commit(); return; }
+          for (const hash of hashes) {
+            const media = transaction.objectStore(MEDIA_STORE_NAME).getKey(hash);
+            media.onsuccess = () => {
+              if (media.result === undefined) { fail(new Error('A story reference image is missing. Relink it before saving.')); return; }
+              if (--remaining === 0) commit();
+            };
+          }
+        } catch (error) { fail(error); }
+      };
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = () => reject(failure ?? transaction.error ?? new Error('Story data could not be saved.'));
+      transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('Story edit was cancelled. The saved project was not changed.'));
+    });
+  } finally { database.close(); }
 }
 
 export async function loadLocalDocument(): Promise<EditorDocument | null> {

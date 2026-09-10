@@ -1,21 +1,15 @@
 'use client';
 
-import { Download, HardDrive, MoreHorizontal, RotateCcw, Sparkles } from 'lucide-react';
+import { Download, HardDrive, MoreHorizontal, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 export function ProjectActionsMenu({
   providerMode,
-  planningLabel,
-  planningDisabled,
-  onPlan,
   onBackup,
   onNew,
   onExport,
 }: {
   providerMode: 'loading' | 'fixture' | 'live';
-  planningLabel: string;
-  planningDisabled: boolean;
-  onPlan: () => void;
   onBackup: () => void;
   onNew: () => void;
   onExport: () => void;
@@ -60,7 +54,6 @@ export function ProjectActionsMenu({
             <span>Provider</span>
             <strong>{providerMode === 'live' ? 'Live mode' : providerMode === 'fixture' ? 'Fixture mode' : 'Checking…'}</strong>
           </div>
-          <button type="button" role="menuitem" disabled={planningDisabled} onClick={() => run(onPlan)}><Sparkles size={14} /> {planningLabel}</button>
           <button type="button" role="menuitem" onClick={() => run(onBackup)}><HardDrive size={14} /> Backup or restore</button>
           <button type="button" role="menuitem" onClick={() => run(onExport)}><Download size={14} /> Export SVG</button>
           <button type="button" role="menuitem" onClick={() => run(onNew)}><RotateCcw size={14} /> New project</button>

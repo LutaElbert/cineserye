@@ -9,6 +9,7 @@ import type {
 } from '../../domain/cinema/project-data';
 import type { ShotPlannerProviderRequest } from './provider-contracts';
 import { ProviderError } from './provider-errors';
+import { bindReviewedContinuity, continuityCatalogFromContext } from '../../domain/cinema/continuity-identity';
 
 const shortText = z.string().trim().min(1).max(500);
 const longText = z.string().trim().min(1).max(8_000);
@@ -26,6 +27,7 @@ export const GeneratedScenePlanSchema = z.object({
     sourceIds,
   }).strict(),
   characters: z.array(z.object({
+    existingEntityId: z.string().min(1).max(160).nullable().optional(),
     title: shortText,
     summary: longText,
     appearanceReference: longText,
@@ -36,6 +38,7 @@ export const GeneratedScenePlanSchema = z.object({
     sourceIds,
   }).strict()).max(4),
   assets: z.array(z.object({
+    existingEntityId: z.string().min(1).max(160).nullable().optional(),
     title: shortText,
     category: z.enum(['location', 'prop', 'visual-element', 'reference', 'other']),
     summary: longText,
@@ -80,6 +83,7 @@ export const GeneratedScenePlanResponseSchema = z.object({
     sourceIds: responseStringArray,
   }),
   characters: z.array(z.object({
+    existingEntityId: z.string().nullable(),
     title: z.string(),
     summary: z.string(),
     appearanceReference: z.string(),
@@ -90,6 +94,7 @@ export const GeneratedScenePlanResponseSchema = z.object({
     sourceIds: responseStringArray,
   })),
   assets: z.array(z.object({
+    existingEntityId: z.string().nullable(),
     title: z.string(),
     category: z.enum(['location', 'prop', 'visual-element', 'reference', 'other']),
     summary: z.string(),
@@ -213,6 +218,16 @@ export function compileGeneratedScenePlan(
     });
   }
   const output = parsed.data;
+  const catalog = continuityCatalogFromContext(request.planningContext);
+  const boundIds = new Set<string>();
+  const bind = (kind: 'character' | 'asset', entityId?: string | null, category?: CinemaAssetRecord['category']) => {
+    const binding = bindReviewedContinuity(catalog, kind, entityId, category);
+    if (binding) {
+      if (boundIds.has(binding.entityId)) throw new ProviderError('UNEXPECTED_RESPONSE', 'The plan binds the same reviewed identity more than once.', true);
+      boundIds.add(binding.entityId);
+    }
+    return binding ? { continuityBinding: binding } : {};
+  };
   const sceneId = request.brief.sceneNodeId;
   const runNodeId = 'cine-agent-plan';
   const availableSourceIds = new Set(request.research.sources.map((source) => source.id));
@@ -225,15 +240,18 @@ export function compileGeneratedScenePlan(
   };
   const characterNodeIds = output.characters.map((character, index) => {
     const nodeId = `cine-character-${padded(index)}`;
+    const bound = bind('character', character.existingEntityId);
+    const identity = bound.continuityBinding ? JSON.parse(bound.continuityBinding.sourceIdentity) as CinemaCharacterRecord : character;
     characters[nodeId] = {
+      ...bound,
       id: nodeId,
       nodeId,
       sceneIds: [sceneId],
-      title: character.title,
-      summary: character.summary,
-      appearanceReference: character.appearanceReference,
-      voiceReference: character.voiceReference,
-      wardrobeNotes: character.wardrobeNotes,
+      title: identity.title,
+      summary: identity.summary,
+      appearanceReference: identity.appearanceReference,
+      voiceReference: identity.voiceReference,
+      wardrobeNotes: identity.wardrobeNotes,
     };
     addPrompt({
       id: `prompt-${nodeId}-reference`,
@@ -254,19 +272,22 @@ export function compileGeneratedScenePlan(
   const assetNodeIds = output.assets.map((asset, index) => {
     const nodeId = `cine-asset-${padded(index)}`;
     const linkedSources = linkedSourceIds(asset.sourceIds, availableSourceIds);
+    const bound = bind('asset', asset.existingEntityId, asset.category);
+    const identity = bound.continuityBinding ? JSON.parse(bound.continuityBinding.sourceIdentity) as CinemaAssetRecord : null;
     assets[nodeId] = {
+      ...bound,
       id: nodeId,
       nodeId,
       sceneIds: [sceneId],
-      title: asset.title,
+      title: identity?.title ?? asset.title,
       category: asset.category,
-      summary: asset.summary,
-      continuityNotes: asset.continuityNotes,
-      source: 'planned',
-      uri: '',
-      provenance: linkedSources.length
+      summary: identity?.summary ?? asset.summary,
+      continuityNotes: identity?.continuityNotes ?? asset.continuityNotes,
+      source: identity?.source ?? 'planned',
+      uri: identity?.uri ?? '',
+      provenance: identity?.provenance ?? (linkedSources.length
         ? `Planned from ${linkedSources.length} cited research ${linkedSources.length === 1 ? 'source' : 'sources'}.`
-        : 'Derived from the creator scene brief without an external source.',
+        : 'Derived from the creator scene brief without an external source.'),
     };
     addPrompt({
       id: `prompt-${nodeId}-reference`,

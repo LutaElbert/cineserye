@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { bindReviewedContinuity, buildContinuityCatalog } from './continuity-identity';
 import { applyCanvasCommandProposal } from '../../editor/canvas-commands';
 import { applyCinemaDomainCommand } from '../../editor/cinema-domain-commands';
 import { initialDocument } from '../../editor/initial-document';
@@ -133,8 +134,12 @@ describe('Sprint 7 multi-scene project model', () => {
       shots: Object.fromEntries(outlined.scenes['scene-01'].shotIds.map((shotId) => [shotId, outlined.shots[shotId]])),
       revisions: Object.fromEntries(Object.entries(outlined.revisions).filter(([, revision]) => revision.sceneId === 'scene-01')),
     });
-    const secondAccepted = acceptCinemaPlanRevision(outlined, await fixturePlan('scene-02', 'A warning appears on the projector.'), '2026-09-02T03:00:00.000Z');
-    const thirdAccepted = acceptCinemaPlanRevision(secondAccepted, await fixturePlan('scene-03', 'Mara exits before the doors close.'), '2026-09-02T04:00:00.000Z');
+    const secondPlan = await fixturePlan('scene-02', 'A warning appears on the projector.');
+    Object.values(secondPlan.characters)[0].continuityBinding = bindReviewedContinuity(buildContinuityCatalog(outlined), 'character', sharedCharacter.id);
+    const secondAccepted = acceptCinemaPlanRevision(outlined, secondPlan, '2026-09-02T03:00:00.000Z');
+    const thirdPlan = await fixturePlan('scene-03', 'Mara exits before the doors close.');
+    Object.values(thirdPlan.characters)[0].continuityBinding = bindReviewedContinuity(buildContinuityCatalog(secondAccepted), 'character', sharedCharacter.id);
+    const thirdAccepted = acceptCinemaPlanRevision(secondAccepted, thirdPlan, '2026-09-02T04:00:00.000Z');
     expect(thirdAccepted.sceneOrder).toEqual(['scene-01', 'scene-02', 'scene-03']);
     expect(thirdAccepted.sceneOrder.every((sceneId) => thirdAccepted.scenes[sceneId].shotIds.length > 0)).toBe(true);
     expect({

@@ -15,9 +15,12 @@ export default defineConfig(({ command }) => {
 
   return {
     css: { postcss: { plugins: [tailwindcss()] } },
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: { watch: {
+      // Test evidence is not application source. Watching generated traces can
+      // cause reloads while a user or a browser test is interacting with a node.
+      ignored: ['**/artifacts/**', '**/test-results/**', '**/playwright-report/**'],
+      ...(isCodexSeatbeltSandbox ? { useFsEvents: false, usePolling: true } : {}),
+    } },
     plugins: [
       vinext(),
       ...(command === 'build'

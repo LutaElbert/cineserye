@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { confirmCineseryeDialog, waitForSaved } from './helpers';
+import { confirmCineseryeDialog, waitForSaved, openSelectedScenePlanner } from './helpers';
 
 async function chooseStartScene(page: Page) {
   await expect(page.locator('main[data-ready="true"]')).toBeVisible({ timeout: 10_000 });
@@ -12,8 +12,8 @@ async function chooseStartScene(page: Page) {
 async function editSceneText(page: Page, text: string) {
   const scene = page.locator('.react-flow__node[data-id="scene-01"]');
   await scene.locator('.concept-node').dblclick();
-  await page.locator('.concept-body-editor').fill(text);
-  await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
+  await page.getByLabel('Layer description', { exact: true }).fill(text);
+  await page.getByRole('button', { name: 'Done', exact: true }).click();
   await scene.click();
 }
 
@@ -67,6 +67,7 @@ test('offers a clean start or a deterministic local sample only on genuine first
 
   await expect(page.getByRole('heading', { name: 'Project Outline' })).toBeVisible();
   await expect(page.getByRole('button', { name: '06 · The Figure Moves Closer', exact: true })).toBeVisible();
+  await page.getByRole('navigation', { name: 'Project outline' }).getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create revision' })).toBeVisible();
   await waitForSaved(page);
   await page.reload();
@@ -91,12 +92,12 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await expect(page.getByRole('button', { name: 'Project Outline', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(outline.getByRole('button', { name: 'Shot 01', exact: true }).getByText('Draft', { exact: true })).toBeVisible();
   await expect(page.getByText('Fixture mode', { exact: true }).first()).toBeVisible();
-  await expect(page.locator('.plan-scene-button')).toBeDisabled();
+  await expect(page.locator('.plan-scene-button')).toHaveCount(0);
   await editSceneText(page, 'Mara enters an abandoned cinema and sees her immediate future projected on screen.');
-  await expect(page.locator('.plan-scene-button')).toBeEnabled();
-  await page.locator('.plan-scene-button').click();
+  await expect(page.locator('.plan-scene-button')).toHaveCount(0);
+  await openSelectedScenePlanner(page);
 
-  let brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  let brief = page.getByRole('region', { name: 'Generate shot plan' });
   await expect(brief.getByLabel(/Send this scene brief/)).toHaveCount(0);
   await expect(brief.getByLabel('Selected scene text')).toContainText('Mara enters an abandoned cinema');
   await expect(brief).toContainText('AI-generation budget');
@@ -118,7 +119,8 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   const review = page.getByRole('region', { name: 'Shot proposal review' });
   await expect(review).toBeVisible();
   await expectVisibleNodesNotToOverlap(page);
-  await expect(page.getByRole('button', { name: 'Review shot plan' })).toBeVisible();
+  await expect(page.locator('.topbar').getByRole('button', { name: 'Review shot plan' })).toHaveCount(0);
+  await expect(review.getByRole('button', { name: 'Accept plan' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Project Outline', exact: true })).toBeVisible();
   await expect(outline.locator('.outline-status-badge.status-proposed').first()).toContainText('Proposed');
   await expect(outline).toContainText('6 shots · 42s');
@@ -198,8 +200,8 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await expect(page.getByText('New local document created.', { exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await editSceneText(page, 'A dancer misses the final train and hears footsteps matching her rhythm.');
-  await page.locator('.plan-scene-button').click();
-  brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  await openSelectedScenePlanner(page);
+  brief = page.getByRole('region', { name: 'Generate shot plan' });
   await brief.getByLabel('Genre and tone').fill('Quiet urban mystery');
   await brief.getByLabel('Location and period').fill('Contemporary elevated train station at night');
   await brief.getByRole('button', { name: 'Generate shot plan' }).click();
@@ -225,12 +227,21 @@ test('keeps first-run planning and all project actions keyboard-accessible at 39
   await expect(menu.getByRole('menuitem', { name: 'Backup or restore' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'Export SVG' })).toBeVisible();
   await expect(menu.getByRole('menuitem', { name: 'New project' })).toBeVisible();
-  await menu.getByRole('menuitem', { name: 'Generate shot plan' }).click();
+  await expect(menu.getByRole('menuitem', { name: 'Generate shot plan' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Escape clears canvas selection; planning now starts from the scene itself.
+  await page.locator('.react-flow__node[data-id="scene-01"]').click();
+  await openSelectedScenePlanner(page);
 
-  const brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  const brief = page.getByRole('region', { name: 'Generate shot plan' });
   await expect(brief).toBeVisible();
   await expect(brief.getByLabel('Genre and tone')).toBeFocused();
-  const bounds = await brief.boundingBox();
+  // The long setup form scrolls inside the actual node; its shell and focused
+  // control, rather than all offscreen form content, must fit the viewport.
+  const editor = page.getByRole('region', { name: 'Scene layer editor', exact: true });
+  await expect(brief.getByLabel('Genre and tone')).toBeInViewport();
+  await expect(editor.getByRole('button', { name: 'Done', exact: true })).toBeInViewport();
+  const bounds = await editor.boundingBox();
   expect(bounds).toBeTruthy();
   expect(bounds!.x).toBeGreaterThanOrEqual(0);
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
@@ -239,7 +250,7 @@ test('keeps first-run planning and all project actions keyboard-accessible at 39
   await page.keyboard.press('Escape');
   await expect(brief).toHaveCount(0);
   await page.getByRole('button', { name: 'Open project actions' }).click();
-  await expect(menu.getByRole('menuitem', { name: 'Generate shot plan' })).toBeFocused();
+  await expect(menu.getByRole('menuitem', { name: 'Backup or restore' })).toBeFocused();
 });
 
 test('shows live mode before submission and requires explicit transfer consent', async ({ page }) => {
@@ -270,8 +281,8 @@ test('shows live mode before submission and requires explicit transfer consent',
   await chooseStartScene(page);
   await expect(page.getByText('Live mode', { exact: true }).first()).toBeVisible();
   await editSceneText(page, 'A courier hears a voice note recorded by her future self inside a rain-soaked jeepney.');
-  await page.locator('.plan-scene-button').click();
-  const brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  await openSelectedScenePlanner(page);
+  const brief = page.getByRole('region', { name: 'Generate shot plan' });
   await brief.getByLabel('Genre and tone').fill('Intimate speculative suspense');
   await brief.getByLabel('Location and period').fill('Contemporary Manila jeepney at night');
   const consent = brief.getByLabel(/Send this scene brief and constraints/);
@@ -303,8 +314,8 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await page.goto('/');
   await chooseStartScene(page);
   await editSceneText(page, 'Mara enters an abandoned cinema and sees a warning from her future self.');
-  await page.locator('.plan-scene-button').click();
-  let brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  await openSelectedScenePlanner(page);
+  let brief = page.getByRole('region', { name: 'Generate shot plan' });
   await brief.getByLabel('Genre and tone').fill('Restrained supernatural suspense');
   await brief.getByLabel('Location and period').fill('Manila cinema, late 1980s');
   await brief.getByRole('button', { name: 'Generate shot plan' }).click();
@@ -324,6 +335,7 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await expect(traceDialog.locator('.trace-list > li')).toHaveCount(1);
   await traceDialog.getByRole('button', { name: 'Close' }).click();
   await review.getByRole('button', { name: 'Accept plan' }).click();
+  await page.getByRole('navigation', { name: 'Project outline' }).getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create revision' })).toBeVisible();
 
   const outline = page.getByRole('navigation', { name: 'Project outline' });
@@ -338,8 +350,10 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await page.getByRole('tab', { name: 'Prompt' }).click();
   await expect(page.getByRole('tabpanel', { name: 'Prompt' })).toContainText('stale');
 
+  await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await page.getByRole('tab', { name: 'Details' }).click();
   await page.getByRole('button', { name: 'Create revision' }).click();
-  brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  brief = page.getByRole('region', { name: 'Generate shot plan' });
   await expect(brief.getByLabel('Selected scene text')).toContainText('Mara enters an abandoned cinema');
   await brief.getByRole('button', { name: 'Generate shot plan' }).click();
   await expect(review).toBeVisible();

@@ -9,7 +9,10 @@ import { compileCinemaCanvasProposal } from './proposal-compiler';
 import type { ResearchProviderResult, ShotPlannerProviderRequest } from './provider-contracts';
 import { ProviderError } from './provider-errors';
 import { runProviderOperation } from './provider-resilience';
-import { VertexAdkShotPlannerProvider } from './vertex-adk-shot-planner';
+import { inputForModel, VertexAdkShotPlannerProvider } from './vertex-adk-shot-planner';
+import { compileGeneratedScenePlan, GeneratedScenePlanResponseSchema } from './planner-output';
+import { buildContinuityCatalog, validatePlanContinuityCatalog } from '../../domain/cinema/continuity-identity';
+import { scopeCinemaProjectDataForRun } from '../../domain/cinema/revision-scope';
 
 const sceneBrief: ScenePlanningBrief = {
   version: 2,
@@ -120,6 +123,40 @@ function generatedPlan() {
     warnings: [],
   };
 }
+
+describe('planner explicit continuity contract', () => {
+  const request = (): ShotPlannerProviderRequest => ({ runId: 'run-1', signal: new AbortController().signal, brief: sceneBrief, research: research() });
+  it('requires nullable existing identity fields in live output schema while old manual outputs remain new', () => {
+    expect(GeneratedScenePlanResponseSchema.safeParse(generatedPlan()).success).toBe(false);
+    const compiled = compileGeneratedScenePlan(request(), generatedPlan(), 'fixture', 'test');
+    expect(Object.values(compiled.characters).every((item) => !item.continuityBinding)).toBe(true);
+  });
+  it('binds an exact catalog ID and preserves its canonical appearance across provider ID remapping', () => {
+    const current = scopeCinemaProjectDataForRun(compileGeneratedScenePlan(request(), generatedPlan(), 'fixture', 'test'), 'existing-person');
+    const person = Object.values(current.characters)[0];
+    person.wardrobeNotes = 'User-approved red coat';
+    const output = generatedPlan();
+    const bound = { ...output, characters: [{ ...output.characters[0], existingEntityId: person.id, title: 'Model tried renaming this person', wardrobeNotes: 'Unapproved green coat' }] };
+    const catalog = buildContinuityCatalog(current);
+    const compiled = compileGeneratedScenePlan({ ...request(), planningContext: JSON.stringify({ continuityCatalog: catalog }) }, bound, 'fixture', 'test');
+    const scoped = scopeCinemaProjectDataForRun(compiled, 'new-scene-run');
+    expect(Object.values(scoped.characters)[0]).toMatchObject({ title: person.title, wardrobeNotes: 'User-approved red coat', continuityBinding: { entityId: person.id, nodeId: person.nodeId } });
+    expect(() => validatePlanContinuityCatalog(scoped, catalog)).not.toThrow();
+  });
+  it('rejects an existing identity claim not present in the reviewed catalog', () => {
+    const output = generatedPlan();
+    const bound = { ...output, characters: [{ ...output.characters[0], existingEntityId: 'invented-existing-person' }] };
+    expect(() => compileGeneratedScenePlan(request(), bound, 'fixture', 'test')).toThrow(/unknown/);
+  });
+  it('does not forward canonical fingerprints or unapproved asset URIs to the model', () => {
+    const current = compileGeneratedScenePlan(request(), generatedPlan(), 'fixture', 'test');
+    Object.values(current.assets)[0].uri = 'https://private.test/reference.png?token=do-not-send';
+    const input = inputForModel({ ...request(), planningContext: JSON.stringify({ continuityCatalog: buildContinuityCatalog(current), story: 'Keep the approved look.' }) });
+    expect(JSON.stringify(input)).not.toContain('do-not-send');
+    expect(JSON.stringify(input)).not.toContain('sourceIdentity');
+    expect(input.reviewedContinuityCatalog.entities[0]).toMatchObject({ entityId: Object.values(current.characters)[0].id, wardrobeNotes: Object.values(current.characters)[0].wardrobeNotes });
+  });
+});
 
 describe('ParallelResearchProvider', () => {
   it('normalizes, bounds, and deduplicates supported research results', async () => {

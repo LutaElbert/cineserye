@@ -1,15 +1,17 @@
 'use client';
 
-import { Clapperboard, Sparkles } from 'lucide-react';
+import { BookOpen, Clapperboard, Sparkles } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 export function FirstRunChooser({
   providerMode,
   onStartScene,
+  onStartIdea,
   onExploreSample,
 }: {
   providerMode: 'loading' | 'fixture' | 'live';
   onStartScene: () => void;
+  onStartIdea?: () => void;
   onExploreSample: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -23,7 +25,7 @@ export function FirstRunChooser({
   }, []);
 
   const modeLabel = providerMode === 'live'
-    ? 'Live mode is configured. Nothing is sent until you review a scene brief and consent.'
+    ? 'Live mode is configured. Nothing is sent until you review the requested scope and consent.'
     : providerMode === 'fixture'
       ? 'Fixture mode is active. Planning stays deterministic and offline.'
       : 'Provider status is still loading. You can safely begin locally.';
@@ -35,12 +37,16 @@ export function FirstRunChooser({
           <span className="brand-mark" aria-hidden="true">C</span>
           <div>
             <span className="eyebrow">Welcome to Cineserye</span>
-            <h1 id="first-run-title">Start with your scene—or study a finished example.</h1>
-            <p>Cineserye turns one scene into a reviewable, continuity-aware shot proposal without changing your canvas until you accept it.</p>
+            <h1 id="first-run-title">{onStartIdea ? 'Start with your scene—or simply share an idea.' : 'Start with your scene—or study a finished example.'}</h1>
+            <p>{onStartIdea ? 'Describe a story and let the Assistant help develop it, build scenes manually, or explore an example. You approve what gets created.' : 'Cineserye turns one scene into a reviewable, continuity-aware shot proposal without changing your canvas until you accept it.'}</p>
           </div>
         </header>
         <div className="first-run-options">
-          <button ref={startRef} type="button" className="first-run-option" onClick={onStartScene}>
+          {onStartIdea ? <button ref={startRef} type="button" className="first-run-option" style={{ gridColumn: '1 / -1', borderColor: '#aaa1f5', background: '#f7f5ff' }} onClick={onStartIdea}>
+            <BookOpen size={20} aria-hidden="true" />
+            <span><strong>Start with an idea</strong><small>One empty Story Premise layer. Add scenes only when you accept a plan or create them yourself.</small></span>
+          </button> : null}
+          <button ref={onStartIdea ? undefined : startRef} type="button" className="first-run-option" onClick={onStartScene}>
             <Clapperboard size={20} aria-hidden="true" />
             <span><strong>Start a scene</strong><small>Open the clean Story Premise → Scene 01 → Shot 01 workspace.</small></span>
           </button>

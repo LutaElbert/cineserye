@@ -39,6 +39,7 @@ export type UnifiedOutlineScene = {
   nodeIds: string[];
   shotCount: number;
   targetDurationSeconds: number;
+  allocatedDurationSeconds?: number;
   expectedCostLabel: string;
 };
 
@@ -309,6 +310,9 @@ export function buildUnifiedProjectOutline(
       nodeIds: [sceneNode.id, ...itemIds],
       shotCount: shotItems.length,
       targetDurationSeconds,
+      allocatedDurationSeconds: cinema?.storyWorkflow?.sessions.flatMap((session) => session.accepted
+        .filter((mapping) => mapping.sceneId === sceneRecord?.id)
+        .map((mapping) => session.proposals.find((proposal) => proposal.id === mapping.proposalId)?.durationSeconds)).find((value) => value !== undefined),
       expectedCostLabel: cost ? formatCost(cost.expected, cost.pricingMode, cost.currency) : 'Draft',
     };
   });

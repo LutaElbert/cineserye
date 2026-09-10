@@ -24,6 +24,10 @@ export interface ResearchProvider {
 export type ShotPlannerProviderRequest = ProviderRequestContext & {
   brief: ScenePlanningBrief;
   research: ResearchProviderResult;
+  /** Approved text-only continuity context. Never forwarded to web research. */
+  /** Approved shared story JSON may include a versioned continuityCatalog.
+   * Only exact catalog entity IDs authorize reuse; names never authorize merging. */
+  planningContext?: string;
 };
 
 export type ShotPlannerProviderResult = {

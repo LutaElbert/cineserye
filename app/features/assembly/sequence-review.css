@@ -1,0 +1,15 @@
+.sequence-review { display: grid; gap: 12px; color: #30323f; font-size: 13px; }
+.sequence-review header, .sequence-review-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.sequence-review header > span, .sequence-review small { color: #626779; font-size: 11px; }
+.sequence-review p { margin: 0; line-height: 1.5; }
+.sequence-review-preview { display: grid; place-items: center; min-height: 120px; background: #171923; border-radius: 12px; overflow: hidden; color: #fff; }
+.sequence-review-preview video, .sequence-review-result video { width: 100%; max-height: 280px; object-fit: contain; background: #171923; }
+.sequence-review-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; max-height: 250px; overflow-y: auto; }
+.sequence-review-list li { border: 1px solid #e2e2ed; border-radius: 10px; padding: 10px; display: grid; gap: 8px; }
+.sequence-review-list li[aria-current=true] { border-color: #7560de; background: #f6f3ff; }
+.sequence-review-list li > button { display: grid; text-align: left; border: 0; padding: 0; color: inherit; background: transparent; gap: 3px; cursor: pointer; }
+.sequence-review-list li > div { display: flex; gap: 8px; }
+.sequence-review label { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.sequence-review input, .sequence-review select { width: 100%; min-width: 0; min-height: 34px; border: 1px solid #cbcbdc; border-radius: 7px; padding: 6px 8px; background: #fff; color: inherit; }
+.sequence-review-result { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid #e2e2ed; }
+.sequence-review-result a { color: #5033bd; font-weight: 600; }

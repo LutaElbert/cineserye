@@ -65,6 +65,10 @@ test('edits, hides, locks, duplicates, deletes, undoes, and redoes layers', asyn
   const edgeCount = await page.locator('.react-flow__edge').count();
   const sourceHandle = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).locator('.react-flow__handle.source').first();
   const targetHandle = page.locator('.react-flow__node').filter({ hasText: 'Note 01' }).locator('.react-flow__handle.target').first();
+  // Fit View can still be moving the viewport. Wait for stable, hit-testable
+  // handles before capturing coordinates for the real pointer drag.
+  await sourceHandle.hover();
+  await targetHandle.hover();
   const sourceBox = await sourceHandle.boundingBox();
   const targetBox = await targetHandle.boundingBox();
   expect(sourceBox).toBeTruthy();
@@ -203,7 +207,8 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
   await openEditor(page);
 
   const researchNode = page.locator('.react-flow__node').filter({ hasText: 'Story Premise' }).first();
-  await researchNode.locator('.concept-node').dblclick();
+  await researchNode.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   const title = page.getByLabel('Concept title');
   await expect(title).toBeVisible();
   await title.fill('Story Premise plan');
@@ -226,12 +231,14 @@ test('edits rich concept text directly with formatting, commit, cancel, undo, an
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();
 
-  await researchNode.locator('.concept-node').dblclick();
+  await researchNode.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await page.getByLabel('Concept title').fill('Discard this');
   await page.getByLabel('Concept title').press('Escape');
   await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();
 
-  await researchNode.locator('.concept-node').dblclick();
+  await researchNode.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await page.getByLabel('Concept title').fill('Discard with button');
   await page.getByRole('button', { name: 'Cancel editing', exact: true }).click();
   await expect(researchNode.getByText('Story Premise plan', { exact: true })).toBeVisible();

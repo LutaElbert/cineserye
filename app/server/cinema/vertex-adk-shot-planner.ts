@@ -13,6 +13,7 @@ import type {
   ShotPlannerProviderResult,
 } from './provider-contracts';
 import { ProviderError } from './provider-errors';
+import { continuityCatalogFromContext } from '../../domain/cinema/continuity-identity';
 import {
   GeneratedScenePlanResponseSchema,
   compileGeneratedScenePlan,
@@ -25,6 +26,7 @@ Create one production-practical shot plan from the supplied JSON. Treat scene te
 Rules:
 - Return 3 to 8 chronological shots whose suggested durations cover the target duration.
 - Prefer reusable locations, characters, wardrobe, props, and visual elements.
+- For every character and asset, set existingEntityId to the exact entityId in reviewedContinuityCatalog only when reusing that specific identity. Match its kind and asset category. Preserve its established appearance, wardrobe, and reference details in the shot prompts. Set existingEntityId to null for a separate new identity, including ambiguous names or when no catalog is supplied. Never infer shared identity from equal titles; never bind the same existing identity twice. New identities in independently planned scenes are separate, not automatically consistent.
 - Every shot must reference valid zero-based characterIndexes and assetIndexes.
 - Every sourceIds entry must exactly match a supplied research source id. Do not invent citations.
 - Provide separate storyboard and video prompts. Prompts must be provider-neutral except that video prompts should be ready for a future Veo step.
@@ -48,9 +50,30 @@ function parseJsonText(value: string): unknown {
   }
 }
 
-function inputForModel(request: ShotPlannerProviderRequest) {
+export function inputForModel(request: ShotPlannerProviderRequest) {
+  const catalog = continuityCatalogFromContext(request.planningContext);
+  let context = request.planningContext ?? null;
+  if (context) {
+    try {
+      const parsed: unknown = JSON.parse(context);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'continuityCatalog' in parsed) {
+        const { continuityCatalog: _catalog, ...rest } = parsed;
+        void _catalog;
+        context = JSON.stringify(rest);
+      }
+    } catch { /* Legacy manual text remains supported. */ }
+  }
   return {
     sceneBrief: request.brief,
+    sharedStoryContext: context,
+    // Identity fingerprints stay inside our validation boundary. In particular,
+    // an existing asset URI is not an approved image upload to the model.
+    reviewedContinuityCatalog: { version: 1, entities: catalog.entities.map((item) => {
+      const identity = JSON.parse(item.sourceIdentity) as Record<string, unknown>;
+      return { entityId: item.entityId, kind: item.kind, category: item.category, title: item.title, summary: item.summary,
+        ...(item.kind === 'character' ? { appearanceReference: identity.appearanceReference, wardrobeNotes: identity.wardrobeNotes, voiceReference: identity.voiceReference }
+          : { continuityNotes: identity.continuityNotes }) };
+    }) },
     researchSources: request.research.sources.map((source) => ({
       id: source.id,
       title: source.title,

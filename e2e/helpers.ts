@@ -23,6 +23,20 @@ export async function addCinemaDraft(page: Page, role: string, finishEditing = f
   }
 }
 
+/** Planning starts inside the scene node, never from the global toolbar. */
+export async function openSelectedScenePlanner(page: Page) {
+  const editor = page.getByRole('region', { name: 'Scene layer editor', exact: true });
+  if (!(await editor.isVisible())) {
+    const selected = page.locator('.react-flow__node.selected');
+    await expect(selected).toHaveCount(1);
+    await selected.dblclick();
+  }
+  const focus = page.getByRole('button', { name: 'Focus layer editor', exact: true });
+  if (await focus.isVisible()) await focus.click();
+  await editor.getByRole('button', { name: 'Review shot plan', exact: true }).click();
+  await expect(editor.getByRole('region', { name: 'Generate shot plan', exact: true })).toBeVisible();
+}
+
 export function canvasNode(page: Page, name: string): Locator {
   return page.locator('.react-flow__node').filter({ hasText: name }).first();
 }

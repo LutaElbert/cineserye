@@ -15,14 +15,15 @@ import {
   runCinemaPlanningWorkflow,
 } from '../../../server/cinema/workflow';
 import { assertCinemaLivePreflight } from '../../../server/cinema/live-preflight';
+import { localOperationExecutor, operationDigest } from '../../../server/cinema/operation-repository';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
-const activeRequests = new Map<string, Promise<Awaited<ReturnType<typeof runCinemaPlanningWorkflow>>>>();
+const activeRequests = new Map<string, { digest: string; promise: Promise<Awaited<ReturnType<typeof runCinemaPlanningWorkflow>>> }>();
 
 export async function POST(request: Request): Promise<Response> {
   try {
     const source = await request.text();
-    if (source.length > MAX_REQUEST_BYTES) {
+    if (new TextEncoder().encode(source).byteLength > MAX_REQUEST_BYTES) {
       throw new ProviderError('INVALID_REQUEST', 'The scene brief is too large.');
     }
     let payload: PlanSceneRequest;
@@ -47,21 +48,24 @@ export async function POST(request: Request): Promise<Response> {
     const dependencies = config.mode === 'live'
       ? (await import('../../../server/cinema/live-workflow')).liveWorkflowDependencies(config)
       : fixtureWorkflowDependencies();
+    const scope = { brief: payload.brief, mode: config.mode, model: config.vertexModel, receipt: payload.liveConsentReceipt };
+    const dispatch = () => runCinemaPlanningWorkflow(payload.brief, dependencies, request.signal, payload.idempotencyKey);
+    if (config.mode === 'live') {
+      const executor = await localOperationExecutor();
+      return Response.json(await executor.execute(`planning:${payload.idempotencyKey}`, scope, dispatch));
+    }
+    const digest = operationDigest(scope);
     let operation = activeRequests.get(payload.idempotencyKey);
+    if (operation && operation.digest !== digest) throw new ProviderError('INVALID_REQUEST', 'This operation ID has different content.');
     if (!operation) {
-      operation = runCinemaPlanningWorkflow(
-        payload.brief,
-        dependencies,
-        request.signal,
-        payload.idempotencyKey,
-      );
+      operation = { digest, promise: dispatch() };
       activeRequests.set(payload.idempotencyKey, operation);
-      void operation.then(
+      void operation.promise.then(
         () => activeRequests.delete(payload.idempotencyKey),
         () => activeRequests.delete(payload.idempotencyKey),
       );
     }
-    const result = await operation;
+    const result = await operation.promise;
     return Response.json(result, { status: 200 });
   } catch (error) {
     const safeError = publicProviderError(error);

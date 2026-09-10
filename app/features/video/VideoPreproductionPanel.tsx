@@ -1,7 +1,10 @@
 'use client';
 
 import { Check, Download, Film, LoaderCircle, RotateCcw, Square, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useScopedConfirmation } from '../../components/useScopedConfirmation';
+import { requestDigest } from '../../domain/cinema/request-digest';
+import { ownedVideoOperationUrl, videoApprovalContent } from './video-api';
 import type { CinemaProjectData, CinemaShotRecord } from '../../domain/cinema/project-data';
 import {
   approveVideoClip,
@@ -19,6 +22,11 @@ import type {
 import { persistVideoClipArtifact } from './video-storage';
 
 type VisualUpdater = (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData;
+
+/** Choose sufficient footage when possible without changing the narrative cut. */
+export function recommendedClipDuration(plannedSeconds: number): 4 | 6 | 8 {
+  return plannedSeconds <= 4 ? 4 : plannedSeconds <= 6 ? 6 : 8;
+}
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -47,6 +55,21 @@ function downloadBlob(blob: Blob, name: string) {
 
 const TERMINAL = new Set(['ready', 'failed', 'cancelled', 'timed-out']);
 
+/** Canvas selection/global active scene never decides a shot's provenance. */
+export function videoGenerationInputs(cinema: CinemaProjectData, shot: CinemaShotRecord) {
+  const revision = Object.values(cinema.revisions).find((entry) => entry.sceneId === shot.sceneId && entry.status === 'active'
+    && Boolean(entry.snapshot.shots[shot.id])) ?? null;
+  const prompts = Object.values(cinema.prompts).filter((entry) => entry.ownerNodeId === shot.nodeId && entry.runId === revision?.runId)
+    .sort((left, right) => right.version - left.version);
+  const prompt = prompts.find((entry) => entry.purpose === 'video' && entry.status !== 'stale') ?? null;
+  const imagePrompt = prompts.find((entry) => entry.purpose === 'storyboard' && entry.status !== 'stale') ?? null;
+  const approvedFrame = Object.values(cinema.visualPreproduction?.storyboardFrames ?? {}).filter((frame) => frame.shotId === shot.id
+    && frame.revisionId === revision?.id && frame.status === 'approved' && frame.safetyStatus === 'passed'
+    && frame.promptId === imagePrompt?.id && frame.promptVersion === imagePrompt.version && frame.promptText === imagePrompt.generatedText)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] ?? null;
+  return { revision, prompt, approvedFrame };
+}
+
 export function VideoPreproductionPanel({
   cinema,
   shot,
@@ -61,8 +84,7 @@ export function VideoPreproductionPanel({
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
 }) {
   const visual = cinema.visualPreproduction;
-  const prompt = Object.values(cinema.prompts).find((candidate) => candidate.ownerNodeId === shot.nodeId && candidate.purpose === 'video') ?? null;
-  const approvedFrame = Object.values(visual?.storyboardFrames ?? {}).find((frame) => frame.shotId === shot.id && frame.status === 'approved') ?? null;
+  const { revision, prompt, approvedFrame } = videoGenerationInputs(cinema, shot);
   const operations = useMemo(() => Object.values(visual?.videoOperations ?? {})
     .filter((operation) => operation.shotId === shot.id)
     .sort((left, right) => right.startedAt.localeCompare(left.startedAt)), [shot.id, visual?.videoOperations]);
@@ -74,26 +96,33 @@ export function VideoPreproductionPanel({
   const sceneAspect = cinema.scenes[shot.sceneId]?.brief?.aspectRatio;
   const [settings, setSettings] = useState<CinemaVideoSettings>({
     aspectRatio: sceneAspect === '16:9' ? '16:9' : '9:16',
-    durationSeconds: 4,
+    durationSeconds: recommendedClipDuration(shot.durationSeconds),
     resolution: '720p',
     audio: false,
     outputCount: 1,
     seed: null,
   });
-  const [confirmed, setConfirmed] = useState(false);
+  const approvalScope = JSON.stringify({ projectId: cinema.projectId, sceneId: shot.sceneId, shot, prompt, approvedFrame, settings, preflight, providerMode, revision: revision?.id });
+  const currentApproval = useRef(approvalScope);
+  currentApproval.current = approvalScope;
+  const [confirmed, setConfirmed] = useScopedConfirmation(approvalScope);
   const [activeOperationId, setActiveOperationId] = useState<string | null>(resumableOperation?.id ?? null);
   const [starting, setStarting] = useState(false);
+  const startingRef = useRef(false);
   const [clipUrls, setClipUrls] = useState<Record<string, string>>({});
+  const [decoded, setDecoded] = useState<Record<string, { seconds: number; width: number; height: number }>>({});
 
   useEffect(() => {
     let active = true;
+    setPreflight(null);
     void fetch('/api/cinema/generate-video').then((response) => response.json() as Promise<VideoPreflightResponse>).then((result) => {
       if (!active) return;
-      if (result.ok) setPreflight(result);
+      if (result.ok && result.mode === providerMode) setPreflight(result);
+      else if (result.ok) onNotice('Video provider mode changed. Reload capabilities before confirming.', 'error');
       else onNotice(result.error.message, 'error');
     }).catch(() => onNotice('Video capabilities are temporarily unavailable.', 'error'));
     return () => { active = false; };
-  }, [onNotice]);
+  }, [onNotice, providerMode]);
 
   useEffect(() => {
     if (!activeOperationId && resumableOperation) setActiveOperationId(resumableOperation.id);
@@ -121,6 +150,12 @@ export function VideoPreproductionPanel({
     const operation = result.operation;
     const current = visual?.videoOperations[operation.operationId];
     if (!current) return;
+    if (operation.status !== 'ready' && current.status === operation.status && current.provider === operation.provider
+      && current.model === operation.model && current.providerOperationId === operation.providerOperationId && current.error === operation.error) return;
+    if (operation.status === 'ready' && operation.clip && visual?.videoClips[operation.clip.id]) {
+      setActiveOperationId(null);
+      return;
+    }
     if (operation.status === 'ready' && operation.clip && !visual?.videoClips[operation.clip.id]) {
       try {
         const blob = base64Blob(operation.clip.base64);
@@ -220,7 +255,9 @@ export function VideoPreproductionPanel({
     let timer = 0;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/cinema/generate-video?operationId=${encodeURIComponent(activeOperationId)}`);
+        const ownedOperation = visual?.videoOperations[activeOperationId];
+        if (!ownedOperation) throw new Error('The video operation scope is unavailable.');
+        const response = await fetch(ownedVideoOperationUrl({ projectId: cinema.projectId, sceneId: shot.sceneId, shotId: shot.id, revisionId: ownedOperation.revisionId, operationId: activeOperationId }));
         const result = await response.json() as VideoOperationResponse;
         if (!result.ok) throw new Error(result.error.message);
         if (!disposed) await applyOperationSnapshot(result);
@@ -237,11 +274,12 @@ export function VideoPreproductionPanel({
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [activeOperationId, applyOperationSnapshot, onNotice]);
+  }, [activeOperationId, applyOperationSnapshot, onNotice, cinema.projectId, shot.id, shot.sceneId, visual?.videoOperations]);
 
   const estimate = preflight?.usdPerSecond === null || preflight?.usdPerSecond === undefined
     ? null
     : Math.round(preflight.usdPerSecond * settings.durationSeconds * 100) / 100;
+  const footageShortfall = settings.durationSeconds < shot.durationSeconds;
 
   const changeSettings = (patch: Partial<CinemaVideoSettings>) => {
     setSettings((current) => ({ ...current, ...patch }));
@@ -249,18 +287,24 @@ export function VideoPreproductionPanel({
   };
 
   const startGeneration = async (retryOf: string | null = null) => {
-    if (!approvedFrame || !prompt || !cinema.activeRevisionId || !preflight || starting || activeOperationId) return;
+    if (!confirmed || !approvedFrame || !prompt || !revision || !preflight?.ready || preflight.mode !== providerMode || startingRef.current || activeOperationId) return;
+    const capturedApproval = approvalScope;
+    startingRef.current = true;
     setStarting(true);
+    setConfirmed(false);
     const operationId = `video-${crypto.randomUUID()}`;
     try {
       const media = await loadLocalMediaBlob(approvedFrame.blobHash);
       if (!media) throw new Error('The approved storyboard frame is missing from local storage.');
       const frameBase64 = await blobToBase64(media.blob);
+      if (capturedApproval !== currentApproval.current) throw new Error('Shot or generation settings changed. Review and confirm again.');
       const request: GenerateVideoRequest = {
         version: 1,
         idempotencyKey: operationId,
         shotId: shot.id,
-        revisionId: cinema.activeRevisionId,
+        projectId: cinema.projectId,
+        sceneId: shot.sceneId,
+        revisionId: revision.id,
         acceptedPlan: true,
         prompt: {
           id: prompt.id,
@@ -283,11 +327,13 @@ export function VideoPreproductionPanel({
         explicitConfirmation: true,
         liveProviderConsent: providerMode === 'live',
       };
+      request.approval = { quoteId: preflight.quoteId, contentDigest: await requestDigest(videoApprovalContent(request, preflight.quoteId)) };
+      if (capturedApproval !== currentApproval.current) throw new Error('Shot or generation settings changed during approval. Review and confirm again.');
       const now = new Date().toISOString();
       const record: CinemaVideoOperationRecord = {
         id: operationId,
         shotId: shot.id,
-        revisionId: cinema.activeRevisionId,
+        revisionId: revision.id,
         promptId: prompt.id,
         promptVersion: prompt.version,
         promptText: prompt.generatedText,
@@ -337,13 +383,16 @@ export function VideoPreproductionPanel({
       });
       onNotice(error instanceof Error ? error.message : 'Video generation failed.', 'error');
     } finally {
+      startingRef.current = false;
       setStarting(false);
     }
   };
 
   const cancel = async () => {
     if (!activeOperationId) return;
-    const response = await fetch(`/api/cinema/generate-video?operationId=${encodeURIComponent(activeOperationId)}`, { method: 'DELETE' });
+    const ownedOperation = visual?.videoOperations[activeOperationId];
+    if (!ownedOperation) return onNotice('The video operation scope is unavailable.', 'error');
+    const response = await fetch(ownedVideoOperationUrl({ projectId: cinema.projectId, sceneId: shot.sceneId, shotId: shot.id, revisionId: ownedOperation.revisionId, operationId: activeOperationId }), { method: 'DELETE' });
     const result = await response.json() as VideoOperationResponse;
     if (!result.ok) return onNotice(result.error.message, 'error');
     await applyOperationSnapshot(result);
@@ -373,7 +422,7 @@ export function VideoPreproductionPanel({
       <div><span>Motion workbench</span><strong id="video-workbench-title">Animate approved frame</strong></div>
       <small>{clips.length} {clips.length === 1 ? 'version' : 'versions'}</small>
     </header>
-    {!approvedFrame ? <p className="visual-empty">Approve one storyboard frame to unlock a bounded video experiment.</p> : !prompt ? <p className="visual-empty">This shot has no video motion prompt.</p> : <>
+    {!revision ? <p className="visual-empty">Accept this scene’s shot plan before generating video.</p> : !approvedFrame ? <p className="visual-empty">Approve a current storyboard frame for this scene’s accepted revision. Earlier or stale frames stay available but cannot start a new clip.</p> : !prompt ? <p className="visual-empty">Refresh this shot’s stale or missing video motion prompt.</p> : <>
       <div className="video-anchor-summary"><Film size={16} /><div><strong>Approved start frame</strong><span>{approvedFrame.id} · prompt v{prompt.version}</span></div></div>
       <div className="video-prompt-summary"><span>Motion prompt</span><p>{prompt.generatedText}</p>{prompt.negativeConstraints.length ? <small>Avoid: {prompt.negativeConstraints.join(' · ')}</small> : null}</div>
       <div className="video-settings">
@@ -383,15 +432,23 @@ export function VideoPreproductionPanel({
         <div><span>Estimate</span><strong>{estimate === null ? 'Server guarded' : `$${estimate.toFixed(2)} USD`}</strong></div>
       </div>
       <p className="video-capability-note">{preflight ? `${preflight.capability.model} · one silent clip · start/end frames supported` : 'Loading provider capabilities…'} Separate reference images are not sent with this start-frame workflow.</p>
-      {activeRecord ? <div className="video-operation-status" role="status" aria-live="polite"><LoaderCircle className="spin" size={15} /><div><strong>{activeRecord.status.replace('-', ' ')}</strong><span>Operation metadata is saved locally and resumes after reload.</span></div><button type="button" className="secondary-button" onClick={() => void cancel()}><Square size={12} /> Cancel</button></div> : <div className="video-generation-footer">
-        <label><input type="checkbox" checked={confirmed} disabled={!preflight || starting} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm one {settings.durationSeconds}s {settings.resolution} silent clip, the approved frame, prompt, content transfer, and {estimate === null ? 'server-enforced spend ceiling' : `$${estimate.toFixed(2)} estimate`}.</label>
-        <div><small>Clip stays unapproved until review.</small><button type="button" className="primary-button" disabled={!confirmed || !preflight || starting} onClick={() => void startGeneration()}>{starting ? <LoaderCircle className="spin" size={14} /> : <Film size={14} />} Generate one clip</button></div>
+      {providerMode === 'fixture' && <p className="video-capability-note">Fixture test footage: actual duration and dimensions can differ from your requested settings. This is not a finished production clip.</p>}
+      {preflight?.blockers.map((message) => <p role="alert" key={message}>{message}</p>)}
+      {activeRecord ? <div className="video-operation-status" role="status" aria-live="polite"><LoaderCircle className="spin" size={15} /><div><strong>{activeRecord.status.replace('-', ' ')}</strong><span>Metadata is local. Fixture tracking resumes only while this server remains running.</span></div><button type="button" className="secondary-button" onClick={() => void cancel()}><Square size={12} /> Cancel</button></div> : <div className="video-generation-footer">
+        {footageShortfall && <p role="status">This {settings.durationSeconds}s clip is shorter than the planned {shot.durationSeconds}s shot. Choose a longer clip or revise the shot before full-story export. Shots over 8s need a revised plan or a shorter approved edit.</p>}
+        {!footageShortfall && settings.durationSeconds > shot.durationSeconds && <p className="assistant-help">The planned shot uses {shot.durationSeconds}s. Extra footage can be trimmed during assembly; generation is charged for the full {settings.durationSeconds}s clip.</p>}
+        <label><input type="checkbox" checked={confirmed} disabled={!preflight?.ready || starting} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm one {settings.durationSeconds}s {settings.resolution} silent clip, the approved frame, prompt, content transfer, and {estimate === null ? 'server-enforced spend ceiling' : `$${estimate.toFixed(2)} estimate`}.</label>
+        <div><small>Clip stays unapproved until review.</small><button type="button" className="primary-button" disabled={!confirmed || !preflight?.ready || starting} onClick={() => void startGeneration()}>{starting ? <LoaderCircle className="spin" size={14} /> : <Film size={14} />} Generate one clip</button></div>
       </div>}
-      {lastRetryable && !activeOperationId ? <button type="button" className="video-retry secondary-button" disabled={!confirmed || starting} onClick={() => void startGeneration(lastRetryable.id)}><RotateCcw size={12} /> Retry as a new linked operation</button> : null}
+      {lastRetryable && !activeOperationId ? <button type="button" className="video-retry secondary-button" disabled={!confirmed || !preflight?.ready || starting} onClick={() => void startGeneration(lastRetryable.id)}><RotateCcw size={12} /> Retry as a new linked operation</button> : null}
     </>}
     {clips.length ? <div className="video-version-stack" aria-label="Video versions">{clips.map((clip) => <article key={clip.id} className={`video-version video-${clip.status}`}>
-      {clipUrls[clip.id] ? <video controls muted playsInline preload="metadata" src={clipUrls[clip.id]} aria-label={`Video version for ${shot.title}`} /> : <div className="video-missing">Local clip unavailable</div>}
-      <div><strong>{clip.status === 'approved' ? 'Approved clip' : 'Clip candidate'}</strong><small>{clip.durationSeconds}s · {clip.settings.resolution} · {clip.model}</small></div>
+      {clipUrls[clip.id] ? <video controls muted playsInline preload="metadata" src={clipUrls[clip.id]} aria-label={`Video version for ${shot.title}`}
+        onLoadedMetadata={(event) => { const element = event.currentTarget; if (Number.isFinite(element.duration)) setDecoded((current) => ({ ...current, [clip.id]: { seconds: element.duration, width: element.videoWidth, height: element.videoHeight } })); }} /> : <div className="video-missing">Local clip unavailable</div>}
+      <div><strong>{clip.status === 'approved' ? 'Approved clip' : 'Clip candidate'}</strong><small>Requested: {clip.settings.durationSeconds}s · {clip.settings.resolution} · {clip.model}</small>
+        {clip.provider === 'cineserye-video-fixture' && <small>Offline sample only · 1s · 160×90 · not a generated production take</small>}
+        {decoded[clip.id] && <small>Decoded footage: {decoded[clip.id].seconds.toFixed(2)}s · {decoded[clip.id].width}×{decoded[clip.id].height}</small>}
+      </div>
       <footer><button type="button" className="secondary-button" disabled={clip.status === 'approved'} onClick={() => onUpdate((state) => approveVideoClip(state, clip.id))}><Check size={12} /> {clip.status === 'approved' ? 'Approved' : 'Approve clip'}</button><button type="button" className="icon-button" aria-label={`Reject video clip ${clip.id}`} onClick={() => onUpdate((state) => rejectVideoClip(state, clip.id))}><X size={13} /></button><button type="button" className="icon-button" aria-label={`Download video clip ${clip.id}`} onClick={() => void downloadClip(clip.id)}><Download size={13} /></button><button type="button" className="secondary-button" onClick={() => downloadMetadata(clip.id)}>Metadata</button></footer>
     </article>)}</div> : null}
     <p className="video-portability-note">Video bytes stay in this browser and are downloaded separately. Project backups include clip provenance and approvals, but intentionally exclude large MP4 bytes.</p>

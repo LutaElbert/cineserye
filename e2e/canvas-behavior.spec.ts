@@ -237,8 +237,7 @@ test('double-clicking one layer drills from multi-selection into editing', async
   await canvasNode(page, 'Story Premise').dblclick();
   await expect(page.getByRole('group', { name: '3 selected layer actions' })).toBeHidden();
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
-  await expect(page.getByLabel('Concept title')).toBeVisible();
-  await expect(page.locator('.react-flow__resize-control')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Story premise layer editor', exact: true })).toBeVisible();
 });
 
 test('double-clicking empty canvas creates and edits a concept while zoom recovery remains available', async ({ page }) => {

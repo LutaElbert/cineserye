@@ -36,6 +36,7 @@ export async function runCinemaPlanningWorkflow(
   dependencies: CinemaWorkflowDependencies,
   signal: AbortSignal,
   requestedRunId?: string,
+  planningContext?: string,
 ): Promise<PlanSceneSuccess> {
   const brief = validateScenePlanningBrief(untrustedBrief);
   const runId = requestedRunId ?? crypto.randomUUID();
@@ -57,7 +58,7 @@ export async function runCinemaPlanningWorkflow(
       { runId, phase: 'research' },
       () => runProviderOperation(
         (attemptSignal) => dependencies.researchProvider.research({ runId, brief, signal: attemptSignal }),
-        { signal, timeoutMs: 15_000, maxAttempts: 2 },
+        { signal, timeoutMs: 15_000, maxAttempts: dependencies.mode === 'live' ? 1 : 2 },
       ),
       (result) => ({ provider: result.provider, resultCount: result.sources.length }),
     );
@@ -69,9 +70,10 @@ export async function runCinemaPlanningWorkflow(
           runId,
           brief,
           research,
+          planningContext,
           signal: attemptSignal,
         }),
-        { signal, timeoutMs: 75_000, maxAttempts: 2 },
+        { signal, timeoutMs: 75_000, maxAttempts: dependencies.mode === 'live' ? 1 : 2 },
       ),
       (result) => ({ provider: result.provider, model: result.model, resultCount: Object.keys(result.cinema.shots).length }),
     );

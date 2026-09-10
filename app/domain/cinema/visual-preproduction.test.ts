@@ -86,6 +86,16 @@ describe('Sprint 3 reference policy', () => {
 });
 
 describe('Sprint 4 storyboard provenance', () => {
+  it('retains unspecified storyboard seeds as null and still reads legacy numeric seeds', () => {
+    const visual = addCinemaReference(createEmptyVisualPreproductionData(), reference());
+    visual.storyboardRuns['run-storyboard-1'] = run();
+    visual.storyboardFrames['frame-1'] = { ...frame('frame-1', 0, 'candidate'), seed: null };
+    visual.storyboardFrames['frame-2'] = { ...frame('frame-2', 1, 'candidate'), seed: 41001 };
+    const frames = validateVisualPreproductionData(visual, MOCK_CINEMA_PROJECT_DATA).storyboardFrames;
+    expect(frames['frame-1'].seed).toBeNull();
+    expect(frames['frame-2'].seed).toBe(41001);
+  });
+
   it('S4-UT-01 enforces the provider output count boundary', () => {
     const visual = addCinemaReference(createEmptyVisualPreproductionData(), reference({
       rightsStatus: 'creator-owned', allowedUses: ['research', 'image-generation'], approvalStatus: 'approved',
@@ -167,6 +177,15 @@ function videoVisual() {
 }
 
 describe('Sprint 6 video provenance and approval', () => {
+  it('retains real fixture duration without passing a short sample as live footage', () => {
+    const visual = videoVisual();
+    visual.videoOperations['video-operation-1'].provider = 'cineserye-video-fixture';
+    visual.videoClips['clip-1'] = { ...videoClip('clip-1', 'candidate'), provider: 'cineserye-video-fixture', width: 160, height: 90, durationSeconds: 1 };
+    expect(validateVisualPreproductionData(visual, MOCK_CINEMA_PROJECT_DATA).videoClips['clip-1'].durationSeconds).toBe(1);
+    visual.videoOperations['video-operation-1'].provider = 'google-vertex-ai';
+    visual.videoClips['clip-1'].provider = 'google-vertex-ai';
+    expect(() => validateVisualPreproductionData(visual, MOCK_CINEMA_PROJECT_DATA)).toThrow(/duration/);
+  });
   it('S6-UT-03 resolves clip metadata to an approved frame, shot, revision, and video prompt', () => {
     const visual = videoVisual();
     visual.videoClips['clip-1'] = videoClip('clip-1', 'candidate');

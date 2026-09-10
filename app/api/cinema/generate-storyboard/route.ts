@@ -1,7 +1,9 @@
 import 'server-only';
 
 import { z } from 'zod';
-import type { GenerateStoryboardResponse } from '../../../features/storyboard/storyboard-api';
+import { storyboardApprovalContent, type GenerateStoryboardResponse } from '../../../features/storyboard/storyboard-api';
+import { localOperationExecutor, operationDigest } from '../../../server/cinema/operation-repository';
+import { storyboardPreflight } from '../../../server/cinema/storyboard-preflight';
 import { ProviderError, publicProviderError } from '../../../server/cinema/provider-errors';
 import {
   FixtureStoryboardProvider,
@@ -21,7 +23,7 @@ const RequestSchema = z.object({
     version: z.number().int().positive(),
     text: z.string().min(1).max(20_000),
     purpose: z.literal('storyboard'),
-    status: z.string().max(40),
+    status: z.enum(['draft', 'approved']),
   }).strict(),
   references: z.array(z.object({
     id: z.string().min(1).max(160),
@@ -39,14 +41,18 @@ const RequestSchema = z.object({
   }).strict(),
   explicitConfirmation: z.literal(true),
   liveProviderConsent: z.boolean(),
+  approval: z.object({ quoteId: z.string().length(64), contentDigest: z.string().length(64) }).strict().optional(),
 }).strict();
 
-const active = new Map<string, Promise<Awaited<ReturnType<FixtureStoryboardProvider['generate']>>>>();
+export async function GET(): Promise<Response> {
+  try { return Response.json(storyboardPreflight()); }
+  catch (error) { return Response.json({ ok: false, error: publicProviderError(error) }, { status: 503 }); }
+}
 
 export async function POST(request: Request): Promise<Response> {
   try {
     const source = await request.text();
-    if (source.length > MAX_REQUEST_BYTES) throw new ProviderError('INVALID_REQUEST', 'The storyboard request is too large.');
+    if (new TextEncoder().encode(source).byteLength > MAX_REQUEST_BYTES) throw new ProviderError('INVALID_REQUEST', 'The storyboard request is too large.');
     let json: unknown;
     try {
       json = JSON.parse(source);
@@ -56,13 +62,16 @@ export async function POST(request: Request): Promise<Response> {
     const parsed = RequestSchema.safeParse(json);
     if (!parsed.success) throw new ProviderError('INVALID_REQUEST', 'The storyboard request is malformed or contains an unapproved reference.');
     const payload = parsed.data;
-    const mode = process.env.CINESERYE_E2E_FIXTURE === 'true'
-      ? 'fixture'
-      : process.env.CINESERYE_PROVIDER_MODE === 'live' ? 'live' : 'fixture';
+    const preflight = storyboardPreflight();
+    const { mode, model, maxOutputs } = preflight;
+    if (!preflight.ready) throw new ProviderError('INVALID_CONFIGURATION', preflight.blockers[0]);
     if (mode === 'live' && !payload.liveProviderConsent) {
       throw new ProviderError('INVALID_REQUEST', 'Confirm the live provider content transfer before generating.');
     }
-    const model = process.env.CINESERYE_VERTEX_IMAGE_MODEL?.trim() || 'gemini-2.5-flash-image';
+    if (mode === 'live' && (payload.approval?.quoteId !== preflight.quoteId
+      || payload.approval.contentDigest !== operationDigest(storyboardApprovalContent(payload, preflight.quoteId)))) {
+      throw new ProviderError('INVALID_REQUEST', 'The approved image request or price changed. Review and confirm the current scope again.');
+    }
     const provider = mode === 'live'
       ? new VertexStoryboardProvider(
         process.env.GOOGLE_CLOUD_PROJECT?.trim() || 'cineserye',
@@ -70,36 +79,18 @@ export async function POST(request: Request): Promise<Response> {
         model,
       )
       : new FixtureStoryboardProvider();
-    const maxOutputs = Math.min(4, Math.max(1, Number(process.env.CINESERYE_STORYBOARD_MAX_OUTPUTS ?? 4)));
     if (!Number.isInteger(maxOutputs) || payload.settings.outputCount > maxOutputs) {
       throw new ProviderError('INVALID_REQUEST', `Storyboard generation is limited to ${maxOutputs} outputs per request.`);
     }
-    const configuredUnitCost = process.env.CINESERYE_STORYBOARD_USD_PER_IMAGE
-      ? Number(process.env.CINESERYE_STORYBOARD_USD_PER_IMAGE)
-      : mode === 'fixture' ? 0 : null;
-    const configuredSpendLimit = process.env.CINESERYE_STORYBOARD_MAX_ESTIMATED_USD
-      ? Number(process.env.CINESERYE_STORYBOARD_MAX_ESTIMATED_USD)
-      : mode === 'fixture' ? 0 : null;
-    if (mode === 'live' && (
-      configuredUnitCost === null || !Number.isFinite(configuredUnitCost) || configuredUnitCost < 0
-      || configuredSpendLimit === null || !Number.isFinite(configuredSpendLimit) || configuredSpendLimit <= 0
-    )) {
-      throw new ProviderError('INVALID_CONFIGURATION', 'Live storyboard pricing and a per-request spend limit must be configured before generation.');
-    }
-    const estimatedCost = configuredUnitCost === null ? null : configuredUnitCost * payload.settings.outputCount;
-    if (estimatedCost !== null && configuredSpendLimit !== null && estimatedCost > configuredSpendLimit) {
+    const estimatedCost = preflight.unitCost * payload.settings.outputCount;
+    if (estimatedCost > preflight.maxCost) {
       throw new ProviderError('INVALID_REQUEST', 'The storyboard request exceeds the configured spend limit.');
     }
-    let operation = active.get(payload.idempotencyKey);
-    if (!operation) {
-      operation = provider.generate(payload, request.signal);
-      active.set(payload.idempotencyKey, operation);
-      void operation.then(
-        () => active.delete(payload.idempotencyKey),
-        () => active.delete(payload.idempotencyKey),
-      );
-    }
-    const result = validateStoryboardProviderResult(await operation, payload);
+    const dispatch = async () => validateStoryboardProviderResult(await provider.generate(payload, request.signal), payload);
+    const result = mode === 'live'
+      ? await (await localOperationExecutor()).execute(`storyboard:${payload.idempotencyKey}`,
+        storyboardApprovalContent(payload, preflight.quoteId), dispatch)
+      : await dispatch();
     const response: GenerateStoryboardResponse = {
       ok: true,
       version: 1,

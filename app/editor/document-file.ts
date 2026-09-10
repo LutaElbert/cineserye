@@ -18,6 +18,7 @@ import {
 } from './rich-text';
 import { APP_CONFIG } from './config';
 import { validateCinemaProjectData } from '../domain/cinema/project-data';
+import { storyReferenceMediaHashes } from '../domain/cinema/story-workflow';
 
 export const PROJECT_FORMAT = APP_CONFIG.storage.projectFormat;
 export const PROJECT_FILE_VERSION = 6;
@@ -478,6 +479,9 @@ export async function serializeProjectBackupWithMedia(
   document: EditorDocument,
   media: ReadonlyArray<{ hash: string; blob: Blob; mimeType: string; width: number; height: number; byteSize: number }>,
 ): Promise<string> {
+  for (const hash of storyReferenceMediaHashes(document.cinema?.storyWorkflow)) {
+    if (!media.some((entry) => entry.hash === hash)) throw new Error('A story reference image is missing. Relink it before creating a portable backup.');
+  }
   const portable: PortableProjectMedia[] = await Promise.all(media.map(async (entry) => ({
     hash: entry.hash,
     mimeType: entry.mimeType,
@@ -544,6 +548,9 @@ export async function parseProjectBackupWithMedia(source: string): Promise<Parse
     if (actual !== hash) throw new Error(`Project media item ${index + 1} failed its integrity check.`);
     return { hash, mimeType, width, height, byteSize, blob };
   }));
+  for (const hash of storyReferenceMediaHashes(document.cinema?.storyWorkflow)) {
+    if (!media.some((entry) => entry.hash === hash)) throw new Error('The backup is missing a story reference image. Restore a complete backup; the current project was not changed.');
+  }
   return { document, media };
 }
 

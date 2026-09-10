@@ -1,6 +1,6 @@
 'use client';
 
-import { Clapperboard, FolderOpen, Plus, RotateCcw, Sparkles, Undo2 } from 'lucide-react';
+import { BookOpen, Clapperboard, FolderOpen, Plus, RotateCcw, Sparkles, Undo2 } from 'lucide-react';
 
 export function EmptyCanvasRecovery({
   canUndo,
@@ -8,6 +8,7 @@ export function EmptyCanvasRecovery({
   onUndo,
   onRecover,
   onStartScene,
+  onStartIdea,
   onAdd,
   onRestore,
   onExploreSample,
@@ -17,6 +18,7 @@ export function EmptyCanvasRecovery({
   onUndo: () => void;
   onRecover: () => void;
   onStartScene: () => void;
+  onStartIdea?: () => void;
   onAdd: () => void;
   onRestore: () => void;
   onExploreSample: () => void;
@@ -32,6 +34,7 @@ export function EmptyCanvasRecovery({
       <div className="empty-canvas-primary-actions">
         {canUndo ? <button type="button" className="primary-button" onClick={onUndo}><Undo2 size={14} /> Undo delete</button> : null}
         {!canUndo && hasRecovery ? <button type="button" className="primary-button" onClick={onRecover}><RotateCcw size={14} /> Recover last canvas</button> : null}
+        {onStartIdea ? <button type="button" className="secondary-button" onClick={onStartIdea}><BookOpen size={14} /> Start with an idea</button> : null}
         <button type="button" className="secondary-button" onClick={onStartScene}><Clapperboard size={14} /> Start with a scene</button>
       </div>
       <div className="empty-canvas-secondary-actions">
