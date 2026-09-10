@@ -157,6 +157,7 @@ function SceneBranch({
       <div className="outline-scene-end">
         <button type="button" className="outline-scene-metrics" aria-label={`Focus ${scene.item.title} nodes`} onClick={() => onFocusNodes(scene.nodeIds)}>
           <span>{scene.shotCount} {scene.shotCount === 1 ? 'shot' : 'shots'} · {scene.targetDurationSeconds}s</span>
+          {scene.allocatedDurationSeconds !== undefined && <span>{scene.allocatedDurationSeconds}s allocated</span>}
           {secondaryMetric ? <span>{secondaryMetric}</span> : null}
         </button>
         <div className="outline-scene-actions" aria-label={`${scene.item.title} controls`}>

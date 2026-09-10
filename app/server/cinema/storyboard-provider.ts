@@ -4,6 +4,7 @@ import type {
   StoryboardProviderFrame,
 } from '../../features/storyboard/storyboard-api';
 import { ProviderError } from './provider-errors';
+import { inspectStoryboardImage, requireStoryboardDecoder } from './storyboard-media';
 
 export type StoryboardProviderResult = {
   provider: string;
@@ -115,7 +116,9 @@ export class VertexStoryboardProvider implements StoryboardProvider {
   ) {}
 
   async generate(request: GenerateStoryboardRequest, signal: AbortSignal): Promise<StoryboardProviderResult> {
-    const client = new GoogleGenAI({ vertexai: true, project: this.project, location: this.location });
+    await requireStoryboardDecoder(signal);
+    const client = new GoogleGenAI({ vertexai: true, project: this.project, location: this.location,
+      httpOptions: { retryOptions: { attempts: 1 } } });
     const frames: StoryboardProviderFrame[] = [];
     for (let index = 0; index < request.settings.outputCount; index += 1) {
       if (signal.aborted) throw new ProviderError('CANCELLED', 'Storyboard generation was cancelled.');
@@ -129,6 +132,7 @@ export class VertexStoryboardProvider implements StoryboardProvider {
         model: this.model,
         contents: [{ role: 'user', parts }],
         config: {
+          abortSignal: signal,
           responseModalities: ['TEXT', 'IMAGE'],
           imageConfig: { aspectRatio: request.settings.aspectRatio },
         },
@@ -138,15 +142,16 @@ export class VertexStoryboardProvider implements StoryboardProvider {
       if (!imagePart?.inlineData?.data || !imagePart.inlineData.mimeType) {
         throw new ProviderError('UNEXPECTED_RESPONSE', 'Vertex AI did not return a storyboard image.');
       }
-      const [width, height] = DIMENSIONS[request.settings.aspectRatio];
+      const decoded = await inspectStoryboardImage(imagePart.inlineData.data, imagePart.inlineData.mimeType, signal);
       frames.push({
         id: `${request.idempotencyKey}-variant-${index + 1}`,
         variantIndex: index,
-        seed: index,
-        mimeType: imagePart.inlineData.mimeType as StoryboardProviderFrame['mimeType'],
+        seed: null,
+        mimeType: decoded.mimeType,
         base64: imagePart.inlineData.data,
-        width,
-        height,
+        width: decoded.width,
+        height: decoded.height,
+        // Provider acceptance only; this does not claim an independent safety review.
         safetyStatus: 'passed',
       });
     }

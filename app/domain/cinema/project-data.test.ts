@@ -191,7 +191,7 @@ describe('cinema project data', () => {
   });
 
   it('rejects unsupported future versions', () => {
-    const value = { ...completeCinemaData(), schemaVersion: 3 };
+    const value = { ...completeCinemaData(), schemaVersion: 4 };
     expect(() => validateCinemaProjectData(value, hostNodeIds)).toThrow('unsupported cinema data version');
   });
 

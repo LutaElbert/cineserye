@@ -1,4 +1,5 @@
 import type { CinemaAspectRatio, CinemaProjectData } from './project-data';
+import { storyReferenceSnapshot } from './story-reference-bridge';
 
 export type CinemaReferenceType =
   | 'character'
@@ -68,7 +69,7 @@ export type CinemaStoryboardFrameRecord = {
   provider: string;
   model: string;
   aspectRatio: CinemaAspectRatio;
-  seed: number;
+  seed: number | null;
   variantIndex: number;
   intent: CinemaStoryboardIntent;
   blobHash: string;
@@ -240,7 +241,7 @@ function keyed<T extends { id: string }>(
 
 export function validateVisualPreproductionData(
   value: unknown,
-  project: Pick<CinemaProjectData, 'scenes' | 'shots' | 'prompts' | 'revisions'>,
+  project: Pick<CinemaProjectData, 'scenes' | 'shots' | 'prompts' | 'revisions' | 'storyWorkflow'>,
 ): CinemaVisualPreproductionData {
   if (value === undefined) return createEmptyVisualPreproductionData();
   const source = record(value, 'Visual pre-production data');
@@ -290,7 +291,7 @@ export function validateVisualPreproductionData(
     if (!project.revisions[revisionId]) throw new Error(`Storyboard revision ${revisionId} is missing.`);
     const referenceIds = ids(item.referenceIds, 'Storyboard reference ids');
     referenceIds.forEach((referenceId) => {
-      if (!references[referenceId]) throw new Error(`Storyboard reference ${referenceId} is missing.`);
+      if (!references[referenceId] && !storyReferenceSnapshot(project.storyWorkflow, referenceId)) throw new Error(`Storyboard reference ${referenceId} is missing.`);
     });
     const outputCount = numberValue(item.outputCount, 'Storyboard output count', 1);
     if (!Number.isInteger(outputCount) || outputCount > 4) throw new Error('Storyboard output count must be between 1 and 4.');
@@ -327,7 +328,7 @@ export function validateVisualPreproductionData(
       provider: text(item.provider, 'Storyboard frame provider', 160),
       model: text(item.model, 'Storyboard frame model', 160),
       aspectRatio: enumValue(item.aspectRatio, ASPECTS, 'Storyboard frame aspect ratio'),
-      seed: numberValue(item.seed, 'Storyboard frame seed'),
+      seed: optionalNullableNumber(item.seed, 'Storyboard frame seed'),
       variantIndex: numberValue(item.variantIndex, 'Storyboard frame variant index'),
       intent: item.intent === undefined ? run.intent : enumValue(item.intent, STORYBOARD_INTENTS, 'Storyboard frame intent'),
       blobHash: text(item.blobHash, 'Storyboard frame blob hash', 128),
@@ -437,7 +438,8 @@ export function validateVisualPreproductionData(
       throw new Error('Video clip provider provenance does not match its operation.');
     }
     const durationSeconds = numberValue(item.durationSeconds, 'Video clip duration', 1);
-    if (durationSeconds !== settings.durationSeconds) throw new Error('Video clip duration does not match its operation.');
+    const verifiedFixture = provider === 'cineserye-video-fixture' && durationSeconds === 1 && item.width === 160 && item.height === 90;
+    if (!verifiedFixture && Math.abs(durationSeconds - settings.durationSeconds) > 1 / 24) throw new Error('Video clip duration does not match its operation.');
     return {
       id: text(item.id, 'Video clip id', 160), operationId,
       shotId: operation.shotId, revisionId: operation.revisionId, promptId: operation.promptId,

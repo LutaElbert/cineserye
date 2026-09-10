@@ -56,7 +56,7 @@ export function scopeCinemaProjectDataForRun(
 
   const next: CinemaProjectData = {
     ...structuredClone(project),
-    schemaVersion: 2,
+    schemaVersion: project.schemaVersion,
     projectId: project.projectId || `cineserye-${project.projectNodeId ?? project.activeSceneId ?? 'local-project'}`,
     activeRevisionId: null,
     revisions: {},
@@ -132,6 +132,14 @@ export function scopeCinemaProjectDataForRun(
       }])),
     } : undefined,
   };
+  if (next.storyWorkflow) {
+    const changed = next.storyWorkflow.bindings.some((binding) => binding.owner.kind === 'shot'
+      && recordIds.has(binding.owner.id) && recordIds.get(binding.owner.id) !== binding.owner.id);
+    next.storyWorkflow.bindings = next.storyWorkflow.bindings.map((binding) => ({ ...binding,
+      owner: binding.owner.kind === 'shot' ? { kind: 'shot', id: recordIds.get(binding.owner.id) ?? binding.owner.id } : binding.owner,
+    }));
+    if (changed) { next.storyWorkflow.bindingRevision++; next.storyWorkflow.revision++; }
+  }
   const hostNodeIds = new Set<string>([
     ...(next.projectNodeId ? [next.projectNodeId] : []),
     ...Object.values(next.scenes).map((record) => record.nodeId),

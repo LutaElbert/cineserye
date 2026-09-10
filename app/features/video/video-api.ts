@@ -29,7 +29,22 @@ export type GenerateVideoRequest = {
   settings: CinemaVideoSettings;
   explicitConfirmation: true;
   liveProviderConsent: boolean;
+  /** Required by the application route; optional for direct provider fixtures. */
+  projectId?: string;
+  sceneId?: string;
+  approval?: { quoteId: string; contentDigest: string };
 };
+
+export function videoApprovalContent(request: GenerateVideoRequest, quoteId: string) {
+  return { version: 1, quoteId, projectId: request.projectId, sceneId: request.sceneId,
+    shotId: request.shotId, revisionId: request.revisionId, acceptedPlan: request.acceptedPlan,
+    prompt: request.prompt, startFrame: request.startFrame, endFrame: request.endFrame,
+    referenceIds: request.referenceIds, settings: request.settings, liveProviderConsent: request.liveProviderConsent };
+}
+
+export function ownedVideoOperationUrl(scope: { projectId: string; sceneId: string; shotId: string; revisionId: string; operationId: string }) {
+  return `/api/cinema/generate-video?${new URLSearchParams(scope).toString()}`;
+}
 
 export type VideoCapabilitySummary = {
   version: string;
@@ -84,6 +99,9 @@ export type VideoPreflightResponse = {
   };
   usdPerSecond: number | null;
   maximumEstimatedUsd: number | null;
+  ready: boolean;
+  blockers: string[];
+  quoteId: string;
 } | {
   ok: false;
   error: { code: ProviderErrorCode; message: string; retryable: boolean };

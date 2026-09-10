@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { waitForSaved } from './helpers';
+import { waitForSaved, openSelectedScenePlanner } from './helpers';
 
 async function openAcceptedSample(page: Page) {
   await page.goto('/');
@@ -27,8 +27,8 @@ async function planScene(page: Page, title: string) {
   const workspace = page.getByRole('region', { name: 'Multi-scene project workspace' });
   const card = workspace.locator('.project-scene-card').filter({ hasText: title });
   await card.getByRole('button', { name: 'Open & plan' }).click();
-  await page.locator('.plan-scene-button').click();
-  const brief = page.getByRole('dialog', { name: 'Generate shot plan' });
+  await openSelectedScenePlanner(page);
+  const brief = page.getByRole('region', { name: 'Generate shot plan' });
   await brief.getByLabel('Genre and tone').fill('Grounded supernatural suspense');
   await brief.getByLabel('Location and period').fill('Present-day Manila cinema');
   await brief.getByRole('button', { name: 'Generate shot plan' }).click();

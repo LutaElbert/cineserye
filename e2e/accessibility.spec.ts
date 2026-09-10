@@ -34,8 +34,9 @@ test('supports keyboard entry, editing, cancellation, and focus restoration', as
   const researchNode = canvasNode(page, 'Story Premise');
   await researchNode.focus();
   await researchNode.press('Enter');
-  await expect(page.getByLabel('Concept title')).toBeFocused();
-  await page.getByLabel('Concept title').press('Escape');
+  const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
+  await expect(editor).toBeVisible();
+  await editor.press('Escape');
   await expect(researchNode).toBeFocused();
 });
 

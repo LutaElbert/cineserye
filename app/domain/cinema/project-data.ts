@@ -86,6 +86,7 @@ export type CinemaCharacterRecord = {
   appearanceReference: string;
   voiceReference: string;
   wardrobeNotes: string;
+  continuityBinding?: ContinuityBinding;
 };
 
 export type CinemaAssetRecord = {
@@ -99,6 +100,7 @@ export type CinemaAssetRecord = {
   source: 'local' | 'generated' | 'external' | 'planned';
   uri: string;
   provenance: string;
+  continuityBinding?: ContinuityBinding;
 };
 
 export type CinemaAgentRunRecord = {
@@ -209,13 +211,14 @@ export type CinemaPlanRevisionRecord = {
 };
 
 export type CinemaProjectData = Omit<CinemaProjectDataV1, 'schemaVersion'> & {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   projectId: string;
   activeRevisionId: string | null;
   revisions: Record<string, CinemaPlanRevisionRecord>;
   visualPreproduction?: import('./visual-preproduction').CinemaVisualPreproductionData;
   professionalPlanning?: import('./professional-planning').CinemaProfessionalPlanningData;
   multiScene?: import('./multi-scene').CinemaMultiSceneData;
+  storyWorkflow?: import('./story-workflow').StoryWorkflowData;
 };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -519,6 +522,7 @@ function validateCinemaProjectDataV1(
   }));
   const characters = recordMap(value.characters, 'Character', (record) => ({
     ...extensions(record),
+    ...(record.continuityBinding === undefined ? {} : { continuityBinding: ContinuityBindingSchema.parse(record.continuityBinding) }),
     id: id(record.id, 'Character id'),
     nodeId: id(record.nodeId, 'Character canvas node id'),
     sceneIds: idList(record.sceneIds, 'Character scene ids'),
@@ -530,6 +534,7 @@ function validateCinemaProjectDataV1(
   }));
   const assets = recordMap(value.assets, 'Asset', (record) => ({
     ...extensions(record),
+    ...(record.continuityBinding === undefined ? {} : { continuityBinding: ContinuityBindingSchema.parse(record.continuityBinding) }),
     id: id(record.id, 'Asset id'),
     nodeId: id(record.nodeId, 'Asset canvas node id'),
     sceneIds: idList(record.sceneIds, 'Asset scene ids'),
@@ -798,9 +803,11 @@ export function captureCinemaRevisionSnapshot(
   const shots = Object.fromEntries(Object.entries(project.shots)
     .filter(([shotId]) => shotIds.has(shotId)));
   const characters = Object.fromEntries(Object.entries(project.characters)
-    .filter(([, record]) => record.sceneIds.includes(sceneId)));
+    .filter(([, record]) => record.sceneIds.includes(sceneId))
+    .map(([id, record]) => [id, { ...record, sceneIds: [sceneId] }]));
   const assets = Object.fromEntries(Object.entries(project.assets)
-    .filter(([, record]) => record.sceneIds.includes(sceneId)));
+    .filter(([, record]) => record.sceneIds.includes(sceneId))
+    .map(([id, record]) => [id, { ...record, sceneIds: [sceneId] }]));
   const agentRuns = Object.fromEntries(Object.entries(project.agentRuns)
     .filter(([, record]) => record.sceneId === sceneId));
   const runIds = new Set(Object.keys(agentRuns));
@@ -855,10 +862,11 @@ export function validateCinemaProjectData(
   hostNodeIds: ReadonlySet<string>,
 ): CinemaProjectData {
   if (!isRecord(value)) throw new Error('This project uses an unsupported cinema data version.');
+  if (value.schemaVersion !== 3 && value.storyWorkflow !== undefined) throw new Error('Story workflow data requires cinema version 3; do not downgrade this project.');
   if (value.schemaVersion === 1) {
     return migrateCinemaProjectDataV1(validateCinemaProjectDataV1(value, hostNodeIds));
   }
-  if (value.schemaVersion !== 2) throw new Error('This project uses an unsupported cinema data version.');
+  if (value.schemaVersion !== 2 && value.schemaVersion !== 3) throw new Error('This project uses an unsupported cinema data version.');
 
   const current = validateCinemaProjectDataV1({ ...value, schemaVersion: 1 }, hostNodeIds);
   const revisions = recordMap(value.revisions, 'Plan revision', (record) => ({
@@ -922,6 +930,7 @@ export function validateCinemaProjectData(
     shots: current.shots,
     prompts: current.prompts,
     revisions,
+    storyWorkflow: value.schemaVersion === 3 ? StoryWorkflowSchema.parse(value.storyWorkflow) : undefined,
   });
   for (const prompt of Object.values(current.prompts)) {
     for (const referenceId of prompt.referenceIds ?? []) {
@@ -935,10 +944,10 @@ export function validateCinemaProjectData(
     activeRevisionId,
   });
   const multiScene = validateMultiSceneData(value.multiScene, current);
-  return {
+  const result: CinemaProjectData = {
     ...current,
     ...extensions(value),
-    schemaVersion: 2,
+    schemaVersion: value.schemaVersion,
     projectId,
     activeRevisionId,
     revisions,
@@ -946,6 +955,8 @@ export function validateCinemaProjectData(
     professionalPlanning,
     multiScene,
   };
+  if (value.schemaVersion === 3) result.storyWorkflow = validateStoryWorkflow(value.storyWorkflow, result);
+  return result;
 }
 
 export function acceptCinemaPlanRevision(
@@ -988,6 +999,8 @@ export function acceptCinemaPlanRevision(
   const result: CinemaProjectData = {
     ...next,
     projectId: current?.projectId ?? incoming.projectId,
+    schemaVersion: current?.storyWorkflow || incoming.storyWorkflow ? 3 : 2,
+    ...(current?.storyWorkflow || incoming.storyWorkflow ? { storyWorkflow: structuredClone(current?.storyWorkflow ?? incoming.storyWorkflow) } : {}),
     activeRevisionId: revisionId,
     revisions,
     visualPreproduction: structuredClone(
@@ -1012,7 +1025,7 @@ export function acceptCinemaPlanRevision(
       }
     }
   }
-  return result;
+  return reconcileStoryWorkflow(result);
 }
 
 function mergeAcceptedScene(
@@ -1020,31 +1033,25 @@ function mergeAcceptedScene(
   incoming: CinemaProjectData,
   sceneId: string,
 ): CinemaProjectData {
+  const continuityHostRemap = resolveContinuityBindings(current, incoming);
   if (!current) return structuredClone(incoming);
   const next = structuredClone(incoming);
   const previousScene = current.scenes[sceneId];
-  const normalizedTitle = (value: string) => value.trim().toLocaleLowerCase();
-  const continuityHostRemap = new Map<string, string>();
+  const reusedCharacters: Record<string, CinemaCharacterRecord> = {};
+  const reusedAssets: Record<string, CinemaAssetRecord> = {};
   for (const [incomingId, character] of Object.entries(next.characters)) {
-    const shared = Object.values(current.characters).find((candidate) => (
-      candidate.sceneIds.includes(sceneId)
-      && candidate.sceneIds.length > 1
-      && normalizedTitle(candidate.title) === normalizedTitle(character.title)
-    ));
-    if (shared) {
-      continuityHostRemap.set(character.nodeId, shared.nodeId);
+    if (character.continuityBinding) {
+      const shared = structuredClone(current.characters[character.continuityBinding.entityId]);
+      shared.sceneIds = [...new Set([...shared.sceneIds, sceneId])];
+      reusedCharacters[shared.id] = shared;
       delete next.characters[incomingId];
     }
   }
   for (const [incomingId, asset] of Object.entries(next.assets)) {
-    const shared = Object.values(current.assets).find((candidate) => (
-      candidate.sceneIds.includes(sceneId)
-      && candidate.sceneIds.length > 1
-      && candidate.category === asset.category
-      && normalizedTitle(candidate.title) === normalizedTitle(asset.title)
-    ));
-    if (shared) {
-      continuityHostRemap.set(asset.nodeId, shared.nodeId);
+    if (asset.continuityBinding) {
+      const shared = structuredClone(current.assets[asset.continuityBinding.entityId]);
+      shared.sceneIds = [...new Set([...shared.sceneIds, sceneId])];
+      reusedAssets[shared.id] = shared;
       delete next.assets[incomingId];
     }
   }
@@ -1052,14 +1059,24 @@ function mergeAcceptedScene(
     for (const shot of Object.values(next.shots)) {
       shot.continuityNodeIds = shot.continuityNodeIds.map((nodeId) => continuityHostRemap.get(nodeId) ?? nodeId);
     }
-    for (const prompt of Object.values(next.prompts)) {
+    for (const [id, prompt] of Object.entries(next.prompts)) {
+      // Reuse preserves the existing visual reference, not a newly invented one.
+      if (prompt.purpose === 'reference-sheet' && continuityHostRemap.has(prompt.ownerNodeId)) {
+        delete next.prompts[id];
+        for (const run of Object.values(next.agentRuns)) run.promptIds = run.promptIds.filter((promptId) => promptId !== id);
+        continue;
+      }
       prompt.ownerNodeId = continuityHostRemap.get(prompt.ownerNodeId) ?? prompt.ownerNodeId;
-      prompt.continuityNodeIds = prompt.continuityNodeIds.map((nodeId) => continuityHostRemap.get(nodeId) ?? nodeId);
+      prompt.continuityNodeIds = [...new Set(prompt.continuityNodeIds.map((nodeId) => continuityHostRemap.get(nodeId) ?? nodeId))];
     }
   }
   const previousRunIds = new Set(
     Object.values(current.agentRuns).filter((run) => run.sceneId === sceneId).map((run) => run.id),
   );
+  if (Object.values(current.prompts).some((prompt) => prompt.purpose === 'reference-sheet'
+    && previousRunIds.has(prompt.runId) && [...continuityHostRemap.values()].includes(prompt.ownerNodeId))) {
+    throw Error('Keep the source plan of a reused reference, or review a separate new identity before replacing that source scene.');
+  }
   const scenes = structuredClone(current.scenes);
   scenes[sceneId] = {
     ...structuredClone(next.scenes[sceneId]),
@@ -1086,13 +1103,15 @@ function mergeAcceptedScene(
   return {
     ...next,
     projectId: current.projectId,
+    schemaVersion: current.storyWorkflow || next.storyWorkflow ? 3 : 2,
+    ...(current.storyWorkflow || next.storyWorkflow ? { storyWorkflow: structuredClone(current.storyWorkflow ?? next.storyWorkflow) } : {}),
     projectNodeId: current.projectNodeId ?? next.projectNodeId,
     activeSceneId: sceneId,
     sceneOrder,
     scenes,
     shots: { ...keepOtherSceneRecords(current.shots), ...next.shots },
-    characters: { ...retainSharedEntities(current.characters), ...next.characters },
-    assets: { ...retainSharedEntities(current.assets), ...next.assets },
+    characters: { ...retainSharedEntities(current.characters), ...reusedCharacters, ...next.characters },
+    assets: { ...retainSharedEntities(current.assets), ...reusedAssets, ...next.assets },
     agentRuns: { ...keepOtherSceneRecords(current.agentRuns), ...next.agentRuns },
     prompts: { ...keepOtherRunRecords(current.prompts), ...next.prompts },
     sources: { ...keepOtherRunRecords(current.sources), ...next.sources },
@@ -1327,12 +1346,14 @@ export function removeCinemaRecordsForNodes(
 
   next.professionalPlanning = reconcileProfessionalPlanningData(next, next.professionalPlanning);
 
-  return validateCinemaProjectData(next, remainingHostNodeIds);
+  return validateCinemaProjectData(reconcileStoryWorkflow(next), remainingHostNodeIds);
 }
 import { createEmptyVisualPreproductionData, validateVisualPreproductionData } from './visual-preproduction';
+import { ContinuityBindingSchema, resolveContinuityBindings, type ContinuityBinding } from './continuity-identity';
 import {
   createDefaultProfessionalPlanningData,
   reconcileProfessionalPlanningData,
   validateProfessionalPlanningData,
 } from './professional-planning';
 import { createDefaultMultiSceneData, validateMultiSceneData } from './multi-scene';
+import { reconcileStoryWorkflow, validateStoryWorkflow, StoryWorkflowSchema } from './story-workflow';

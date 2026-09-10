@@ -18,7 +18,7 @@ export type CinemaProviderConfig = {
 
 type Environment = Record<string, string | undefined>;
 
-export function readCinemaProviderConfig(environment: Environment = process.env): CinemaProviderConfig {
+export function readCinemaProviderConfig(environment: Environment = process.env, requireResearch = true): CinemaProviderConfig {
   const mode = environment.CINESERYE_E2E_FIXTURE === 'true'
     ? 'fixture'
     : environment.CINESERYE_PROVIDER_MODE ?? 'fixture';
@@ -44,7 +44,7 @@ export function readCinemaProviderConfig(environment: Environment = process.env)
     maxLiveRunCost,
   };
   if (mode === 'live') {
-    if (!config.parallelApiKey) {
+    if (requireResearch && !config.parallelApiKey) {
       throw new ProviderError('INVALID_CONFIGURATION', 'Parallel research is not configured.');
     }
     if (!config.googleCloudProject) {

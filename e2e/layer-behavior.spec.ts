@@ -29,7 +29,8 @@ test('double-click edits a canvas concept and cancel is a clean no-op', async ({
   const originalNodeCount = await page.locator('.react-flow__node').count();
   const originalEdgeCount = await page.locator('.react-flow__edge').count();
 
-  await research.locator('.concept-node').dblclick();
+  await research.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await expect(page.getByLabel('Concept title')).toBeVisible();
   await page.getByLabel('Concept title').fill('Temporary double-click edit');
   await page.getByRole('button', { name: 'Cancel editing', exact: true }).click();
@@ -52,7 +53,8 @@ test('outside-click commits concept text and only grows geometry when committed 
   expect(originalBox).toBeTruthy();
   expect(originalTransform).toBeTruthy();
 
-  await research.locator('.concept-node').dblclick();
+  await research.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await expect(page.getByLabel('Concept title')).toBeFocused();
   const editingBox = await research.boundingBox();
   expect(editingBox!.height).toBeGreaterThan(originalBox!.height + 40);
@@ -87,7 +89,8 @@ test('outside-click commits concept text and only grows geometry when committed 
 test('all formatting tools target the active title or body and can be toggled off', async ({ page }) => {
   await openEditor(page);
   const research = canvasNode(page, 'Story Premise');
-  await research.locator('.concept-node').dblclick();
+  await research.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   const title = page.getByLabel('Concept title');
   const body = page.getByLabel('Concept body');
   const bold = page.getByRole('button', { name: 'Bold', exact: true });
@@ -161,7 +164,8 @@ test('all formatting tools target the active title or body and can be toggled of
   await expect(renderedTitle.locator('s')).toHaveCount(1);
   await expect(research.getByText('Canvas behavior', { exact: true })).toBeVisible();
 
-  await research.locator('.concept-node').dblclick();
+  await research.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await expect(title).toBeFocused();
   await expect(bold).toHaveAttribute('aria-pressed', 'false');
   await expect(italic).toHaveAttribute('aria-pressed', 'true');
@@ -188,7 +192,8 @@ test('checklist content auto-sizes its layer and removes the trailing empty row 
   const originalBox = await research.boundingBox();
   expect(originalBox).toBeTruthy();
 
-  await research.locator('.concept-node').dblclick();
+  await research.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   const title = page.getByLabel('Concept title');
   const body = page.getByLabel('Concept body');
   await title.fill('Checklist sizing');
@@ -488,6 +493,9 @@ test('locked layers reject canvas editing, renaming, and new connections', async
 
   await explore.locator('.concept-node').dblclick();
   await expect(page.getByLabel('Concept title')).toHaveCount(0);
+  const readOnlyEditor = page.getByRole('region', { name: 'Scene layer editor', exact: true });
+  await expect(readOnlyEditor.getByLabel('Layer title', { exact: true })).toBeDisabled();
+  await readOnlyEditor.getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Scene 01', exact: true }).dblclick();
   await expect(page.getByLabel('Layer name')).toHaveCount(0);
 
@@ -791,7 +799,8 @@ test('top-left resizing updates position, respects minimums, and hides controls 
   await page.getByLabel('Lock layer').check();
   await expect(research.locator('.react-flow__resize-control.handle')).toHaveCount(0);
   await page.getByLabel('Lock layer').uncheck();
-  await research.locator('.concept-node').dblclick();
+  await research.click();
+  await page.getByRole('button', { name: 'Edit text', exact: true }).click();
   await expect(page.getByLabel('Concept title')).toBeVisible();
   await expect(research.locator('.react-flow__resize-control.handle')).toHaveCount(0);
   await page.getByRole('button', { name: 'Cancel editing', exact: true }).click();

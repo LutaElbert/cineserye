@@ -21,6 +21,8 @@
     "deploy": "vinext-cloudflare deploy --config wrangler.jsonc"
   },
   "dependencies": {
+    "@ag-ui/core": "0.0.59",
+    "@ag-ui/encoder": "0.0.59",
     "@google/adk": "^2.0.0",
     "@google/genai": "^2.20.0",
     "@tiptap/extension-task-item": "^3.30.5",

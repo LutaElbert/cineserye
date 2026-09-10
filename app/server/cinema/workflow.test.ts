@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ScenePlanningBrief } from '../../domain/cinema/scene-brief';
 import type { CinemaTraceEvent } from './telemetry';
 import { fixtureWorkflowDependencies, runCinemaPlanningWorkflow } from './workflow';
+import { ProviderError } from './provider-errors';
 
 function brief(overrides: Partial<ScenePlanningBrief> = {}): ScenePlanningBrief {
   return {
@@ -28,6 +29,13 @@ function brief(overrides: Partial<ScenePlanningBrief> = {}): ScenePlanningBrief 
 }
 
 describe('fixture cinema planning workflow', () => {
+  it('never automatically repeats an uncertain live research dispatch', async () => {
+    const dependencies = fixtureWorkflowDependencies(() => undefined);
+    dependencies.mode = 'live';
+    const research = vi.spyOn(dependencies.researchProvider, 'research').mockRejectedValue(new ProviderError('PROVIDER_UNAVAILABLE', 'Unknown outcome', true));
+    await expect(runCinemaPlanningWorkflow(brief(), dependencies, new AbortController().signal)).rejects.toThrow();
+    expect(research).toHaveBeenCalledTimes(1);
+  });
   it('runs research then planning and returns a validated prompt package', async () => {
     const events: CinemaTraceEvent[] = [];
     const result = await runCinemaPlanningWorkflow(

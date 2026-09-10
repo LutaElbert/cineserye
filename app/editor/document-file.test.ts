@@ -165,7 +165,7 @@ describe('Cineserye project backups', () => {
 
   it('rejects an unsupported future cinema sidecar version', () => {
     const planned = applyCanvasCommandProposal(initialDocument, MOCK_SHOT_PLAN_PROPOSAL).document;
-    planned.cinema = { ...structuredClone(MOCK_CINEMA_PROJECT_DATA), schemaVersion: 3 } as never;
+    planned.cinema = { ...structuredClone(MOCK_CINEMA_PROJECT_DATA), schemaVersion: 4 } as never;
 
     expect(() => validateEditorDocument(planned)).toThrow('unsupported cinema data version');
   });
