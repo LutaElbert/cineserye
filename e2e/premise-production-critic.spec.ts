@@ -148,6 +148,8 @@ for (const viewport of [{ name: 'desktop', width: 1440, height: 900 }, { name: '
     await editor.getByRole('button', { name: 'Generate one clip', exact: true }).click();
     await expect(editor.locator('.video-version')).toHaveCount(1, { timeout: 20_000 });
     await expect.poll(() => editor.locator('.video-version video').evaluate((element: HTMLVideoElement) => element.readyState), { timeout: 8_000 }).toBeGreaterThanOrEqual(1);
+    expect(await editor.locator('.video-version video').evaluate((element: HTMLVideoElement) => ({ duration: element.duration, width: element.videoWidth, height: element.videoHeight })))
+      .toEqual({ duration: 1, width: 160, height: 90 });
     await expect(editor.locator('.video-version').getByText(/^Requested:/)).toBeVisible();
     await expect(editor.locator('.video-version').getByText(/^Decoded footage:/)).toBeVisible();
     await expect(editor.getByText(/Fixture test footage: actual duration/)).toBeVisible();

@@ -33,6 +33,15 @@ export class OperationRepository {
     return repository;
   }
   private pruneResults() {
+    // Old video ledgers called local stop/timeout/failure "completed". Protect
+    // their ownership BEFORE every retention pass (including open), so the
+    // video store can migrate them without making an unknown purchase retryable.
+    this.database.prepare(`UPDATE operations SET status='unknown'
+      WHERE status='completed' AND substr(key,1,6)='video:' AND length(key)=70
+      AND CASE WHEN json_valid(result) THEN
+        json_extract(result,'$.mode')='live' AND
+        json_extract(result,'$.status') IN ('failed','cancelled','timed-out')
+      ELSE 0 END`).run();
     // Bound retained content, not merely age at process startup. Tombstones keep
     // expired IDs from accidentally purchasing the same operation again.
     this.database.prepare("UPDATE operations SET result=NULL, status='expired' WHERE status='completed' AND updated_at < ?")
@@ -52,6 +61,22 @@ export class OperationRepository {
     const row = this.database.prepare('SELECT digest,status,result FROM operations WHERE key=?').get(key) as RecordRow;
     if (row.digest !== digest) throw new ProviderError('INVALID_REQUEST', 'This operation ID was already used for different content.');
     return { claimed: Number(inserted.changes) === 1, row };
+  }
+  /** Reuse the durable ledger to fence a new ID in the same workflow scope.
+   * Browser undo, an old backup, or a second process cannot bypass this check.
+   * Exact prefix comparison (not LIKE) keeps user IDs containing %/_ literal. */
+  claimExclusive(key: string, digest: string, scopePrefix: string, blockedMessage = 'An earlier Story request in this project is still running or has an unknown outcome. Recover the existing request before approving another.'): { claimed: boolean; row: RecordRow } {
+    if (key.includes('\0') || scopePrefix.includes('\0') || !scopePrefix.endsWith(':') || !key.startsWith(scopePrefix) || !key.slice(scopePrefix.length)
+      || key.slice(scopePrefix.length).includes(':')) throw new ProviderError('INVALID_REQUEST', 'Invalid operation scope.');
+    return this.transaction(() => {
+      // Existing IDs retain their original replay/conflict/tombstone policy.
+      if (this.read(key)) return this.claim(key, digest);
+      const unresolved = this.database.prepare("SELECT key FROM operations WHERE substr(key,1,length(?))=? AND instr(substr(key,length(?)+1),':')=0 AND status IN ('pending','unknown') LIMIT 1")
+        .get(scopePrefix, scopePrefix, scopePrefix);
+      if (unresolved) throw new ProviderError('PROVIDER_UNAVAILABLE',
+        blockedMessage, false);
+      return this.claim(key, digest);
+    });
   }
   complete(key: string, result: unknown) {
     this.database.prepare("UPDATE operations SET status='completed', result=?, updated_at=? WHERE key=?")
@@ -73,6 +98,27 @@ export class OperationRepository {
     this.pruneResults();
     return this.database.prepare('SELECT digest,status,result FROM operations WHERE key=?').get(key) as RecordRow | undefined;
   }
+  /** Existing video ledger migration/observation: never claim or dispatch work,
+   * and never revive a result whose retention tombstone has expired. */
+  legacyVideoRows(): Array<RecordRow & { key: string }> {
+    return this.database.prepare("SELECT key,digest,status,result FROM operations WHERE substr(key,1,6)='video:' AND length(key)=70 AND result IS NOT NULL")
+      .all() as Array<RecordRow & { key: string }>;
+  }
+  hasUnscopedVideoClaim(): boolean {
+    // A previously pruned legacy key has no recoverable scope or outcome. Do
+    // not guess it was safe: scoped modern tombstones do not hit this fence.
+    return Boolean(this.database.prepare("SELECT 1 FROM operations WHERE substr(key,1,6)='video:' AND length(key)=70 AND status IN ('pending','unknown','expired') AND result IS NULL LIMIT 1").get());
+  }
+  migrateVideoKey(key: string, nextKey: string, result: unknown, uncertain: boolean) {
+    this.database.prepare("UPDATE operations SET key=?, result=?, status=CASE WHEN ? THEN 'unknown' ELSE status END WHERE key=? AND status!='expired'")
+      .run(nextKey, JSON.stringify(result), Number(uncertain), key);
+  }
+  observeExisting(key: string, digest: string, result: unknown, terminal: boolean) {
+    const changed = this.database.prepare("UPDATE operations SET status=?, result=?, updated_at=? WHERE key=? AND digest=? AND status IN ('pending','unknown')")
+      .run(terminal ? 'completed' : 'pending', JSON.stringify(result), Date.now(), key, digest);
+    if (!Number(changed.changes)) throw new ProviderError('INVALID_REQUEST', 'The observed operation is no longer writable. Refresh its existing result.');
+    this.pruneResults();
+  }
   close() { this.database.close(); }
   /** Synchronous only: atomically fence continuations against competing dispatch claims. */
   transaction<T>(work: () => T): T {
@@ -90,14 +136,14 @@ export class OperationExecutor {
   private readonly active = new Map<string, { digest: string; promise: Promise<unknown> }>();
   constructor(private readonly repository: OperationRepository) {}
   read(key: string) { return this.repository.read(key); }
-  async execute<T>(key: string, content: unknown, dispatch: () => Promise<T>): Promise<T> {
+  async execute<T>(key: string, content: unknown, dispatch: () => Promise<T>, scopePrefix?: string): Promise<T> {
     const digest = operationDigest(content);
     const running = this.active.get(key);
     if (running) {
       if (running.digest !== digest) throw new ProviderError('INVALID_REQUEST', 'This running operation has different content.');
       return running.promise as Promise<T>;
     }
-    const { claimed, row } = this.repository.claim(key, digest);
+    const { claimed, row } = scopePrefix === undefined ? this.repository.claim(key, digest) : this.repository.claimExclusive(key, digest, scopePrefix);
     if (!claimed) {
       if (row.status === 'completed' && row.result !== null) return JSON.parse(row.result) as T;
       throw new ProviderError('PROVIDER_UNAVAILABLE', row.status === 'expired'

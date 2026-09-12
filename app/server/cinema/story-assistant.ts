@@ -1,4 +1,5 @@
 import 'server-only';
+import { assertNativeRuntime } from './native-runtime';
 import { z } from 'zod';
 import { GoogleGenAI } from '@google/genai';
 import { EventType, RunAgentInputSchema, type BaseEvent } from '@ag-ui/core';
@@ -164,6 +165,7 @@ export function createAssistantHandlers(environment: Record<string, string | und
     },
     async POST(request: Request) {
       try {
+        assertNativeRuntime();
         const body = await request.text(); if (new TextEncoder().encode(body).length > 24 * 1024 * 1024) throw Error('Request exceeds transfer limit.');
         const eventInput = RunAgentInputSchema.parse(JSON.parse(body));
         const runId = z.string().uuid().parse(eventInput.runId);

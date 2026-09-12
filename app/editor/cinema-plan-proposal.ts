@@ -326,16 +326,22 @@ export function prepareCinemaPlanProposal(
   source: EditorDocument,
   currentCinema: CinemaProjectData | undefined,
   proposal: CanvasCommandProposal,
+  options: { replaceStarterShot?: boolean } = {},
 ): CanvasCommandProposal {
   const sourceNodeIds = new Set(source.nodes.map((node) => node.id));
   const sourceNodeById = new Map(source.nodes.map((node) => [node.id, node]));
   const replacements = activePlanHostIds(currentCinema).filter((nodeId) => sourceNodeIds.has(nodeId));
-  if (!currentCinema && sourceNodeIds.has('shot-01')) replacements.push('shot-01');
+  const carriesStarterReplacement = proposal.commands.some((command) => command.type === 'delete-nodes'
+    && command.ids.includes('shot-01'));
+  if (!currentCinema?.activeRevisionId && sourceNodeIds.has('shot-01')
+    && (!currentCinema || options.replaceStarterShot || carriesStarterReplacement)) replacements.push('shot-01');
   const commands = proposal.commands
     .filter((command) => command.type !== 'delete-nodes')
     .map((command) => {
       if (command.type !== 'update-node' || !sourceNodeIds.has(command.id)) return command;
       const sourceNode = sourceNodeById.get(command.id);
+      const preserveCreativeAnchor = sourceNode?.data.kind === 'concept'
+        && (sourceNode.data.domainType === 'cinema.story' || sourceNode.data.domainType === 'cinema.scene');
       const sourceWidth = Number(sourceNode?.style?.width) || Number(sourceNode?.measured?.width) || 0;
       const sourceHeight = Number(sourceNode?.style?.height) || 0;
       const proposedStyle = command.patch.style ?? (
@@ -347,6 +353,7 @@ export function prepareCinemaPlanProposal(
         patch: {
           ...command.patch,
           position: undefined,
+          ...(preserveCreativeAnchor ? { data: undefined } : {}),
           ...(proposedStyle ? {
             style: {
               ...proposedStyle,

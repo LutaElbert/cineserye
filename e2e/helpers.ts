@@ -1,7 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export async function openEditor(page: Page) {
-  await page.goto('/');
+  // The editor's readiness contract is hydration plus an actionable graph,
+  // checked below, not completion of every page load resource.
+  // Some engines can leave the navigation lifecycle pending after the fully
+  // hydrated editor is already usable under a saturated native matrix. Commit
+  // is the only navigation signal needed; the assertions below are the actual
+  // application readiness contract.
+  await page.goto('/', { waitUntil: 'commit' });
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
   const chooser = page.getByRole('dialog', { name: /Start with your scene/ });
   if (await chooser.count()) {

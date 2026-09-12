@@ -36,14 +36,20 @@ function validHierarchyPair(sourceRole: CinemaDraftRole | null, targetRole: Cine
 }
 
 export function isCinemaHierarchyEdge(nodes: EditorNode[], edge: EditorEdge): boolean {
-  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return isCinemaHierarchyEdgeInIndex(new Map(nodes.map((node) => [node.id, node])), edge);
+}
+
+/** Reuse one current-document index when classifying a batch of edges. Never
+ * cache this across edits: node roles and missing endpoints may change. */
+export function isCinemaHierarchyEdgeInIndex(byId: ReadonlyMap<string, EditorNode>, edge: EditorEdge): boolean {
   const validPair = validHierarchyPair(nodeRole(byId.get(edge.source)), nodeRole(byId.get(edge.target)));
   if (edge.data?.relationship !== undefined) return edge.data.relationship === 'hierarchy' && validPair;
   return validPair;
 }
 
 function hierarchyEdges(nodes: EditorNode[], edges: EditorEdge[]) {
-  return edges.filter((edge) => isCinemaHierarchyEdge(nodes, edge));
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return edges.filter((edge) => isCinemaHierarchyEdgeInIndex(byId, edge));
 }
 
 function orderedChildren(nodes: EditorNode[], edges: EditorEdge[], parentId: string) {

@@ -23,8 +23,14 @@ import { loadLocalMediaBlob, saveLocalMediaBlob } from '../../editor/persistence
 import { storyboardApprovalContent, type GenerateStoryboardRequest, type GenerateStoryboardResponse, type StoryboardPreflight } from './storyboard-api';
 import { requestDigest } from '../../domain/cinema/request-digest';
 import { VideoPreproductionPanel } from '../video/VideoPreproductionPanel';
+import { parseStoryboardPreflight } from './storyboard-response';
+import { useResultOwner } from '../simplified-flow/useResultOwner';
 import { useScopedConfirmation } from '../../components/useScopedConfirmation';
 import { storyImageReferences } from '../../domain/cinema/story-reference-bridge';
+import type { WorkflowCapabilities } from '../story-development/workflow-capabilities';
+import { WorkspaceFeatureStatus, workspaceFeature } from '../simplified-flow/WorkspaceFeatureStatus';
+import { useWorkspaceAdmission } from '../simplified-flow/useWorkspaceAdmission';
+import { ensureClientOperation, observeClientOperation } from '../simplified-flow/operation-journal';
 
 type VisualUpdater = (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData;
 
@@ -55,7 +61,7 @@ export function VisualPreproductionPanel({
   sceneId,
   shot,
   accepted,
-  providerMode,
+  capabilities,
   canvasImages,
   onCleanupMedia,
   onUpdate,
@@ -65,12 +71,15 @@ export function VisualPreproductionPanel({
   sceneId: string;
   shot: CinemaShotRecord | null;
   accepted: boolean;
-  providerMode: 'fixture' | 'live';
+  capabilities: WorkflowCapabilities | null;
   canvasImages: Array<{ nodeId: string; name: string; fileName: string; src: string; width: number; height: number }>;
   onCleanupMedia: () => Promise<void>;
   onUpdate: (updater: VisualUpdater) => void;
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
 }) {
+  const { mode: providerMode, canReview } = workspaceFeature(capabilities, 'images');
+  const admitWorkspace = useWorkspaceAdmission(capabilities);
+  const captureOwner = useResultOwner(JSON.stringify([cinema.projectId, sceneId, shot?.id]), onUpdate);
   const visual = cinema.visualPreproduction ?? createEmptyVisualPreproductionData();
   const sceneRevisions = Object.values(cinema.revisions).filter((revision) => revision.sceneId === sceneId && revision.status === 'active');
   const revisionId = accepted && sceneRevisions.length === 1 && (!shot || sceneRevisions[0].snapshot.shots[shot.id]) ? sceneRevisions[0].id : null;
@@ -86,7 +95,9 @@ export function VisualPreproductionPanel({
   const [referencesOpen, setReferencesOpen] = useState(false);
   const [frameUrls, setFrameUrls] = useState<Record<string, string>>({});
   const controllerRef = useRef<AbortController | null>(null);
-  const [preflight, setPreflight] = useState<StoryboardPreflight | null>(null);
+  const storyboardGridRef = useRef<HTMLDivElement | null>(null);
+  const [preflightResult, setPreflight] = useState<{ workspace: WorkflowCapabilities; value: StoryboardPreflight } | null>(null);
+  const preflight = preflightResult?.workspace === capabilities ? preflightResult?.value ?? null : null;
   const [preflightError, setPreflightError] = useState('');
   const [preflightRevision, setPreflightRevision] = useState(0);
   const mountedRef = useRef(true);
@@ -95,20 +106,22 @@ export function VisualPreproductionPanel({
     return () => { mountedRef.current = false; controllerRef.current?.abort(); };
   }, []);
   useEffect(() => {
-    if (providerMode !== 'live') return;
+    if (!canReview || !capabilities || providerMode !== 'live') return;
+    setPreflightError('');
     const controller = new AbortController();
     void fetch('/api/cinema/generate-storyboard', { signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error('Image preflight is unavailable. Reopen this panel to retry.');
-      const value = await response.json() as StoryboardPreflight;
-      if (!controller.signal.aborted) { setPreflight(value); setPreflightError(''); }
+      const value = parseStoryboardPreflight(await response.json());
+      if (value.mode !== providerMode) throw new Error('Image provider mode changed. Refresh workspace status.');
+      if (!controller.signal.aborted) { setPreflight({ workspace: capabilities, value }); setPreflightError(''); }
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) { setPreflight(null); setPreflightError(error instanceof Error ? error.message : 'Preflight unavailable.'); }
     });
     return () => controller.abort();
-  }, [providerMode, preflightRevision]);
+  }, [canReview, capabilities, providerMode, preflightRevision]);
   const estimatedCost = providerMode === 'fixture' ? 0 : preflight ? preflight.unitCost * outputCount : null;
-  const preflightReady = providerMode === 'fixture' || Boolean(preflight?.ready && preflight.mode === providerMode
-    && outputCount <= preflight.maxOutputs && estimatedCost !== null && estimatedCost <= preflight.maxCost);
+  const preflightReady = canReview && (providerMode === 'fixture' || Boolean(preflight?.ready && preflight.mode === providerMode
+    && outputCount <= preflight.maxOutputs && estimatedCost !== null && estimatedCost <= preflight.maxCost));
 
   const references = useMemo(() => Object.values(visual.references)
     .filter((reference) => reference.sceneId === sceneId)
@@ -121,17 +134,18 @@ export function VisualPreproductionPanel({
   const shotReferences = shot ? Object.values(visual.references).filter((reference) => reference.shotIds.includes(shot.id)) : [];
   const eligibleReferences = [...shotReferences.filter(isReferenceEligibleForImageGeneration), ...(shot ? storyImageReferences(cinema, shot.id) : [])];
   const referenceScopeReady = eligibleReferences.length <= 8 && eligibleReferences.reduce((sum, item) => sum + (item.byteSize ?? 0), 0) <= 12 * 1024 * 1024;
-  const approvalScope = JSON.stringify({
-    shotId: shot?.id, shot, revisionId, accepted, providerMode,
-    prompt: storyboardPrompt, outputCount, intent, quote: preflight,
+  const sourceScope = JSON.stringify({
+    projectId: cinema.projectId, shotId: shot?.id, shot, revisionId, accepted,
+    prompt: storyboardPrompt, outputCount, intent,
     aspectRatio: cinema.scenes[sceneId]?.brief?.aspectRatio,
     references: eligibleReferences.map(({ id, title, blobHash, mimeType, rightsStatus, allowedUses, approvalStatus }) => (
       { id, title, blobHash, mimeType, rightsStatus, allowedUses, approvalStatus }
     )),
   });
-  const currentScopeRef = useRef(approvalScope);
-  currentScopeRef.current = approvalScope;
-  const [confirmed, setConfirmed] = useScopedConfirmation(approvalScope);
+  const approvalScope = JSON.stringify({ sourceScope, providerMode, quote: preflight });
+  const currentScopeRef = useRef(sourceScope);
+  currentScopeRef.current = sourceScope;
+  const [confirmed, setConfirmed] = useScopedConfirmation(approvalScope, capabilities);
   const shotFrames = useMemo(() => shot ? Object.values(visual.storyboardFrames)
     .filter((frame) => frame.shotId === shot.id)
     .sort((left, right) => left.variantIndex - right.variantIndex) : [], [shot, visual.storyboardFrames]);
@@ -152,7 +166,7 @@ export function VisualPreproductionPanel({
     const urls: string[] = [];
     void Promise.all(shotFrames.map(async (frame) => {
       const media = await loadLocalMediaBlob(frame.blobHash);
-      if (!media) return null;
+      if (!media || disposed) return null;
       const url = URL.createObjectURL(media.blob);
       urls.push(url);
       return [frame.id, url] as const;
@@ -166,6 +180,7 @@ export function VisualPreproductionPanel({
   }, [shotFrames]);
 
   const uploadReference = async (file: File) => {
+    const ownsResult = captureOwner();
     setUploading(true);
     try {
       const validation = await validateImageFile(file);
@@ -174,6 +189,7 @@ export function VisualPreproductionPanel({
         width: validation.width,
         height: validation.height,
       });
+      if (!ownsResult()) return;
       const reference: CinemaReferenceRecord = {
         id: `reference-${crypto.randomUUID()}`,
         sceneId,
@@ -198,9 +214,10 @@ export function VisualPreproductionPanel({
       onUpdate((current) => addCinemaReference(current, reference));
       onNotice('Reference added to the local deck. Confirm its rights before generation.', 'success');
     } catch (error) {
+      if (!ownsResult()) return;
       onNotice(error instanceof Error ? error.message : 'The reference could not be added.', 'error');
     } finally {
-      setUploading(false);
+      if (ownsResult()) setUploading(false);
     }
   };
 
@@ -239,12 +256,14 @@ export function VisualPreproductionPanel({
   };
 
   const addCanvasImage = async () => {
+    const ownsResult = captureOwner();
     const source = canvasImages.find((image) => image.nodeId === canvasImageId);
     if (!source) return;
     setUploading(true);
     try {
       const blob = await (await fetch(source.src)).blob();
       const media = await saveLocalMediaBlob(blob, { mimeType: blob.type, width: source.width, height: source.height });
+      if (!ownsResult()) return;
       onUpdate((current) => addCinemaReference(current, {
         id: `reference-${crypto.randomUUID()}`,
         sceneId,
@@ -269,9 +288,10 @@ export function VisualPreproductionPanel({
       setCanvasImageId('');
       onNotice('Canvas image attached. Confirm its rights before generation.', 'success');
     } catch (error) {
+      if (!ownsResult()) return;
       onNotice(error instanceof Error ? error.message : 'The canvas image could not be attached.', 'error');
     } finally {
-      setUploading(false);
+      if (ownsResult()) setUploading(false);
     }
   };
 
@@ -284,12 +304,15 @@ export function VisualPreproductionPanel({
   };
 
   const generate = async () => {
-    if (!shot || !storyboardPrompt || !revisionId || !confirmed || generating || !preflightReady || !referenceScopeReady) return;
+    if (!shot || !storyboardPrompt || !revisionId || !confirmed || generating || controllerRef.current || !preflightReady || !referenceScopeReady || providerMode === 'loading') return;
     const controller = new AbortController();
+    const ownsResult = captureOwner();
     controllerRef.current = controller;
     setGenerating(true);
     const runId = `storyboard-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
+    const journalOwner = { projectId: cinema.projectId, kind: 'image-generation' as const, scopeKey: `${shot.id}:${revisionId}` };
+    let journalRecorded = false, dispatched = false;
     onUpdate((current) => ({
       ...current,
       storyboardRuns: {
@@ -317,6 +340,7 @@ export function VisualPreproductionPanel({
       },
     }));
     try {
+      const assertWorkspace = admitWorkspace(providerMode);
       const references = await Promise.all(eligibleReferences.map(async (reference) => {
         const media = reference.blobHash ? await loadLocalMediaBlob(reference.blobHash) : null;
         if (!media || !reference.mimeType) throw new Error(`${reference.title} is missing its local media.`);
@@ -357,7 +381,20 @@ export function VisualPreproductionPanel({
         quoteId: preflight.quoteId,
         contentDigest: await requestDigest(storyboardApprovalContent(payload, preflight.quoteId)),
       };
-      if (controller.signal.aborted || currentScopeRef.current !== approvalScope) throw new Error('Generation scope changed. Review it again.');
+      assertWorkspace();
+      if (!ownsResult() || controller.signal.aborted || currentScopeRef.current !== sourceScope) throw new Error('Generation scope changed. Review it again.');
+      const sourceFingerprint = payload.approval?.contentDigest ?? await requestDigest({ shotId: payload.shotId, revisionId: payload.revisionId,
+        prompt: payload.prompt, references: payload.references.map((reference) => {
+          const metadata: Partial<typeof reference> = { ...reference }; delete metadata.base64; return metadata;
+        }), settings: payload.settings });
+      if (!ownsResult() || controller.signal.aborted || currentScopeRef.current !== sourceScope) throw new Error('Generation scope changed while recording recovery. Review it again.');
+      ensureClientOperation({ id: runId, ...journalOwner, sourceFingerprint,
+        provider: providerMode === 'live' ? 'google-vertex-ai' : 'cineserye-storyboard-fixture',
+        model: providerMode === 'live' ? preflight!.model : 'fixture-cinematic-board-v1', estimateUsd: estimatedCost },
+      { phase: 'intent', dispatchCertainty: 'not-dispatched' });
+      journalRecorded = true;
+      observeClientOperation(runId, journalOwner, { phase: 'dispatched', dispatchCertainty: 'may-have-dispatched' });
+      dispatched = true;
       const response = await fetch('/api/cinema/generate-storyboard', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -366,7 +403,7 @@ export function VisualPreproductionPanel({
       });
       const result = await response.json() as GenerateStoryboardResponse;
       if (!result.ok) throw new Error(result.error.message);
-      if (controller.signal.aborted || !mountedRef.current || currentScopeRef.current !== approvalScope) throw new Error('The result belongs to a cancelled or changed request and was not applied.');
+      if (!ownsResult() || controller.signal.aborted || !mountedRef.current || currentScopeRef.current !== sourceScope) throw new Error('The result belongs to a cancelled or changed request and was not applied.');
       const frames = await Promise.all(result.frames.map(async (frame) => {
         const blob = base64Blob(frame.base64, frame.mimeType);
         if (!blob.size) throw new Error('The provider returned an empty storyboard frame.');
@@ -401,7 +438,7 @@ export function VisualPreproductionPanel({
           createdAt: new Date().toISOString(),
         };
       }));
-      if (controller.signal.aborted || !mountedRef.current || currentScopeRef.current !== approvalScope) throw new Error('The result belongs to a cancelled or changed request and was not applied.');
+      if (!ownsResult() || controller.signal.aborted || !mountedRef.current || currentScopeRef.current !== sourceScope) throw new Error('The result belongs to a cancelled or changed request and was not applied.');
       onUpdate((current) => ({
         ...current,
         storyboardRuns: {
@@ -421,12 +458,20 @@ export function VisualPreproductionPanel({
           ...Object.fromEntries(frames.map((frame) => [frame.id, frame])),
         },
       }));
+      observeClientOperation(runId, journalOwner, { phase: 'awaiting-review', dispatchCertainty: 'completed', lastError: null,
+        completedUnits: frames.length, totalUnits: frames.length });
       setConfirmed(false);
       onNotice(`${frames.length} storyboard ${frames.length === 1 ? 'variant' : 'variants'} generated for review.`, 'success');
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        storyboardGridRef.current?.scrollIntoView({ block: 'start' });
+      }));
     } catch (error) {
-      if (!mountedRef.current) return;
+      if (!ownsResult() || !mountedRef.current) return;
       setConfirmed(false);
       const cancelled = controller.signal.aborted;
+      if (journalRecorded) observeClientOperation(runId, journalOwner, { phase: cancelled || dispatched ? 'unknown' : 'failed',
+        dispatchCertainty: dispatched ? 'may-have-dispatched' : 'not-dispatched', completedUnits: null, totalUnits: null,
+        lastError: cancelled ? 'Local waiting stopped. Provider work or billing may continue.' : error instanceof Error ? error.message : 'Generation failed.' });
       onUpdate((current) => ({
         ...current,
         storyboardRuns: {
@@ -442,12 +487,13 @@ export function VisualPreproductionPanel({
       onNotice(cancelled ? (providerMode === 'live' ? 'Cancelled locally. Dispatched provider work may still incur charges; review provider activity before generating again.' : 'Storyboard generation cancelled.') : error instanceof Error ? error.message : 'Storyboard generation failed.', cancelled ? 'info' : 'error');
     } finally {
       controllerRef.current = null;
-      setGenerating(false);
+      if (ownsResult()) setGenerating(false);
     }
   };
 
   return (
     <div className="visual-preproduction">
+      <WorkspaceFeatureStatus capabilities={capabilities} feature="images" />
       {shot ? <section className="storyboard-workbench" aria-labelledby="storyboard-workbench-title">
         <header>
           <div><span>Storyboard workbench</span><strong id="storyboard-workbench-title">{shot.title}</strong></div>
@@ -461,6 +507,14 @@ export function VisualPreproductionPanel({
             {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'ref' : 'refs'}
           </button>
         </header>
+        {shotFrames.length ? <div ref={storyboardGridRef} className="storyboard-grid" aria-label="Storyboard variants">{shotFrames.map((frame) => <article key={frame.id} className={`storyboard-frame frame-${frame.status}`}>
+          {/* Local object URLs are intentionally not sent through an image optimizer. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {frameUrls[frame.id] ? <img src={frameUrls[frame.id]} alt={`Storyboard variant ${frame.variantIndex + 1} for ${shot.title}`} /> : <div className="storyboard-frame-loading"><LoaderCircle className="spin" /></div>}
+          <div><strong>Variant {frame.variantIndex + 1}</strong><small>{frame.intent.replaceAll('-', ' ')} · {frame.status} · {frame.model}</small></div>
+          {frame.referenceIds.some((id) => id.startsWith('story-ref:') && !eligibleReferences.some((reference) => reference.id === id)) && <p role="status">Story references changed or are no longer approved for this shot. This existing output is preserved; review before reusing it.</p>}
+          <footer><button type="button" className="secondary-button" disabled={frame.status === 'approved'} onClick={() => onUpdate((current) => approveStoryboardFrame(current, frame.id))}><Check size={12} /> {frame.status === 'approved' ? 'Approved anchor' : 'Approve'}</button><button type="button" className="icon-button" aria-label={`Reject storyboard variant ${frame.variantIndex + 1}`} onClick={() => onUpdate((current) => rejectStoryboardFrame(current, frame.id))}><X size={13} /></button>{frameUrls[frame.id] && <a className="icon-button" href={frameUrls[frame.id]} download={`${shot.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-variant-${frame.variantIndex + 1}.${frame.mimeType === 'image/svg+xml' ? 'svg' : frame.mimeType.split('/')[1]}`} aria-label={`Download storyboard variant ${frame.variantIndex + 1}`}><Download size={13} /></a>}</footer>
+        </article>)}</div> : null}
         {!accepted || !revisionId ? <p className="visual-empty">Accept the shot-plan proposal before generating storyboard frames.</p> : !storyboardPrompt ? <p className="visual-empty">This shot has no storyboard prompt.</p> : <>
           <div className="storyboard-prompt-summary"><span>Prompt v{storyboardPrompt.version}</span><p>{storyboardPrompt.generatedText}</p></div>
           {!eligibleReferences.length ? <p className="storyboard-reference-guidance">No approved references. You can generate from the prompt alone, but character and prop consistency may vary. <button type="button" aria-expanded={referenceManagerOpen} aria-controls="scene-reference-manager" onClick={() => setReferencesOpen(true)}>Manage references</button></p> : null}
@@ -482,30 +536,22 @@ export function VisualPreproductionPanel({
                 <option value="budget-conscious">Budget-conscious</option>
               </select>
             </div>
-            <div><span>Image model</span><strong>{providerMode === 'live' ? preflight?.model ?? 'Checking…' : 'Offline fixture'}</strong></div>
+            <div><span>Image model</span><strong>{providerMode === 'loading' ? 'Availability unknown' : providerMode === 'live' ? preflight?.model ?? 'Checking…' : 'Offline fixture'}</strong></div>
             <div><span>Estimated USD</span><strong>{estimatedCost === null ? 'Unavailable' : `$${estimatedCost.toFixed(4)}`}</strong></div>
             {providerMode === 'live' ? <button type="button" className="secondary-button" disabled={generating} onClick={() => { setPreflight(null); setConfirmed(false); setPreflightError(''); setPreflightRevision((value) => value + 1); }}>Refresh estimate</button> : null}
           </div>
           <div className="storyboard-generation-footer">
             {eligibleReferences.some((item) => item.id.startsWith('story-ref:')) && <p>Included story references: {eligibleReferences.filter((item) => item.id.startsWith('story-ref:')).map((item) => item.title).join(', ')}. Edit their scope in Story workspace. Notes are not sent to this image endpoint.</p>}
             {!referenceScopeReady && <p role="alert">Reduce combined story and scene references to at most 8 images and 12 MB before generating.</p>}
-            {!preflightReady ? <p role="status">{preflightError || preflight?.blockers[0] || 'Checking image scope and spend limits. Reduce outputs if the estimate exceeds the limit.'}</p> : null}
+            {canReview && !preflightReady ? <p role="status">{preflightError || preflight?.blockers[0] || 'Checking image scope and spend limits. Reduce outputs if the estimate exceeds the limit.'}</p> : null}
             <label className="storyboard-consent"><input type="checkbox" checked={confirmed} disabled={generating || !preflightReady} onChange={(event) => setConfirmed(event.target.checked)} /> I confirm the {intent.replaceAll('-', ' ')} direction, this prompt, {eligibleReferences.length} approved {eligibleReferences.length === 1 ? 'reference' : 'references'}, and {outputCount} {outputCount === 1 ? 'output' : 'outputs'}.{providerMode === 'live' ? ` Send this content to ${preflight?.model ?? 'the reviewed model'} at an estimated USD $${estimatedCost?.toFixed(4) ?? '—'} (operator ceiling $${preflight?.maxCost ?? '—'}).` : ''}</label>
-            <div className="storyboard-actions"><small>{outputCount} {outputCount === 1 ? 'image' : 'images'} · {providerMode === 'live' ? 'Estimate, not a guaranteed provider bill' : '$0.00 fixture'}</small>{generating ? <button type="button" className="secondary-button" onClick={() => controllerRef.current?.abort()}><X size={13} /> Cancel</button> : null}<button type="button" className="primary-button" disabled={!confirmed || generating || !preflightReady || !referenceScopeReady} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} {generating ? 'Generating…' : shotFrames.length ? 'Regenerate variants' : 'Generate storyboard'}</button></div>
+            <div className="storyboard-actions"><small>{outputCount} {outputCount === 1 ? 'image' : 'images'} · {providerMode === 'loading' ? 'Availability unknown' : providerMode === 'live' ? 'Estimate, not a guaranteed provider bill' : '$0.00 fixture'}</small>{generating ? <button type="button" className="secondary-button" onClick={() => controllerRef.current?.abort()}><X size={13} /> Cancel</button> : null}<button type="button" className="primary-button" disabled={!confirmed || generating || !preflightReady || !referenceScopeReady} onClick={() => void generate()}>{generating ? <LoaderCircle className="spin" size={14} /> : <ImagePlus size={14} />} {generating ? 'Generating…' : shotFrames.length ? 'Regenerate variants' : 'Generate storyboard'}</button></div>
           </div>
         </>}
-        {shotFrames.length ? <div className="storyboard-grid" aria-label="Storyboard variants">{shotFrames.map((frame) => <article key={frame.id} className={`storyboard-frame frame-${frame.status}`}>
-          {/* Local object URLs are intentionally not sent through an image optimizer. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          {frameUrls[frame.id] ? <img src={frameUrls[frame.id]} alt={`Storyboard variant ${frame.variantIndex + 1} for ${shot.title}`} /> : <div className="storyboard-frame-loading"><LoaderCircle className="spin" /></div>}
-          <div><strong>Variant {frame.variantIndex + 1}</strong><small>{frame.intent.replaceAll('-', ' ')} · {frame.status} · {frame.model}</small></div>
-          {frame.referenceIds.some((id) => id.startsWith('story-ref:') && !eligibleReferences.some((reference) => reference.id === id)) && <p role="status">Story references changed or are no longer approved for this shot. This existing output is preserved; review before reusing it.</p>}
-          <footer><button type="button" className="secondary-button" disabled={frame.status === 'approved'} onClick={() => onUpdate((current) => approveStoryboardFrame(current, frame.id))}><Check size={12} /> {frame.status === 'approved' ? 'Approved anchor' : 'Approve'}</button><button type="button" className="icon-button" aria-label={`Reject storyboard variant ${frame.variantIndex + 1}`} onClick={() => onUpdate((current) => rejectStoryboardFrame(current, frame.id))}><X size={13} /></button>{frameUrls[frame.id] && <a className="icon-button" href={frameUrls[frame.id]} download={`${shot.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-variant-${frame.variantIndex + 1}.${frame.mimeType === 'image/svg+xml' ? 'svg' : frame.mimeType.split('/')[1]}`} aria-label={`Download storyboard variant ${frame.variantIndex + 1}`}><Download size={13} /></a>}</footer>
-        </article>)}</div> : null}
-        {accepted ? <VideoPreproductionPanel
+        {accepted ? <VideoPreproductionPanel key={JSON.stringify([cinema.projectId, shot.id])}
           cinema={{ ...cinema, visualPreproduction: visual }}
           shot={shot}
-          providerMode={providerMode}
+          capabilities={capabilities}
           onUpdate={onUpdate}
           onNotice={onNotice}
         /> : null}
@@ -551,7 +597,7 @@ export function VisualPreproductionPanel({
             const attached = Boolean(shot?.id && reference.shotIds.includes(shot.id));
             return <article key={reference.id} className={`reference-card ${eligible ? 'reference-eligible' : ''}`}>
               <header><div><span>{reference.type} · {reference.origin.replace('-', ' ')}</span><strong>{reference.title}</strong></div><button type="button" className="icon-button" aria-label={`${reference.pinned ? 'Unpin' : 'Pin'} ${reference.title}`} onClick={() => setReference(reference.id, { pinned: !reference.pinned })}><Pin size={13} fill={reference.pinned ? 'currentColor' : 'none'} /></button></header>
-              <small>{formatBytes(reference.byteSize)} · {reference.approvalStatus} · {eligible ? 'Image generation ready' : 'Inspiration only'} · Attached to {reference.shotIds.length} {reference.shotIds.length === 1 ? 'shot' : 'shots'}</small>
+              <small>{formatBytes(reference.byteSize)} · {reference.approvalStatus} · {eligible ? 'Eligible image reference' : 'Inspiration only'} · Attached to {reference.shotIds.length} {reference.shotIds.length === 1 ? 'shot' : 'shots'}</small>
               <div className="reference-fields">
                 <label><span>Type</span><select value={reference.type} onChange={(event) => setReference(reference.id, { type: event.target.value as CinemaReferenceType })}><option value="character">Character</option><option value="location">Location</option><option value="prop">Prop</option><option value="wardrobe">Wardrobe</option><option value="style">Style</option><option value="composition">Composition</option><option value="other">Other</option></select></label>
                 <label><span>Rights</span><select value={reference.rightsStatus} onChange={(event) => setReference(reference.id, { rightsStatus: event.target.value as CinemaReferenceRight, approvalStatus: 'pending' })}><option value="unknown">Unknown</option><option value="creator-owned">Creator owned</option><option value="licensed">Licensed</option><option value="public-domain">Public domain</option></select></label>

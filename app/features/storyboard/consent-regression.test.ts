@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MOCK_CINEMA_PROJECT_DATA } from '../../domain/cinema/mock/reel-knows-tomorrow';
 import type { CinemaReferenceRecord } from '../../domain/cinema/visual-preproduction';
 import { VisualPreproductionPanel } from './VisualPreproductionPanel';
+import { workflowCapabilities } from '../../server/cinema/workflow-capabilities';
 
 vi.mock('../video/VideoPreproductionPanel', () => ({ VideoPreproductionPanel: () => null }));
 afterEach(cleanup);
@@ -14,7 +15,7 @@ describe('storyboard consent scope', () => {
     const cinema = structuredClone(MOCK_CINEMA_PROJECT_DATA);
     const shot = Object.values(cinema.shots)[0];
     for (const prompt of Object.values(cinema.prompts)) if (prompt.ownerNodeId === shot.nodeId) prompt.status = 'stale';
-    const props = { cinema, sceneId: shot.sceneId, shot, accepted: true, providerMode: 'fixture' as const,
+    const props = { cinema, sceneId: shot.sceneId, shot, accepted: true, capabilities: workflowCapabilities({ CINESERYE_E2E_FIXTURE: 'true' }),
       canvasImages: [], onCleanupMedia: vi.fn(), onUpdate: vi.fn(), onNotice: vi.fn() };
     const view = render(createElement(VisualPreproductionPanel, props));
     fireEvent.click(screen.getByRole('checkbox', { name: /I confirm/ }));
@@ -33,7 +34,7 @@ describe('storyboard consent scope', () => {
     };
     cinema.visualPreproduction!.references = { [reference.id]: reference };
     const props = { cinema, sceneId: shot.sceneId, shot, accepted: true,
-      providerMode: 'fixture' as const, canvasImages: [], onCleanupMedia: vi.fn(),
+      capabilities: workflowCapabilities({ CINESERYE_E2E_FIXTURE: 'true' }), canvasImages: [], onCleanupMedia: vi.fn(),
       onUpdate: vi.fn(), onNotice: vi.fn() };
     const view = render(createElement(VisualPreproductionPanel, props));
     fireEvent.click(screen.getByRole('checkbox', { name: /I confirm/ }));

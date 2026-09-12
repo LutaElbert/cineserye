@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { X, Sparkles, BookOpen, ImageIcon, Check, ArrowRight } from 'lucide-react';
 import { requestDigest } from '../../domain/cinema/request-digest';
@@ -10,22 +10,28 @@ import type { EditorDocument } from '../../editor/types';
 import { assistantRefLimits, type StoryAssistantController } from './useStoryAssistant';
 import { StructuredQuestions } from './StructuredQuestions';
 import { StoryDevelopmentPanel } from './StoryDevelopmentPanel';
-import type { StoryQuote } from './contracts';
+import { StoryQuoteSchema, type StoryQuote } from './contracts';
+import type { WorkflowCapabilities } from './workflow-capabilities';
 import type { OperationProgress } from '../../domain/cinema/generation-operation';
 import { StoryRevisionHistory } from './StoryRevisionHistory';
 import { assistantScrollSurface, useAssistantFooterSize } from './assistant-scroll';
 
-export function StoryAssistantLayer({ controller, document, getDocument, commit, flush, providerMode, shotPlanning, onScenesAccepted }: {
+export function StoryAssistantLayer({ controller, document, getDocument, commit, flush, providerMode, capabilities, shotPlanning, onScenesAccepted }: {
   controller: StoryAssistantController; document: EditorDocument; getDocument: () => EditorDocument;
   commit: (document: EditorDocument, history?: boolean) => void; flush: () => Promise<unknown>;
   providerMode: 'fixture' | 'live' | 'loading'; shotPlanning?: ReactNode;
+  capabilities: WorkflowCapabilities | null;
   onPlanScene?: (nodeId: string) => void;
   onScenesAccepted?: (sceneIds: string[]) => void;
 }) {
   const state = controller.assistant!;
-  const [quote, setQuote] = useState<StoryQuote | null>(null);
+  const [estimate, setEstimate] = useState<{ value: StoryQuote; workspace: WorkflowCapabilities } | null>(null);
+  const quote = capabilities && estimate?.workspace === capabilities ? estimate.value : null;
+  const currentQuote = useRef(quote);
+  useLayoutEffect(() => { currentQuote.current = quote; }, [quote]);
   const [quoteError, setQuoteError] = useState('');
   const quoteSequence = useRef(0);
+  useLayoutEffect(() => { const sequence = quoteSequence; sequence.current++; return () => { sequence.current++; }; }, [capabilities]);
   const scroll = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   useAssistantFooterSize(root);
@@ -59,31 +65,32 @@ export function StoryAssistantLayer({ controller, document, getDocument, commit,
   useEffect(() => { assistantScrollSurface(scroll.current)?.scrollTo({ top: 0 }); }, [state.state, state.checkpoint?.runId, accepted, manualDirection]);
   useEffect(() => { let active = true; void requestDigest(controller.sourceIdentity).then((digest) => { if (active) setLocalDigest(digest); }); return () => { active = false; }; }, [controller.sourceIdentity]);
   const refresh = async () => {
-    if (providerMode === 'loading') return;
-    const sequence = ++quoteSequence.current; setQuote(null); setQuoteError('');
+    if (providerMode === 'loading' || !capabilities) return;
+    const sequence = ++quoteSequence.current; setEstimate(null); setQuoteError('');
     try {
       const response = await fetch(`/api/cinema/story-assistant?mode=${providerMode}`);
       if (!response.ok) throw Error('This feature’s availability could not be checked.');
-      const value: StoryQuote = await response.json();
+      const value = StoryQuoteSchema.parse(await response.json());
       if (sequence === quoteSequence.current) {
         if (value.mode !== providerMode) throw Error('Analysis capability does not match the workspace provider.');
-        setQuote(value);
+        setEstimate({ value, workspace: capabilities });
       }
     } catch (error) { if (sequence === quoteSequence.current) setQuoteError((error as Error).message); }
   };
   useEffect(() => {
-    if (providerMode === 'loading') return;
+    if (providerMode === 'loading' || !capabilities) return;
     let active = true; const sequence = ++quoteSequence.current;
+    queueMicrotask(() => { if (active && sequence === quoteSequence.current) setEstimate(null); });
     void fetch(`/api/cinema/story-assistant?mode=${providerMode}`).then(async (response) => {
       if (!response.ok) throw Error('Analysis availability is currently unknown.');
-      const value: StoryQuote = await response.json();
+      const value = StoryQuoteSchema.parse(await response.json());
       if (active && sequence === quoteSequence.current) {
         if (value.mode !== providerMode) throw Error('Analysis capability does not match the workspace provider.');
-        setQuote(value); setQuoteError('');
+        setEstimate({ value, workspace: capabilities }); setQuoteError('');
       }
     }).catch((error) => { if (active) setQuoteError((error as Error).message); });
     return () => { active = false; };
-  }, [providerMode]);
+  }, [providerMode, capabilities]);
   const correctedQuestions: AssistantQuestion[] = editingFacts && checkpoint ? checkpoint.analysis.facts.filter((fact) => !checkpoint.questions.some((question) => question.field === fact.field)).map((fact) => ({
     ...questionsFor({ version: 1, facts: [], conflicts: [fact.field] }, 3)[0], id: `edit:${fact.field}`, required: false, reason: 'Optional correction. Leave blank to keep the understood value.',
   })) : [];
@@ -163,7 +170,7 @@ export function StoryAssistantLayer({ controller, document, getDocument, commit,
           {controller.busy ? <><p className="assistant-help">Stopping locally may not cancel dispatched provider work.</p><button type="button" onClick={controller.cancel}>Stop request</button></>
               : showQuestions ? <><div className="assistant-footer-actions">{questionIndex > 0 && <button type="button" onClick={() => setQuestionIndex((index) => index - 1)}>Back</button>}<button className="primary-button" disabled={locked || providerMode === 'loading' || !canAdvance} onClick={() => { if (!lastQuestion) setQuestionIndex((index) => index + 1); else if (providerMode !== 'loading') void controller.execute(providerMode, null, false, controller.sourceIdentity, true); }}>{lastQuestion ? 'Continue' : !activeQuestion?.required && activeAnswer === undefined ? 'Skip' : 'Next'}<ArrowRight size={15} /></button></div><p className="assistant-help">No AI call. Your choices stay editable.</p></>
                 : ['understanding', 'outcome-unknown'].includes(state.state) ? <><p className="assistant-help">Check the saved request. No duplicate call.</p><button className="primary-button" onClick={() => void controller.recover()}>Check saved analysis</button></>
-                  : <><p className="assistant-help">{approvalCopy}</p>{quoteError || !quoteMatches ? <button type="button" disabled={providerMode === 'loading'} onClick={() => void refresh()}>Refresh availability</button> : <button className="primary-button" disabled={locked || !quote.ready || !manifest.ready} onClick={() => void controller.execute(providerMode, quote, true, controller.sourceIdentity)}>{providerMode === 'live' ? 'Approve & continue' : 'Continue'}<ArrowRight size={15} /></button>}</>}
+                  : <><p className="assistant-help">{approvalCopy}</p>{quoteError || !quoteMatches ? <button type="button" disabled={providerMode === 'loading'} onClick={() => void refresh()}>Refresh availability</button> : <button className="primary-button" disabled={locked || !quote.ready || !manifest.ready} onClick={() => void controller.execute(providerMode, quote, true, controller.sourceIdentity, false, () => currentQuote.current === quote)}>{providerMode === 'live' ? 'Approve & continue' : 'Continue'}<ArrowRight size={15} /></button>}</>}
         </footer>
       </div>}
     </div>

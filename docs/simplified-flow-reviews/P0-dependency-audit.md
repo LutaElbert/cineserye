@@ -4,7 +4,7 @@ Owner: Cineserye private-repository maintainer (implementation agent prepares fi
 
 `npm ci` on the merge baseline reported 4 high and 14 moderate affected package entries. The high chain was `@cloudflare/vite-plugin → wrangler → miniflare → sharp 0.35.2`. The patched native dependency `sharp 0.35.4` is selected via a scoped `miniflare` override. It incorporates patched libheif; see [GHSA-rgj7-g3m4-5g8c](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c). This is development/Worker image tooling, not a claim that untrusted media decoding is risk-free.
 
-Fresh `npm ci` and `npm audit --audit-level=high` after the override: exit 0, **0 high/critical; 14 moderate affected entries**. Build/typecheck/lint passed; native/Worker matrices remain in progress. Lockfile hash at this audit: `bf8206c5a429137ce03649d13ed3c2bc6a3821d2f6dbe084d7c2e172eaf522a3`.
+Fresh `npm ci` and `npm audit --audit-level=high` after the override: exit 0, **0 high/critical; 14 moderate affected entries**. Build/typecheck/lint passed. The final credential-free production matrices are green: native Node 614 runnable tests passed with four documented historical non-Chromium stress skips; Worker 129/129 passed. Lockfile hash at this audit: `3346da40af4bbddd85b7400b09780c1d9f013a332bee90da18d07e96e0968fdf`.
 
 | Moderate root and dependency path | Affected runtime / current boundary | Owner and closure criterion |
 | --- | --- | --- |

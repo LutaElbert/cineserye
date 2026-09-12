@@ -1,6 +1,10 @@
 import 'server-only';
 import { ASSEMBLY_LIMITS, SequenceManifestSchema } from '../../../features/assembly/sequence-manifest';
-import { localAssemblyCapability, renderLocalSequence } from '../../../server/cinema/assembly';
+import { isNativeRuntime } from '../../../server/cinema/native-runtime';
+
+// The Worker build exposes a capability response for this route, but it must
+// not evaluate the native renderer (child_process/fs) while doing so.
+const assembly = () => import('../../../server/cinema/assembly');
 
 const TOKEN_AGE_MS = 10 * 60_000;
 let secret: Buffer | null = null;
@@ -12,7 +16,7 @@ function gate(request: Request) {
   if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) || request.headers.has('x-forwarded-host') || request.headers.has('forwarded')) {
     throw new Error('MP4 assembly is available only on the local operator server, not on a hosted or proxied URL.');
   }
-  if (typeof process === 'undefined' || process.release?.name !== 'node' || typeof process.getBuiltinModule !== 'function'
+  if (!isNativeRuntime()
     || (process.env.NODE_ENV !== 'development' && process.env.CINESERYE_LOCAL_ASSEMBLY_ENABLED !== 'true')) {
     throw new Error('Local MP4 rendering is disabled on this server. Enable the local operator renderer explicitly outside development.');
   }
@@ -53,6 +57,7 @@ function failure(message: string, status: number) {
 export async function GET(request: Request): Promise<Response> {
   try {
     const url = gate(request);
+    const { localAssemblyCapability } = await assembly();
     const capability = await localAssemblyCapability();
     return Response.json({ ...capability, token: capability.available ? issueToken(url.origin) : null, output: 'Silent MP4 · 720p · 24fps · local server only' }, { headers: { 'cache-control': 'no-store' } });
   } catch (error) {
@@ -80,7 +85,9 @@ async function boundedMultipart(request: Request): Promise<FormData> {
       chunks.push(value);
     }
   } finally { clearTimeout(timer); reader.releaseLock(); }
-  return new Response(new Blob(chunks as BlobPart[], { type })).formData();
+  // Blob.type normalizes to lowercase, but a multipart boundary is case-sensitive
+  // (Chromium/WebKit use mixed-case values). Preserve the original header.
+  return new Response(new Blob(chunks as BlobPart[]), { headers: { 'content-type': type } }).formData();
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -92,6 +99,7 @@ export async function POST(request: Request): Promise<Response> {
   if (busy) return failure('Another local render is already running. Wait for it to finish.', 409);
   busy = true;
   try {
+    const { renderLocalSequence } = await assembly();
     const data = await boundedMultipart(request);
     const source = data.get('manifest');
     if (typeof source !== 'string' || source.length > 32_000) throw new Error('The sequence manifest is missing or too large.');

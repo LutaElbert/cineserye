@@ -1,5 +1,15 @@
 'use client';
 
+import { useFilmmakingNavigation, setSimplifiedPreview, workspaceNavigationEvent, type FilmmakingStage } from '../features/simplified-flow/navigation';
+import { useWorkspaceCapabilities } from '../features/simplified-flow/useWorkspaceCapabilities';
+import { capabilityLabels, capabilityStatusLabels, capabilityDescription } from '../features/story-development/workflow-capabilities';
+import { FilmmakingNavigation, WorkspaceStatus, WorkspaceGuide, ShotsOverview } from '../features/simplified-flow/SimplifiedWorkspace';
+import { ProjectOperationSummary } from '../features/simplified-flow/ProjectOperationSummary';
+import { listClientOperations, observeClientOperation, reconcileProjectOperations, recordClientOperationIntent, subscribeClientOperations } from '../features/simplified-flow/operation-journal';
+import { projectStageProjection, type StageAction } from '../features/simplified-flow/stage-projection';
+import { SequenceReview } from '../features/assembly/SequenceReview';
+import { CanvasBoundActionbar } from './CanvasBoundActionbar';
+
 import {
   Background,
   Controls,
@@ -76,6 +86,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type ReactNode,
   type MouseEvent as ReactMouseEvent,
@@ -89,7 +100,6 @@ import { storyGenreTone } from '../domain/cinema/story-genres';
 import { createStoryStarterDocument } from './story-starter';
 import { ExpandedPremiseNode } from './ExpandedPremiseNode';
 import { CanvasZoomGestures } from './CanvasZoomGestures';
-import { reconcileRuntimeNodes } from './reconcile-runtime-nodes';
 import { InlineDiscardButton } from './InlineDiscardButton';
 import { useStoryAssistant } from '../features/story-development/useStoryAssistant';
 import { StoryAssistantLayer } from '../features/story-development/StoryAssistantLayer';
@@ -151,9 +161,7 @@ import {
 } from './cinema-edge-routing';
 import { CinemaHierarchyBusEdge } from './CinemaHierarchyBusEdge';
 import {
-  clearLocalRecoveryDocument,
-  clearLocalDocument,
-  clearPendingCinemaProposals,
+  replaceLocalDocument,
   createLocalCheckpoint,
   deleteLocalCheckpoint,
   collectUnusedLocalMedia,
@@ -170,7 +178,6 @@ import {
   updatePendingCinemaProposal,
   saveLocalRecoveryDocument,
   saveLocalDocument,
-  saveLocalMediaBlob,
   type LocalCheckpoint,
   type LocalCinemaTrace,
 } from './persistence';
@@ -201,6 +208,8 @@ import { cinemaProjectPresentation } from '../domain/cinema/project-presentation
 import type { CinemaProjectData } from '../domain/cinema/project-data';
 import { StoryDevelopmentPanel } from '../features/story-development/StoryDevelopmentPanel';
 import { ensureStoryProject, inheritedStoryDirection, storyPremise } from './story-development-commands';
+import { cloneSnapshot, type EditorSnapshot } from './document-history';
+import { DocumentController } from './document-controller';
 import { editorFocusGeometry, type EditorFocusSpace } from './editor-focus';
 import { useDocumentWriter } from './useDocumentWriter';
 import { reviewStoryReferenceTransfer, type StoryReferenceOwner } from '../domain/cinema/story-workflow';
@@ -220,7 +229,7 @@ import {
   layoutCinemaProposalNodes,
   prepareCinemaPlanProposal,
 } from './cinema-plan-proposal';
-import { cinemaSourceFingerprint } from './document-fingerprint';
+import { cinemaSourceFingerprint, legacyCinemaSourceFingerprint } from './document-fingerprint';
 import {
   applyCinemaDomainCommand,
   type CinemaDomainCommand,
@@ -240,7 +249,6 @@ import {
 } from '../features/scene-planner/SceneBriefDialog';
 import type { ScenePlanningBrief } from '../domain/cinema/scene-brief';
 import type {
-  CinemaProviderStatus,
   PlanSceneRequest,
   PlanSceneResponse,
 } from '../features/scene-planner/plan-scene-api';
@@ -264,7 +272,6 @@ import {
 } from '../features/production/ProfessionalPlanningWorkspace';
 import { ProjectProductionWorkspace } from '../features/project/ProjectProductionWorkspace';
 
-type EditorSnapshot = Pick<EditorDocument, 'nodes' | 'edges' | 'cinema'>;
 type ToolMode = 'select' | 'hand';
 type SelectionOperation = 'replace' | 'add' | 'subtract';
 type MobilePanel = 'layers' | 'inspector' | null;
@@ -277,6 +284,16 @@ const RESIZE_OBSERVER_NOTIFICATIONS = new Set([
   'ResizeObserver loop completed with undelivered notifications.',
   'ResizeObserver loop limit exceeded',
 ]);
+
+function runAfterCanvasLayout(action: () => void, attempt = 0) {
+  const canvas = document.querySelector<HTMLElement>('.canvas-region .react-flow');
+  const bounds = canvas?.getBoundingClientRect();
+  if (bounds && Number.isFinite(bounds.width) && Number.isFinite(bounds.height) && bounds.width > 0 && bounds.height > 0) {
+    action();
+    return;
+  }
+  if (attempt < 30) requestAnimationFrame(() => runAfterCanvasLayout(action, attempt + 1));
+}
 
 function installFrameScheduledResizeObserver() {
   if (typeof window === 'undefined' || typeof window.ResizeObserver === 'undefined') return;
@@ -372,13 +389,13 @@ function ConceptNode({ id, data, selected }: NodeProps<EditorNode>) {
   return (
     <>
       <NodeToolbar isVisible={singleSelection && !editing && !data.locked} position={Position.Top} align="start" offset={14}>
-        <div className="node-actionbar nodrag nowheel" aria-label="Concept actions">
+        <CanvasBoundActionbar className="node-actionbar nodrag nowheel" aria-label="Concept actions">
           {['story', 'scene', 'shot'].includes(draftRole ?? '') && <button type="button" onClick={() => actions.openLayerEditor(id)}><TypeIcon size={14} /> Edit layer</button>}
           <button type="button" onClick={() => actions.beginConceptEdit(id)}><TypeIcon size={14} /> Edit text</button>
           <button type="button" onClick={() => actions.addConceptRelative(id, 'child')}><Plus size={14} /> {cinemaRelativeLabel(draftRole, 'child')}</button>
           <button type="button" onClick={() => actions.addConceptRelative(id, 'sibling')}><Plus size={14} /> {cinemaRelativeLabel(draftRole, 'sibling')}</button>
           {draftRole === 'story' && actions.storyEnabled && <button type="button" onClick={actions.openStory}>Develop / references ({actions.storyReferenceCount})</button>}
-        </div>
+        </CanvasBoundActionbar>
       </NodeToolbar>
       <NodeResizer
         isVisible={singleSelection && !data.locked && !editing}
@@ -457,7 +474,7 @@ function RasterNode({ id, data, selected }: NodeProps<EditorNode>) {
   return (
     <>
       <NodeToolbar isVisible={singleSelection && !data.locked} position={Position.Top} offset={14}>
-        <div className="node-actionbar nodrag nowheel" aria-label="Image actions">
+        <CanvasBoundActionbar className="node-actionbar nodrag nowheel" aria-label="Image actions">
           <button type="button" onClick={() => actions.keepImage(id)}>
             <Check size={14} /> Keep image
           </button>
@@ -485,7 +502,7 @@ function RasterNode({ id, data, selected }: NodeProps<EditorNode>) {
               </button>
             </>
           ) : null}
-        </div>
+        </CanvasBoundActionbar>
       </NodeToolbar>
       <NodeResizer
         isVisible={singleSelection && !data.locked}
@@ -586,14 +603,6 @@ function withCinemaConnectionDirection(
   return next;
 }
 
-function cloneSnapshot(
-  nodes: EditorNode[],
-  edges: EditorEdge[],
-  cinema?: CinemaProjectData,
-): EditorSnapshot {
-  return structuredClone({ nodes, edges, ...(cinema === undefined ? {} : { cinema }) });
-}
-
 function layoutAppliedCinemaProposal(
   applied: AppliedCanvasCommandProposal,
   cinema: CinemaProjectData,
@@ -612,39 +621,6 @@ function nodeDimensionSignature(nodes: EditorNode[]): string {
     const dimensions = editorNodeDimensions(node);
     return `${node.id}:${Math.round(dimensions.width)}x${Math.round(dimensions.height)}`;
   }).join('|');
-}
-
-type PersistableEditorState = {
-  title: string;
-  nodes: EditorNode[];
-  edges: EditorEdge[];
-  cinema?: CinemaProjectData;
-};
-
-const TRANSIENT_ELEMENT_KEYS = new Set(['selected', 'dragging', 'measured', 'resizing']);
-
-function persistableElementEqual(left: EditorNode | EditorEdge, right: EditorNode | EditorEdge) {
-  const leftRecord = left as unknown as Record<string, unknown>;
-  const rightRecord = right as unknown as Record<string, unknown>;
-  const keys = new Set([...Object.keys(leftRecord), ...Object.keys(rightRecord)]);
-  for (const key of keys) {
-    if (TRANSIENT_ELEMENT_KEYS.has(key)) continue;
-    if (!Object.is(leftRecord[key], rightRecord[key])) return false;
-  }
-  return true;
-}
-
-function persistableEditorStateEqual(left: PersistableEditorState, right: PersistableEditorState) {
-  if (
-    left.title !== right.title
-    || left.cinema !== right.cinema
-    || left.nodes.length !== right.nodes.length
-    || left.edges.length !== right.edges.length
-  ) {
-    return false;
-  }
-  return left.nodes.every((node, index) => persistableElementEqual(node, right.nodes[index]))
-    && left.edges.every((edge, index) => persistableElementEqual(edge, right.edges[index]));
 }
 
 function restoreNodeGeometry(node: EditorNode, origin: EditorNode): EditorNode {
@@ -688,33 +664,6 @@ function formatCinemaCost(
   return formatCinemaMoney(value, currency ?? 'USD');
 }
 
-function estimateSnapshotBytes(snapshot: EditorSnapshot) {
-  let characters = snapshot.edges.length * 280
-    + snapshot.nodes.length * 360
-    + (snapshot.cinema ? JSON.stringify(snapshot.cinema).length : 0);
-  for (const node of snapshot.nodes) {
-    characters += node.data.name.length;
-    if (node.data.kind === 'raster') characters += node.data.src.length;
-    if (node.data.kind === 'concept') {
-      characters += node.data.label.length + node.data.eyebrow.length + JSON.stringify(node.data.body).length;
-    }
-    if (node.data.kind === 'vector') {
-      for (const path of node.data.paths) {
-        characters += path.d.length + path.name.length + path.fill.length + path.stroke.length;
-      }
-    }
-  }
-  return characters * 2;
-}
-
-function trimHistory(history: EditorSnapshot[], maxEntries = 40, maxBytes = 48 * 1024 * 1024) {
-  let bytes = history.reduce((total, item) => total + estimateSnapshotBytes(item), 0);
-  while (history.length > maxEntries || (history.length > 1 && bytes > maxBytes)) {
-    const removed = history.shift();
-    if (removed) bytes -= estimateSnapshotBytes(removed);
-  }
-}
-
 function connectorPresentation(kind: 'default' | 'dashed' | 'emphasis') {
   return {
     stroke: kind === 'emphasis' ? '#635bff' : '#a9adb7',
@@ -724,19 +673,29 @@ function connectorPresentation(kind: 'default' | 'dashed' | 'emphasis') {
 }
 
 function EditorInner() {
+  const filmmaking = useFilmmakingNavigation();
+  const [shotDetailOpen, setShotDetailOpen] = useState(false);
+  const [simplifiedInspectorOpen, setSimplifiedInspectorOpen] = useState(false);
   const withMediaCleanupLease = useMediaRetentionLease();
   const { confirm: requestConfirmation, confirmationDialog } = useConfirmationDialog();
-  const [nodes, setNodes] = useState<EditorNode[]>(initialDocument.nodes);
-  const [edges, setEdges] = useState<EditorEdge[]>(initialDocument.edges);
-  const [cinema, setCinema] = useState<CinemaProjectData | undefined>(initialDocument.cinema);
-  const [title, setTitle] = useState(initialDocument.title);
+  const [documentController] = useState(() => new DocumentController(initialDocument, saveLocalDocument));
+  const { nodes, edges, cinema, title, revision: autosaveRevision, replacing: replacingDocument } = useSyncExternalStore(
+    documentController.subscribe, documentController.getSnapshot, documentController.getSnapshot,
+  );
+  const { setNodes, setEdges, setCinema, setTitle } = documentController;
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [temporaryPanActive, setTemporaryPanActive] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
   const [dragActive, setDragActive] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const workspaceCapabilities = useWorkspaceCapabilities(hydrated);
+  const configuredProviderMode = workspaceCapabilities.value?.mode ?? 'loading';
+  const configuredProviderStatus = workspaceCapabilities.value?.legacyPlanning ?? null;
+  const capabilitySnapshot = useRef(workspaceCapabilities.value);
+  useLayoutEffect(() => { capabilitySnapshot.current = workspaceCapabilities.value; }, [workspaceCapabilities.value]);
   const [firstRunOpen, setFirstRunOpen] = useState(false);
-  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+  const saveQueue = documentController.saves;
+  const saveState = useSyncExternalStore(saveQueue.subscribe, saveQueue.getSnapshot, saveQueue.getSnapshot);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [expandedVectors, setExpandedVectors] = useState<Set<string>>(new Set());
@@ -746,13 +705,18 @@ function EditorInner() {
     colors: 16,
     despeckle: 1,
   });
-  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+  const history = documentController.history;
+  const historyState = useSyncExternalStore(history.subscribe, history.getSnapshot, history.getSnapshot);
   const [exportOpen, setExportOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const writer = useDocumentWriter();
+  useLayoutEffect(() => {
+    documentController.setAdmission(writer === 'writer' && hydrated);
+    return () => documentController.setAdmission(false, false);
+  }, [documentController, writer, hydrated]);
   const [storyEnabled, setStoryEnabled] = useState(true);
   useEffect(() => {
     let active = true;
@@ -762,12 +726,27 @@ function EditorInner() {
     return () => { active = false; };
   }, []);
   const [workspaceView, setWorkspaceView] = useState<EditorWorkspaceView>('canvas');
+  const canvasVisible = workspaceView === 'canvas' && (!filmmaking.enabled
+    || filmmaking.workspace === 'story' || filmmaking.workspace === 'shots' && shotDetailOpen);
+  useEffect(() => {
+    const restoreWorkspace = () => { setWorkspaceView('canvas'); setShotDetailOpen(false); };
+    window.addEventListener('popstate', restoreWorkspace);
+    window.addEventListener(workspaceNavigationEvent, restoreWorkspace);
+    return () => {
+      window.removeEventListener('popstate', restoreWorkspace);
+      window.removeEventListener(workspaceNavigationEvent, restoreWorkspace);
+    };
+  }, []);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [layerEditorId, setLayerEditorId] = useState<string | null>(null);
   const [assistantOpenEpoch, setAssistantOpenEpoch] = useState(0);
   const [expandedShotSetup, setExpandedShotSetup] = useState<string | null>(null);
   const [focusSpace, setFocusSpace] = useState<EditorFocusSpace>({ width: 1280, height: 900, top: 80, bottom: 80 });
-  const layerFocus = useMemo(() => editorFocusGeometry(focusSpace, 440, 640), [focusSpace]);
+  const layerFocus = useMemo(() => editorFocusGeometry(
+    focusSpace,
+    filmmaking.enabled && filmmaking.workspace === 'shots' ? 720 : 440,
+    640,
+  ), [focusSpace, filmmaking.enabled, filmmaking.workspace]);
   useEffect(() => {
     const canvas = document.querySelector<HTMLElement>('.canvas-region .react-flow');
     if (!canvas) return;
@@ -803,14 +782,11 @@ function EditorInner() {
   const [creationPaletteOpen, setCreationPaletteOpen] = useState(false);
   const [recoveryDocument, setRecoveryDocument] = useState<EditorDocument | null>(null);
   const [checkpoints, setCheckpoints] = useState<LocalCheckpoint[]>([]);
-  const [autosaveRevision, setAutosaveRevision] = useState(0);
   const [mockProposalStage, setMockProposalStage] = useState<'idle' | 'planning' | 'ready'>('idle');
   const [mockProposalPreview, setMockProposalPreview] = useState<AppliedCanvasCommandProposal | null>(null);
   const [proposalCinema, setProposalCinema] = useState<CinemaProjectData | null>(null);
   const [proposalMode, setProposalMode] = useState<'fixture' | 'live' | null>(null);
   const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
-  const [configuredProviderMode, setConfiguredProviderMode] = useState<'loading' | 'fixture' | 'live'>('loading');
-  const [configuredProviderStatus, setConfiguredProviderStatus] = useState<CinemaProviderStatus | null>(null);
   const [localCinemaTraces, setLocalCinemaTraces] = useState<LocalCinemaTrace[]>([]);
   const [sceneBriefDefaults, setSceneBriefDefaults] = useState<SceneBriefDefaults | null>(null);
   const [previewSelectedNodeId, setPreviewSelectedNodeId] = useState<string | null>(null);
@@ -820,12 +796,11 @@ function EditorInner() {
   const exportDialogRef = useRef<HTMLDialogElement>(null);
   const backupDialogRef = useRef<HTMLDialogElement>(null);
   const traceDialogRef = useRef<HTMLDialogElement>(null);
-  const nodesRef = useRef(nodes);
-  const edgesRef = useRef(edges);
-  const cinemaRef = useRef(cinema);
-  const titleRef = useRef(title);
-  const pastRef = useRef<EditorSnapshot[]>([]);
-  const futureRef = useRef<EditorSnapshot[]>([]);
+  // Read-only views into the controller, not independently synchronized copies.
+  const nodesRef = useMemo(() => ({ get current() { return documentController.getSnapshot().nodes; } }), [documentController]);
+  const edgesRef = useMemo(() => ({ get current() { return documentController.getSnapshot().edges; } }), [documentController]);
+  const cinemaRef = useMemo(() => ({ get current() { return documentController.getSnapshot().cinema; } }), [documentController]);
+  const titleRef = useMemo(() => ({ get current() { return documentController.getSnapshot().title; } }), [documentController]);
   const dragOriginRef = useRef<EditorSnapshot | null>(null);
   const resizeOriginRef = useRef<EditorSnapshot | null>(null);
   const fieldOriginRef = useRef<EditorSnapshot | null>(null);
@@ -835,9 +810,6 @@ function EditorInner() {
   const selectionOperationRef = useRef<SelectionOperation>('replace');
   const dragDepthRef = useRef(0);
   const conversionControllerRef = useRef<AbortController | null>(null);
-  const saveQueueRef = useRef(Promise.resolve());
-  const saveTicketRef = useRef(0);
-  const autosaveInputRef = useRef<PersistableEditorState>({ title, nodes, edges, cinema });
   const planningControllerRef = useRef<AbortController | null>(null);
   const proposalSourceFingerprintRef = useRef<string | null>(null);
   const previewLayoutSignatureRef = useRef('');
@@ -876,69 +848,12 @@ function EditorInner() {
   }, [pendingProposalId]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetch('/api/cinema/provider-status', { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('Provider status is unavailable.');
-        return response.json() as Promise<CinemaProviderStatus>;
-      })
-      .then((status) => {
-        setConfiguredProviderMode(status.mode);
-        setConfiguredProviderStatus({
-          ...status,
-          research: status.research ?? { configured: false, provider: 'Parallel Search' },
-          planning: status.planning ?? { configured: false, provider: 'Vertex AI', model: null },
-          telemetryPolicy: status.telemetryPolicy ?? 'no-content-v1',
-          // Fail closed if an older server or cached test double does not yet
-          // expose the Sprint 9 preflight contract. Diagnostics must never
-          // crash the local editor merely because live execution is blocked.
-          livePreflight: status.livePreflight ?? {
-            ready: false,
-            blockers: ['Live provider preflight status is unavailable.'],
-            maxLiveRunCost: null,
-          },
-        });
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setConfiguredProviderMode('loading');
-          setConfiguredProviderStatus(null);
-        }
-      });
-    return () => controller.abort();
-  }, []);
-
-  useLayoutEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-  useLayoutEffect(() => {
-    edgesRef.current = edges;
-  }, [edges]);
-  useLayoutEffect(() => {
-    cinemaRef.current = cinema;
-  }, [cinema]);
-  useEffect(() => {
     if (!pendingProposalId || !proposalCinema) return;
     void updatePendingCinemaProposal(pendingProposalId, {
       cinema: proposalCinema,
       selectedNodeId: previewSelectedNodeId,
     });
   }, [pendingProposalId, previewSelectedNodeId, proposalCinema]);
-  useLayoutEffect(() => {
-    titleRef.current = title;
-  }, [title]);
-  useLayoutEffect(() => {
-    const next = { title, nodes, edges, cinema };
-    const previous = autosaveInputRef.current;
-    autosaveInputRef.current = next;
-    if (!persistableEditorStateEqual(previous, next)) {
-      // Mark the document dirty before the changed canvas is painted. This
-      // prevents an older queued write from presenting a stale "saved" state.
-      saveTicketRef.current += 1;
-      setSaveState('saving');
-      setAutosaveRevision((current) => current + 1);
-    }
-  }, [cinema, edges, nodes, title]);
 
   const announce = useCallback((message: string, tone: Toast['tone'] = 'info') => {
     const id = Date.now() + Math.random();
@@ -949,19 +864,18 @@ function EditorInner() {
     );
   }, []);
 
-  const refreshHistoryState = useCallback(() => {
-    setHistoryState({
-      canUndo: pastRef.current.length > 0,
-      canRedo: futureRef.current.length > 0,
-    });
-  }, []);
+  useEffect(() => {
+    if (!hydrated || !cinema) return;
+    try { reconcileProjectOperations(cinema); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : 'Saved request recovery is unavailable.';
+      window.setTimeout(() => announce(message, 'error'), 0);
+    }
+  }, [hydrated, cinema, announce]);
 
   const recordHistory = useCallback((snapshot?: EditorSnapshot) => {
-    pastRef.current.push(snapshot ?? cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current));
-    trimHistory(pastRef.current);
-    futureRef.current = [];
-    refreshHistoryState();
-  }, [refreshHistoryState]);
+    documentController.record(snapshot);
+  }, [documentController]);
 
   const removeCinemaForNodeIds = useCallback((removedNodeIds: ReadonlySet<string>) => {
     if (!cinemaRef.current || !removedNodeIds.size) return;
@@ -969,61 +883,71 @@ function EditorInner() {
       nodesRef.current.filter((node) => !removedNodeIds.has(node.id)).map((node) => node.id),
     );
     setCinema(removeCinemaRecordsForNodes(cinemaRef.current, removedNodeIds, remainingHostNodeIds));
-  }, []);
+  }, [cinemaRef, nodesRef, setCinema]);
 
-  const undo = useCallback(() => {
-    const previous = pastRef.current.pop();
-    if (!previous) return;
-    futureRef.current.push(cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current));
-    trimHistory(futureRef.current);
-    setNodes(previous.nodes);
-    setEdges(previous.edges);
-    setCinema(previous.cinema);
-    setSelectedPath(null);
-    refreshHistoryState();
-  }, [refreshHistoryState]);
+  const moveHistory = useCallback((direction: 'undo' | 'redo') => {
+    try {
+      if (documentController.moveHistory(direction)) setSelectedPath(null);
+    } catch (error) { announce((error as Error).message, 'error'); }
+  }, [announce, documentController]);
+  const undo = useCallback(() => moveHistory('undo'), [moveHistory]);
+  const redo = useCallback(() => moveHistory('redo'), [moveHistory]);
 
-  const redo = useCallback(() => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current));
-    trimHistory(pastRef.current);
-    setNodes(next.nodes);
-    setEdges(next.edges);
-    setCinema(next.cinema);
-    setSelectedPath(null);
-    refreshHistoryState();
-  }, [refreshHistoryState]);
+  const getCurrentDocument = documentController.document;
 
-  const getCurrentDocument = useCallback((): EditorDocument => ({
-    schemaVersion: 5,
-    title: titleRef.current,
-    nodes: nodesRef.current.map((node) => ({ ...node, selected: false })),
-    edges: edgesRef.current.map((edge) => ({ ...edge, selected: false })),
-    ...(cinemaRef.current === undefined ? {} : { cinema: cinemaRef.current }),
-    updatedAt: Date.now(),
-  }), []);
+  const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
+    if (writer !== 'writer') return Promise.reject(new Error('This tab is read-only. Close the other editor and reload to edit.'));
+    return documentController.save(document, pendingTicket);
+  }, [writer, documentController]);
 
   const runMockScene = useCallback(async (
     brief: ScenePlanningBrief,
     liveProviderConsent: boolean,
   ) => {
     if (mockProposalStage !== 'idle' || mockProposalPreview) return;
+    const capability = capabilitySnapshot.current;
+    if (!capability || !capability.legacyPlanning.livePreflight.ready) {
+      announce('Workspace planning availability is unknown or blocked. Refresh workspace status before planning.', 'error');
+      return;
+    }
     if (!nodesRef.current.some((node) => node.id === brief.sceneNodeId)) {
       announce('The selected scene is not available in this document.', 'error');
+      return;
+    }
+    let sourceDocument: EditorDocument;
+    try {
+      const currentDocument = getCurrentDocument();
+      sourceDocument = ensureStoryProject(currentDocument);
+      // Establish and persist the local project owner before recording an
+      // operation or crossing the request boundary. Provider responses may
+      // carry their own project label, but cannot replace this local identity.
+      if (sourceDocument !== currentDocument) documentController.commit(sourceDocument, false);
+    } catch (error) {
+      announce(error instanceof Error ? error.message : 'The project could not be prepared for shot planning.', 'error');
       return;
     }
     setMockProposalStage('planning');
     setMobilePanel('inspector');
     announce('Generating a shot plan with the configured research and planning providers.');
-    const sourceDocument = getCurrentDocument();
     proposalSourceFingerprintRef.current = cinemaSourceFingerprint(sourceDocument);
     const controller = new AbortController();
     planningControllerRef.current = controller;
+    let operationId = '', journalRecorded = false, dispatched = false;
+    const projectId = sourceDocument.cinema!.projectId;
+    const journalOwner = { projectId, kind: 'shot-plan' as const, scopeKey: brief.sceneNodeId };
     try {
-      await saveLocalDocument(sourceDocument);
+      await queueDocumentSave(sourceDocument);
       controller.signal.throwIfAborted();
-      const idempotencyKey = crypto.randomUUID();
+      if (capabilitySnapshot.current !== capability) throw new Error('Workspace status changed while saving. Review the current provider and estimate before planning.');
+      const idempotencyKey = crypto.randomUUID(); operationId = idempotencyKey;
+      recordClientOperationIntent({ id: idempotencyKey, ...journalOwner,
+        sourceFingerprint: cinemaSourceFingerprint(sourceDocument),
+        provider: configuredProviderStatus?.planning.provider ?? (configuredProviderMode === 'fixture' ? 'cineserye-shot-plan-fixture' : 'configured-shot-planning-provider'),
+        model: configuredProviderStatus?.planning.model ?? null,
+        estimateUsd: configuredProviderStatus?.livePreflight.maxLiveRunCost ?? (configuredProviderMode === 'fixture' ? 0 : null) });
+      journalRecorded = true;
+      observeClientOperation(idempotencyKey, journalOwner, { phase: 'dispatched', dispatchCertainty: 'may-have-dispatched' });
+      dispatched = true;
       const response = await fetch('/api/cinema/plan-scene', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1048,27 +972,30 @@ function EditorInner() {
       const payload = await response.json() as PlanSceneResponse;
       controller.signal.throwIfAborted();
       if (!payload.ok) throw new Error(payload.error.message);
-      const preparedProposal = prepareCinemaPlanProposal(sourceDocument, sourceDocument.cinema, payload.proposal);
+      const ownedCinema = { ...payload.cinema, projectId };
+      const preparedProposal = prepareCinemaPlanProposal(sourceDocument, sourceDocument.cinema, payload.proposal, {
+        replaceStarterShot: !sourceDocument.cinema?.activeRevisionId,
+      });
       const preview = layoutAppliedCinemaProposal(
         applyCanvasCommandProposal(cinemaProposalCanvasSource(sourceDocument), preparedProposal),
-        payload.cinema,
+        ownedCinema,
       );
-      const selectedShotId = payload.cinema.scenes[brief.sceneNodeId]?.shotIds[2]
-        ?? payload.cinema.scenes[brief.sceneNodeId]?.shotIds[0];
-      const selectedShotNodeId = selectedShotId ? payload.cinema.shots[selectedShotId]?.nodeId ?? null : null;
-      const pendingId = `${payload.cinema.projectId}:${brief.sceneNodeId}:${payload.runId}`;
+      const selectedShotId = ownedCinema.scenes[brief.sceneNodeId]?.shotIds[2]
+        ?? ownedCinema.scenes[brief.sceneNodeId]?.shotIds[0];
+      const selectedShotNodeId = selectedShotId ? ownedCinema.shots[selectedShotId]?.nodeId ?? null : null;
+      const pendingId = `${projectId}:${brief.sceneNodeId}:${payload.runId}`;
       const traceRecord = { id: payload.runId, createdAt: Date.now(), events: payload.trace };
       await saveLocalCinemaTrace(traceRecord);
       controller.signal.throwIfAborted();
       setLocalCinemaTraces((current) => [traceRecord, ...current.filter((entry) => entry.id !== traceRecord.id)].slice(0, 50));
       await savePendingCinemaProposal({
         id: pendingId,
-        projectId: payload.cinema.projectId,
+        projectId,
         sceneId: brief.sceneNodeId,
         runId: payload.runId,
         sourceFingerprint: cinemaSourceFingerprint(sourceDocument),
-        proposal: payload.proposal,
-        cinema: payload.cinema,
+        proposal: preparedProposal,
+        cinema: ownedCinema,
         mode: payload.mode,
         warningSummary: payload.warnings,
         sourceCount: payload.sourceCount,
@@ -1080,18 +1007,24 @@ function EditorInner() {
         controller.signal.throwIfAborted();
       }
       setPendingProposalId(pendingId);
-      setProposalCinema(payload.cinema);
+      setProposalCinema(ownedCinema);
       setProposalMode(payload.mode);
       setMockProposalPreview(preview);
       setPreviewSelectedNodeId(selectedShotNodeId);
       setMockProposalStage('ready');
+      observeClientOperation(operationId, journalOwner, { phase: 'awaiting-review', dispatchCertainty: 'completed', lastError: null,
+        completedUnits: Object.keys(ownedCinema.shots).length, totalUnits: Object.keys(ownedCinema.shots).length });
       window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
       announce(
-        `${payload.mode === 'live' ? 'Live' : 'Fixture'} shot plan ready for review: ${Object.keys(payload.cinema.shots).length} shots, reusable elements, ${payload.sourceCount} sources, and explicit cost assumptions.`,
+        `${payload.mode === 'live' ? 'Live' : 'Fixture'} shot plan ready for review: ${Object.keys(ownedCinema.shots).length} shots, reusable elements, ${payload.sourceCount} sources, and explicit cost assumptions.`,
         'success',
       );
     } catch (error) {
       if (planningControllerRef.current !== controller) return;
+      if (journalRecorded) try { observeClientOperation(operationId, journalOwner, {
+        phase: dispatched ? 'unknown' : 'failed', dispatchCertainty: dispatched ? 'may-have-dispatched' : 'not-dispatched',
+        lastError: controller.signal.aborted ? 'Local tracking stopped. Provider work or billing may continue.' : error instanceof Error ? error.message : 'The proposal could not be prepared.',
+      }); } catch { /* Preserve existing request state if the journal belongs to an older scope. */ }
       if (!controller.signal.aborted) {
         announce(error instanceof Error ? error.message : 'The proposal could not be prepared.', 'error');
       }
@@ -1101,7 +1034,7 @@ function EditorInner() {
     } finally {
       if (planningControllerRef.current === controller) planningControllerRef.current = null;
     }
-  }, [announce, configuredProviderStatus, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage]);
+  }, [announce, configuredProviderMode, configuredProviderStatus, documentController, fitView, getCurrentDocument, mockProposalPreview, mockProposalStage, nodesRef, queueDocumentSave]);
 
   const planMockScene = useCallback((requestedNodeId?: string) => {
     if (mockProposalStage !== 'idle' || mockProposalPreview || sceneBriefDefaults) return;
@@ -1153,7 +1086,7 @@ function EditorInner() {
         availableEquipment: [],
       },
     });
-  }, [announce, configuredProviderMode, getCurrentDocument, mockProposalPreview, mockProposalStage, sceneBriefDefaults]);
+  }, [announce, cinemaRef, configuredProviderMode, getCurrentDocument, mockProposalPreview, mockProposalStage, nodesRef, sceneBriefDefaults]);
 
   const createPlanRevision = useCallback(() => {
     const sceneId = cinemaRef.current?.activeSceneId;
@@ -1190,7 +1123,7 @@ function EditorInner() {
         budgetBand: 'micro', currency: 'PHP', budgetCeiling: null, availableEquipment: [],
       },
     });
-  }, [announce]);
+  }, [announce, cinemaRef, nodesRef, setEdges, setNodes]);
 
   const closeSceneBrief = useCallback(() => {
     setSceneBriefDefaults(null);
@@ -1211,7 +1144,7 @@ function EditorInner() {
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     window.setTimeout(() => fitView({ duration: 280, padding: 0.22 }), 80);
     announce('Proposal rejected. The saved canvas was not changed.');
-  }, [announce, fitView, pendingProposalId]);
+  }, [announce, fitView, pendingProposalId, setEdges, setNodes]);
 
   const curateProposalSource = useCallback((sourceId: string, action: ResearchSourceCuration) => {
     setProposalCinema((current) => {
@@ -1273,7 +1206,7 @@ function EditorInner() {
     setSelectedPath(null);
     window.setTimeout(() => fitView({ duration: 340, padding: 0.14 }), 140);
     announce('Prompt package accepted as one undoable canvas change.', 'success');
-  }, [announce, fitView, getCurrentDocument, mockProposalPreview, pendingProposalId, proposalCinema, recordHistory]);
+  }, [announce, cinemaRef, fitView, getCurrentDocument, mockProposalPreview, pendingProposalId, proposalCinema, recordHistory, setCinema, setEdges, setNodes]);
 
   const restorePlanRevision = useCallback(async (revisionId: string) => {
     const current = cinemaRef.current;
@@ -1318,26 +1251,7 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The revision could not be restored.', 'error');
     }
-  }, [announce, fitView, getCurrentDocument, recordHistory, requestConfirmation]);
-
-  const queueDocumentSave = useCallback((document: EditorDocument, pendingTicket?: number) => {
-    if (writer !== 'writer') return Promise.reject(new Error('This tab is read-only. Close the other editor and reload to edit.'));
-    const ticket = pendingTicket ?? ++saveTicketRef.current;
-    if (ticket !== saveTicketRef.current) return Promise.resolve();
-    setSaveState('saving');
-    const nextSave = saveQueueRef.current
-      .catch(() => undefined)
-      .then(() => saveLocalDocument(document));
-    saveQueueRef.current = nextSave;
-    void nextSave
-      .then(() => {
-        if (ticket === saveTicketRef.current) setSaveState('saved');
-      })
-      .catch(() => {
-        if (ticket === saveTicketRef.current) setSaveState('error');
-      });
-    return nextSave;
-  }, [writer]);
+  }, [announce, cinemaRef, fitView, getCurrentDocument, recordHistory, requestConfirmation, setCinema, setEdges, setNodes]);
 
   useEffect(() => {
     let active = true;
@@ -1360,12 +1274,11 @@ function EditorInner() {
         const loadedNodes = document.cinema
           ? layoutCinemaProposalNodes(document.nodes, document.cinema)
           : document.nodes;
-        setNodes(loadedNodes.map((node) => ({ ...node, selected: false })));
-        setEdges(document.edges.map((edge) => ({ ...edge, selected: false })));
-        setTitle(document.title);
-        setCinema(document.cinema);
+        documentController.hydrate({ ...document, nodes: loadedNodes.map((node) => ({ ...node, selected: false })),
+          edges: document.edges.map((edge) => ({ ...edge, selected: false })) });
         if (pending) {
-          if (pending.sourceFingerprint === cinemaSourceFingerprint(document)) {
+          if (pending.sourceFingerprint === cinemaSourceFingerprint(document)
+            || pending.sourceFingerprint === legacyCinemaSourceFingerprint(document)) {
             proposalSourceFingerprintRef.current = pending.sourceFingerprint;
             const prepared = prepareCinemaPlanProposal(document, document.cinema, pending.proposal);
             const preview = layoutAppliedCinemaProposal(
@@ -1386,27 +1299,28 @@ function EditorInner() {
         }
       })
       .catch(() => {
-        setSaveState('error');
+        if (!active) return;
+        saveQueue.reportLoadFailure();
         announce('The saved local project could not be opened. Use a backup or start a new project.', 'error');
       })
       .finally(() => active && setHydrated(true));
     return () => {
       active = false;
     };
-  }, [announce]);
+  }, [announce, saveQueue, documentController]);
 
   useEffect(() => {
-    if (!hydrated || firstRunOpen || writer !== 'writer') return;
-    // The layout effect already invalidated older writes for changed content.
+    if (!hydrated || firstRunOpen || writer !== 'writer' || replacingDocument) return;
+    // The document controller already invalidated older writes for changed content.
     // Allocate a ticket here only for the initial hydrated document.
-    const ticket = saveTicketRef.current || ++saveTicketRef.current;
+    const ticket = saveQueue.ensureTicket();
     const saveTimeout = window.setTimeout(() => {
       void queueDocumentSave(getCurrentDocument(), ticket);
     }, 450);
     return () => {
       window.clearTimeout(saveTimeout);
     };
-  }, [autosaveRevision, firstRunOpen, getCurrentDocument, hydrated, queueDocumentSave, writer]);
+  }, [autosaveRevision, firstRunOpen, getCurrentDocument, hydrated, queueDocumentSave, writer, saveQueue, replacingDocument]);
 
   useEffect(() => {
     if (!hydrated || writer !== 'writer') return;
@@ -1433,10 +1347,22 @@ function EditorInner() {
   }, [traceOpen]);
 
   const handleBeforeDelete = useCallback<OnBeforeDelete<EditorNode, EditorEdge>>(async ({ nodes: deletingNodes, edges: deletingEdges }) => {
-    if (deletingNodes.length === 0) return { nodes: deletingNodes, edges: deletingEdges };
+    if (mockProposalPreview) return false;
+    const source = documentController.capture();
+    const commitDeletion = () => {
+      try {
+        documentController.assertSource(source);
+        documentController.deleteElements(deletingNodes.map(node => node.id), deletingEdges.map(edge => edge.id));
+        setSelectedPath(null);
+      } catch (error) { announce(error instanceof Error ? error.message : 'The deletion could not be applied.', 'error'); }
+      // The controller owns this complete transaction. Suppress XYFlow's two
+      // separate edge/node removal callbacks and their partial history origins.
+      return false as const;
+    };
+    if (deletingNodes.length === 0) return commitDeletion();
     const deletingIds = new Set(deletingNodes.map((node) => node.id));
     const leavesCanvasEmpty = nodesRef.current.every((node) => deletingIds.has(node.id));
-    if (!leavesCanvasEmpty) return { nodes: deletingNodes, edges: deletingEdges };
+    if (!leavesCanvasEmpty) return commitDeletion();
     const layerLabel = deletingNodes.length === 1 ? 'layer' : 'layers';
     const confirmed = await requestConfirmation({
       tone: 'danger',
@@ -1456,8 +1382,8 @@ function EditorInner() {
     } catch {
       announce('The recovery copy could not be saved. Undo remains available in this session.', 'error');
     }
-    return { nodes: deletingNodes, edges: deletingEdges };
-  }, [announce, getCurrentDocument, requestConfirmation]);
+    return commitDeletion();
+  }, [announce, documentController, getCurrentDocument, mockProposalPreview, nodesRef, requestConfirmation]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<EditorNode>[]) => {
@@ -1469,7 +1395,7 @@ function EditorInner() {
         && !nodesRef.current.find((node) => node.id === assistant.premiseNodeId)?.data.locked) {
         const next = structuredClone(cinemaRef.current!);
         next.storyWorkflow!.assistant!.position = assistantMove.position;
-        cinemaRef.current = next; setCinema(next);
+        setCinema(next);
       }
       changes = changes.filter((change) => !('id' in change && (change.id === assistant?.id
         || change.id === layerEditorId && change.type === 'dimensions')));
@@ -1507,15 +1433,15 @@ function EditorInner() {
       }
       if (changes.every((change) => change.type === 'position')) {
         const changedNodes = applyNodeChanges(changes, nodesRef.current);
-        nodesRef.current = changedNodes; setNodes(changedNodes);
+        setNodes(changedNodes);
       } else {
-        // XYFlow clears selection before firing onSelectionStart. Keep the prior
-        // ref until React commits, so additive marquee can capture its origin.
+        // Selection is synchronous like every other controller read. The native
+        // pointer capture below retains only gesture IDs before XYFlow resets it.
         setNodes((current) => applyNodeChanges(changes, current));
       }
       if (changes.some((change) => change.type === 'remove')) setSelectedPath(null);
     },
-    [layerEditorId, mockProposalPreview, previewSelectedNodeId, proposalCinema, recordHistory, removeCinemaForNodeIds, writer, toolMode, temporaryPanActive],
+    [cinemaRef, writer, toolMode, temporaryPanActive, mockProposalPreview, nodesRef, setCinema, layerEditorId, proposalCinema, previewSelectedNodeId, recordHistory, removeCinemaForNodeIds, setNodes],
   );
 
   const handleEdgesChange = useCallback(
@@ -1525,7 +1451,7 @@ function EditorInner() {
       if (changes.some((change) => change.type === 'remove')) recordHistory();
       setEdges((current) => applyEdgeChanges(changes, current));
     },
-    [mockProposalPreview, recordHistory],
+    [cinemaRef, mockProposalPreview, recordHistory, setEdges],
   );
 
   const handleConnect = useCallback(
@@ -1552,7 +1478,7 @@ function EditorInner() {
         ),
       );
     },
-    [announce, mockProposalPreview, recordHistory],
+    [announce, edgesRef, mockProposalPreview, nodesRef, recordHistory, setEdges],
   );
 
   const handleReconnect = useCallback((edge: EditorEdge, connection: Connection) => {
@@ -1564,11 +1490,11 @@ function EditorInner() {
     }
     recordHistory();
     setEdges((current) => reconnectEdge(edge, connection, current, { shouldReplaceId: false }));
-  }, [announce, mockProposalPreview, recordHistory]);
+  }, [announce, edgesRef, mockProposalPreview, nodesRef, recordHistory, setEdges]);
 
   const isValidConnection = useCallback(
     (connection: Connection | EditorEdge) => canConnect(nodesRef.current, edgesRef.current, connection),
-    [],
+    [edgesRef, nodesRef],
   );
 
   const selectNode = useCallback((id: string, additive = false) => {
@@ -1580,9 +1506,9 @@ function EditorInner() {
     );
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     setSelectedPath(null);
-  }, []);
+  }, [setEdges, setNodes]);
 
-  const revealAndSelectNode = useCallback((id: string) => {
+  const revealAndSelectNode = useCallback((id: string, framing = { padding: 0.5, maxZoom: 1.4 }) => {
     const ancestors = new Set<string>();
     const queue = [id];
     while (queue.length) {
@@ -1602,8 +1528,8 @@ function EditorInner() {
     })));
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     setSelectedPath(null);
-    window.setTimeout(() => fitView({ nodes: [{ id }], duration: 280, padding: 0.5, maxZoom: 1.4 }), 0);
-  }, [fitView]);
+    runAfterCanvasLayout(() => { void fitView({ nodes: [{ id }], duration: 280, ...framing }); });
+  }, [edgesRef, fitView, setEdges, setNodes]);
 
   const ingestFiles = useCallback(
     async (files: File[], clientPoint?: { x: number; y: number }) => {
@@ -1672,11 +1598,12 @@ function EditorInner() {
         announce(error instanceof Error ? error.message : 'The image could not be added.', 'error');
       }
     },
-    [announce, recordHistory, screenToFlowPosition],
+    [announce, recordHistory, screenToFlowPosition, setNodes],
   );
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
+      if (!canvasVisible) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest('input, textarea, [contenteditable="true"], dialog[open], .premise-expanded-node, .story-assistant-node, .layer-editor-shell')) return;
       const files = Array.from(event.clipboardData?.files ?? []);
@@ -1687,7 +1614,7 @@ function EditorInner() {
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
-  }, [ingestFiles]);
+  }, [canvasVisible, ingestFiles]);
 
   const selectAllVisibleLayers = useCallback(() => {
     const collapsed = collapsedDescendantIds(nodesRef.current, edgesRef.current);
@@ -1708,19 +1635,16 @@ function EditorInner() {
         ? `${selectableIds.size} ${selectableIds.size === 1 ? 'layer' : 'layers'} selected.`
         : 'There are no visible unlocked layers to select.',
     );
-  }, [announce]);
+  }, [announce, edgesRef, nodesRef, setEdges, setNodes]);
 
   const clearCanvasSelection = useCallback(() => {
     setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
     setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
     setSelectedPath(null);
     layerSelectionAnchorRef.current = null;
-  }, []);
+  }, [setEdges, setNodes]);
 
   const handleSelectionStart = useCallback((event: ReactMouseEvent) => {
-    selectionOriginRef.current = new Set(
-      nodesRef.current.filter((node) => node.selected).map((node) => node.id),
-    );
     selectionOperationRef.current = event.altKey
       ? 'subtract'
       : event.shiftKey
@@ -1747,7 +1671,7 @@ function EditorInner() {
     layerSelectionAnchorRef.current = null;
     selectionOriginRef.current = new Set();
     selectionOperationRef.current = 'replace';
-  }, []);
+  }, [setEdges, setNodes]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1756,7 +1680,7 @@ function EditorInner() {
       const isInteractive = Boolean(target?.closest('input, textarea, select, button, a[href], [contenteditable="true"]'));
       if (target?.closest('dialog[open], .premise-expanded-node, .story-assistant-node, .layer-editor-shell')) return;
 
-      if (!isInteractive && event.code === 'Space' && !event.repeat) {
+      if (canvasVisible && !isInteractive && event.code === 'Space' && !event.repeat) {
         event.preventDefault();
         setTemporaryPanActive(true);
         return;
@@ -1764,10 +1688,19 @@ function EditorInner() {
 
       if (event.defaultPrevented) return;
 
+      // Some browsers map Backspace outside an input to history navigation.
+      // Neither a hidden selection nor the active workspace should change.
+      if (!canvasVisible && !isEditing && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault();
+        return;
+      }
+
       if (!isEditing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (event.shiftKey) redo();
         else undo();
+      } else if (!canvasVisible) {
+        return;
       } else if (!isEditing && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
         event.preventDefault();
         selectAllVisibleLayers();
@@ -1800,7 +1733,7 @@ function EditorInner() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [clearCanvasSelection, fitView, redo, selectAllVisibleLayers, undo, zoomIn, zoomOut]);
+  }, [canvasVisible, clearCanvasSelection, fitView, redo, selectAllVisibleLayers, undo, zoomIn, zoomOut]);
 
   useEffect(
     () => () => conversionControllerRef.current?.abort(),
@@ -1812,7 +1745,7 @@ function EditorInner() {
     setNodes((current) => current.map((node) => ({ ...node, selected: false })));
     setSelectedPath(null);
     announce('Image kept as an editable reference layer.', 'success');
-  }, [announce]);
+  }, [announce, setNodes]);
 
   const vectorizeImage = useCallback(
     async (id: string, expandLayers = false) => {
@@ -1884,7 +1817,7 @@ function EditorInner() {
         setConvertingId(null);
       }
     },
-    [announce, conversionOptions, convertingId, fitView, recordHistory],
+    [announce, conversionOptions, convertingId, fitView, nodesRef, recordHistory, setNodes],
   );
 
   const cancelVectorization = useCallback(() => {
@@ -1927,10 +1860,8 @@ function EditorInner() {
   const selectedNodeCount = selectedNodes.length;
   const commitStoryDocument = useCallback((next: EditorDocument, history = true) => {
     if (writer !== 'writer' || mockProposalPreview || editingConceptId) throw Error('Finish canvas editing or the shot-plan review before changing story data.');
-    if (history) recordHistory();
-    nodesRef.current = reconcileRuntimeNodes(next.nodes, nodesRef.current); edgesRef.current = next.edges; cinemaRef.current = next.cinema;
-    setNodes(nodesRef.current); setEdges(next.edges); setCinema(next.cinema);
-  }, [writer, mockProposalPreview, editingConceptId, recordHistory]);
+    documentController.commit(next, history);
+  }, [writer, mockProposalPreview, editingConceptId, documentController]);
   const selectedUnlockedCount = selectedNodes.filter((node) => !node.data.locked).length;
   const selectedEdge = mockProposalPreview ? null : edges.find((edge) => edge.selected) ?? null;
   const selectedCinemaDetail = selectedNode && activeCinemaData
@@ -1956,7 +1887,7 @@ function EditorInner() {
       if (shouldRecord) recordHistory();
       setNodes((current) => current.map((node) => (node.id === id ? updater(node) : node)));
     },
-    [recordHistory],
+    [recordHistory, setNodes],
   );
 
   const updateEdge = useCallback(
@@ -1964,7 +1895,7 @@ function EditorInner() {
       if (shouldRecord) recordHistory();
       setEdges((current) => current.map((edge) => edge.id === id ? updater(edge) : edge));
     },
-    [recordHistory],
+    [recordHistory, setEdges],
   );
 
   const updateAcceptedShot = useCallback((
@@ -1982,7 +1913,7 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The shot could not be updated.', 'error');
     }
-  }, [announce, getCurrentDocument, recordHistory]);
+  }, [announce, getCurrentDocument, recordHistory, setCinema, setEdges, setNodes]);
 
   const applyProfessionalPlanningCommand = useCallback((
     command: CinemaDomainCommand,
@@ -1998,12 +1929,12 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The production plan could not be updated.', 'error');
     }
-  }, [announce, getCurrentDocument, recordHistory]);
+  }, [announce, getCurrentDocument, recordHistory, setCinema, setEdges, setNodes]);
 
   const selectProfessionalShot = useCallback((nodeId: string) => {
     setNodes((current) => current.map((node) => ({ ...node, selected: node.id === nodeId })));
     setMobilePanel('inspector');
-  }, []);
+  }, [setNodes]);
 
   const openProjectScene = useCallback((sceneId: string) => {
     try {
@@ -2020,13 +1951,17 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The scene could not be opened.', 'error');
     }
-  }, [announce, fitView, getCurrentDocument, recordHistory]);
+  }, [announce, fitView, getCurrentDocument, recordHistory, setCinema, setEdges, setNodes]);
 
+  const visualOwnerEpoch = documentController.capture().epoch;
+  const visualOwnerProjectId = cinema?.projectId;
   const updateVisualPreproduction = useCallback((
     updater: (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData,
   ) => {
     const applyVisual = (current: CinemaProjectData) => {
       const visualPreproduction = updater(current.visualPreproduction ?? createEmptyVisualPreproductionData());
+      if (visualPreproduction === current.visualPreproduction) return current;
+      if (visualPreproduction.references === current.visualPreproduction?.references) return { ...current, visualPreproduction };
       const prompts = structuredClone(current.prompts);
       for (const shot of Object.values(current.shots)) {
         const referenceIds = Object.values(visualPreproduction.references)
@@ -2044,13 +1979,18 @@ function EditorInner() {
       setProposalCinema((current) => current ? applyVisual(current) : current);
       return;
     }
+    if (!documentController.ownsProject(visualOwnerEpoch, visualOwnerProjectId)) return;
+    const current = cinemaRef.current;
+    if (!current) return;
+    const next = applyVisual(current);
+    if (next === current) return;
     recordHistory();
-    setCinema((current) => current ? applyVisual(current) : current);
-  }, [mockProposalPreview, recordHistory]);
+    setCinema(next);
+  }, [cinemaRef, documentController, mockProposalPreview, recordHistory, setCinema, visualOwnerEpoch, visualOwnerProjectId]);
 
   const cleanupUnusedMedia = useCallback(async () => {
     try {
-      const memoryRoots = () => [getCurrentDocument(), ...pastRef.current, ...futureRef.current,
+      const memoryRoots = () => [getCurrentDocument(), ...history.roots(),
         dragOriginRef.current, resizeOriginRef.current, fieldOriginRef.current, conceptEditOriginRef.current,
         { cinema: proposalCinema }, mockProposalPreview?.document];
       const documents = [...memoryRoots(), await loadLocalRecoveryDocument(),
@@ -2078,14 +2018,14 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'Unused local media could not be cleaned.', 'error');
     }
-  }, [announce, getCurrentDocument, requestConfirmation, proposalCinema, mockProposalPreview, withMediaCleanupLease]);
+  }, [announce, getCurrentDocument, requestConfirmation, proposalCinema, mockProposalPreview, withMediaCleanupLease, history]);
 
   const updateSelectedNodes = useCallback((updater: (node: EditorNode) => EditorNode) => {
     const selectedIds = new Set(nodesRef.current.filter((node) => node.selected && !node.data.locked).map((node) => node.id));
     if (!selectedIds.size) return;
     recordHistory();
     setNodes((current) => current.map((node) => selectedIds.has(node.id) ? updater(node) : node));
-  }, [recordHistory]);
+  }, [nodesRef, recordHistory, setNodes]);
 
   const duplicateSelectedNodes = useCallback(() => {
     const selected = nodesRef.current.filter((node) => node.selected && !node.data.locked);
@@ -2124,7 +2064,7 @@ function EditorInner() {
     ]);
     layerSelectionAnchorRef.current = copies[0]?.id ?? null;
     announce(`${copies.length} ${copies.length === 1 ? 'layer' : 'layers'} duplicated.`, 'success');
-  }, [announce, recordHistory]);
+  }, [announce, edgesRef, nodesRef, recordHistory, setEdges, setNodes]);
 
   const setSelectedNodesLocked = useCallback((locked: boolean) => {
     const selectedIds = new Set(nodesRef.current.filter((node) => node.selected && node.data.locked !== locked).map((node) => node.id));
@@ -2136,7 +2076,7 @@ function EditorInner() {
       deletable: !locked,
       data: { ...node.data, locked },
     } : node));
-  }, [recordHistory]);
+  }, [nodesRef, recordHistory, setNodes]);
 
   const alignSelectedNodes = useCallback((mode: 'left' | 'top' | 'horizontal' | 'vertical') => {
     const selected = nodesRef.current.filter((node) => node.selected && !node.data.locked);
@@ -2161,13 +2101,13 @@ function EditorInner() {
     setNodes((current) => current.map((node) => positions.has(node.id)
       ? { ...node, position: { ...node.position, [axis]: positions.get(node.id)! } }
       : node));
-  }, [recordHistory]);
+  }, [nodesRef, recordHistory, setNodes]);
 
   const deleteSelectedNodes = useCallback(() => {
     const selected = nodesRef.current.filter((node) => node.selected && !node.data.locked);
     if (!selected.length) return;
     void deleteElements({ nodes: selected });
-  }, [deleteElements]);
+  }, [deleteElements, nodesRef]);
 
   const tidyDiagram = useCallback(() => {
     const cinemaLayout = planCinemaWorkspaceReorganization(
@@ -2194,7 +2134,7 @@ function EditorInner() {
     }
     window.setTimeout(() => fitView({ duration: 320, padding: 0.22 }), 0);
     announce(cinemaLayout.handled ? 'Project hierarchy reorganized.' : 'Diagram layout tidied.', 'success');
-  }, [announce, fitView, recordHistory]);
+  }, [announce, cinemaRef, edgesRef, fitView, nodesRef, recordHistory, setEdges, setNodes]);
 
   const beginConceptEdit = useCallback((id: string) => {
     const node = nodesRef.current.find((item) => item.id === id);
@@ -2214,7 +2154,7 @@ function EditorInner() {
     } : item));
     setEditingConceptId(id);
     selectNode(id);
-  }, [editingConceptId, recordHistory, selectNode]);
+  }, [cinemaRef, edgesRef, editingConceptId, nodesRef, recordHistory, selectNode, setNodes]);
 
   const openLayerEditor = useCallback((id: string) => {
     if (activeLayerEditorId.current === id) {
@@ -2225,7 +2165,9 @@ function EditorInner() {
     const current = getCurrentDocument();
     const target = layerEditTarget(current, id);
     if (!target) return;
-    if (target.role === 'story' && !storyEnabled) { beginConceptEdit(id); return; }
+    // Story capability controls assisted development, not the local premise
+    // editor. A delayed or unavailable capability response must never turn a
+    // story-layer gesture into the unrelated inline text editor.
     if (target.role === 'story') setWorkspaceView('canvas');
     const next = target.role === 'story' && !target.readOnly ? ensureStoryProject(current) : current;
     if (next !== current) commitStoryDocument(next);
@@ -2237,7 +2179,7 @@ function EditorInner() {
     selectNode(id);
     activeLayerEditorId.current = id;
     setLayerEditorId(id);
-  }, [writer, mockProposalPreview, editingConceptId, getCurrentDocument, storyEnabled, beginConceptEdit, commitStoryDocument, selectNode]);
+  }, [writer, mockProposalPreview, editingConceptId, getCurrentDocument, commitStoryDocument, selectNode]);
 
   const openStoryEditor = useCallback(() => {
     const premise = storyPremise(getCurrentDocument());
@@ -2255,19 +2197,19 @@ function EditorInner() {
   useEffect(() => {
     if (!layerEditorId) return;
     const node = nodesRef.current.find((item) => item.id === layerEditorId);
-    const canvas = document.querySelector('.canvas-region .react-flow')?.getBoundingClientRect();
-    if (node && canvas) {
-      void setCenter(node.position.x + layerFocus.width / 2, node.position.y + layerFocus.height / 2 + layerFocus.centerOffsetY, { zoom: layerFocus.zoom, duration: 0 });
-    }
-  }, [layerEditorId, setCenter, layerFocus]);
+    if (!node) return;
+    let current = true;
+    runAfterCanvasLayout(() => {
+      if (current) void setCenter(node.position.x + layerFocus.width / 2, node.position.y + layerFocus.height / 2 + layerFocus.centerOffsetY, { zoom: layerFocus.zoom, duration: 0 });
+    });
+    return () => { current = false; };
+  }, [layerEditorId, setCenter, layerFocus, nodesRef]);
 
   const commitLayerDocument = useCallback((next: EditorDocument, history = false) => {
     if (writer !== 'writer' || mockProposalPreview) throw Error('This document cannot be edited right now.');
-    if (!layerEditRecorded.current || history) { recordHistory(); layerEditRecorded.current = true; }
-    nodesRef.current = reconcileRuntimeNodes(next.nodes, nodesRef.current).map((node) => ({ ...node, selected: node.id === layerEditorId }));
-    edgesRef.current = next.edges; cinemaRef.current = next.cinema;
-    setNodes(nodesRef.current); setEdges(next.edges); setCinema(next.cinema);
-  }, [writer, mockProposalPreview, recordHistory, layerEditorId]);
+    documentController.commit(next, !layerEditRecorded.current || history); layerEditRecorded.current = true;
+    setNodes(current => current.map(node => ({ ...node, selected: node.id === layerEditorId })));
+  }, [writer, mockProposalPreview, documentController, setNodes, layerEditorId]);
 
   const closeLayerEditor = useCallback(() => {
     const closingId = activeLayerEditorId.current;
@@ -2314,7 +2256,7 @@ function EditorInner() {
       announce(error instanceof Error ? error.message : 'The filmmaking layer could not be added.', 'error');
       return false;
     }
-  }, [announce, beginConceptEdit, fitView, getCurrentDocument, recordHistory]);
+  }, [announce, beginConceptEdit, fitView, getCurrentDocument, recordHistory, setCinema, setEdges, setNodes]);
 
   const createCinemaDraft = useCallback((
     role: CinemaDraftRole,
@@ -2495,7 +2437,7 @@ function EditorInner() {
       announce(`${descriptor.label} draft added.`, 'success');
     }
     return created;
-  }, [announce, applyManualCreation, screenToFlowPosition]);
+  }, [announce, applyManualCreation, cinemaRef, edgesRef, nodesRef, screenToFlowPosition]);
 
   const addConceptAt = useCallback((screenPoint: { x: number; y: number }, editAfterCreate = false) => {
     createCinemaDraft('note', { screenPoint, editAfterCreate });
@@ -2511,7 +2453,7 @@ function EditorInner() {
       : null;
     const role = cinemaRelativeRole(sourceRole, relation) ?? 'note';
     createCinemaDraft(role, { sourceId: id, relation });
-  }, [createCinemaDraft]);
+  }, [createCinemaDraft, nodesRef]);
 
   const createFromPalette = useCallback((role: CinemaDraftRole) => {
     const selectedConcept = nodesRef.current.find((node) => node.selected && node.data.kind === 'concept');
@@ -2543,7 +2485,7 @@ function EditorInner() {
       created = createCinemaDraft(role);
     }
     if (created) setCreationPaletteOpen(false);
-  }, [announce, createCinemaDraft]);
+  }, [announce, createCinemaDraft, nodesRef]);
 
   const convertConceptRole = useCallback((nodeId: string, role: CinemaDraftRole) => {
     const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
@@ -2566,7 +2508,7 @@ function EditorInner() {
       }],
     }, nodeId, false);
     if (converted) announce(`Converted to ${descriptor.label.toLocaleLowerCase()}.`, 'success');
-  }, [announce, applyManualCreation]);
+  }, [announce, applyManualCreation, nodesRef]);
 
   const updateConceptTitle = useCallback((id: string, title: RichTextDocument) => {
     const label = richTextToPlainText(title).slice(0, 500);
@@ -2581,13 +2523,13 @@ function EditorInner() {
           },
         }
       : node));
-  }, []);
+  }, [setNodes]);
 
   const updateConceptBody = useCallback((id: string, body: RichTextDocument) => {
     setNodes((current) => current.map((node) => node.id === id && node.data.kind === 'concept'
       ? { ...node, data: { ...node.data, body } }
       : node));
-  }, []);
+  }, [setNodes]);
 
   const commitConceptEdit = useCallback(() => {
     const id = editingConceptId;
@@ -2623,7 +2565,7 @@ function EditorInner() {
     }
     conceptEditOriginRef.current = null;
     setEditingConceptId(null);
-  }, [editingConceptId, recordHistory]);
+  }, [cinemaRef, editingConceptId, nodesRef, recordHistory, setCinema, setNodes]);
 
   const cancelConceptEdit = useCallback(() => {
     const id = editingConceptId;
@@ -2641,13 +2583,13 @@ function EditorInner() {
         node?.focus();
       }, 0);
     }
-  }, [editingConceptId]);
+  }, [editingConceptId, setEdges, setNodes]);
 
   const beginFieldEdit = useCallback(() => {
     if (!fieldOriginRef.current) {
       fieldOriginRef.current = cloneSnapshot(nodesRef.current, edgesRef.current, cinemaRef.current);
     }
-  }, []);
+  }, [cinemaRef, edgesRef, nodesRef]);
 
   const endFieldEdit = useCallback(() => {
     if (!fieldOriginRef.current) return;
@@ -2670,10 +2612,11 @@ function EditorInner() {
         layer?.focus();
       }, 0);
     }
-  }, [renamingLayerId]);
+  }, [renamingLayerId, setEdges, setNodes]);
 
   useEffect(() => {
     const beginFromKeyboard = (event: KeyboardEvent) => {
+      if (!canvasVisible) return;
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target?.closest('input, textarea, button, [contenteditable="true"], .premise-expanded-node, .story-assistant-node, .layer-editor-shell')) return;
@@ -2704,7 +2647,7 @@ function EditorInner() {
     };
     window.addEventListener('keydown', beginFromKeyboard, true);
     return () => window.removeEventListener('keydown', beginFromKeyboard, true);
-  }, [addConceptRelative, beginConceptEdit, getCurrentDocument, openLayerEditor]);
+  }, [canvasVisible, addConceptRelative, beginConceptEdit, getCurrentDocument, openLayerEditor, nodesRef]);
 
   const updateSelectedPath = useCallback(
     (updater: (path: VectorPathLayer) => VectorPathLayer, shouldRecord = true) => {
@@ -2725,7 +2668,7 @@ function EditorInner() {
         }),
       );
     },
-    [recordHistory, selectedPath],
+    [recordHistory, selectedPath, setNodes],
   );
 
   const updatePathById = useCallback((nodeId: string, pathId: string, updater: (path: VectorPathLayer) => VectorPathLayer) => {
@@ -2754,7 +2697,7 @@ function EditorInner() {
       paths.splice(nextIndex, 0, path);
       return { ...node, data: { ...node.data, paths } };
     }));
-  }, [recordHistory, selectedPath]);
+  }, [recordHistory, selectedPath, setNodes]);
 
   const duplicateSelectedPath = useCallback(() => {
     if (!selectedPath) return;
@@ -2776,7 +2719,7 @@ function EditorInner() {
       return { ...node, data: { ...node.data, paths } };
     }));
     setSelectedPath({ nodeId: selectedPath.nodeId, pathId: newPathId });
-  }, [recordHistory, selectedPath]);
+  }, [nodesRef, recordHistory, selectedPath, setNodes]);
 
   const deleteSelectedPath = useCallback(() => {
     if (!selectedPath) return;
@@ -2791,7 +2734,7 @@ function EditorInner() {
       : item));
     const next = remaining[Math.min(index, remaining.length - 1)];
     setSelectedPath(next ? { nodeId: node.id, pathId: next.id } : null);
-  }, [recordHistory, selectedPath]);
+  }, [nodesRef, recordHistory, selectedPath, setNodes]);
 
   const toggleNodeVisibility = useCallback((id: string) => {
     const selected = nodesRef.current.find((node) => node.id === id);
@@ -2815,7 +2758,7 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The layer could not be shown safely.', 'error');
     }
-  }, [announce, recordHistory, updateNode]);
+  }, [announce, edgesRef, nodesRef, recordHistory, setNodes, updateNode]);
 
   const toggleNodeLock = useCallback((id: string) => {
     updateNode(id, (node) => ({
@@ -2866,9 +2809,10 @@ function EditorInner() {
       copy.splice(nextIndex, 0, node);
       return copy;
     });
-  }, [recordHistory]);
+  }, [recordHistory, setNodes]);
 
   const resetDocument = useCallback(async () => {
+    const source = documentController.capture();
     const confirmed = await requestConfirmation({
       tone: 'warning',
       eyebrow: 'New project',
@@ -2882,14 +2826,8 @@ function EditorInner() {
     try {
       conversionControllerRef.current?.abort();
       planningControllerRef.current?.abort('new-document');
-      await clearLocalDocument();
-      await clearPendingCinemaProposals();
-      pastRef.current = [];
-      futureRef.current = [];
-      setNodes(structuredClone(initialDocument.nodes));
-      setEdges(structuredClone(initialDocument.edges));
-      setTitle(initialDocument.title);
-      setCinema(initialDocument.cinema);
+      await documentController.replace(initialDocument, source, (document, assertCurrent) => replaceLocalDocument(document, { clearRecovery: true, assertCurrent }));
+      setRecoveryDocument(null);
       setSelectedPath(null);
       setMockProposalPreview(null);
       setMockProposalStage('idle');
@@ -2899,13 +2837,12 @@ function EditorInner() {
       setProposalMode(null);
       setPendingProposalId(null);
       setWorkspaceView('canvas');
-      refreshHistoryState();
       window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
       announce('New local document created.', 'success');
     } catch {
       announce('The local project could not be cleared. Download a backup before trying again.', 'error');
     }
-  }, [announce, fitView, refreshHistoryState, requestConfirmation]);
+  }, [announce, fitView, documentController, requestConfirmation]);
 
   const chooseStartScene = useCallback(() => {
     if (!firstRunOpen) recordHistory();
@@ -2920,18 +2857,17 @@ function EditorInner() {
     setFirstRunOpen(false);
     window.setTimeout(() => fitView({ duration: 260, padding: 0.22 }), 0);
     announce('Clean scene workspace ready. Edit Scene 01, then generate a shot plan.', 'success');
-  }, [announce, firstRunOpen, fitView, recordHistory]);
+  }, [announce, firstRunOpen, fitView, recordHistory, setCinema, setEdges, setNodes, setTitle]);
 
   const chooseStartIdea = useCallback(() => {
     if (!firstRunOpen) recordHistory();
     const next = ensureStoryProject(createStoryStarterDocument());
-    nodesRef.current = next.nodes; edgesRef.current = next.edges; cinemaRef.current = next.cinema;
     setNodes(next.nodes); setEdges(next.edges); setCinema(next.cinema); setTitle(next.title);
     setWorkspaceView('canvas'); setFirstRunOpen(false);
     // Open only after the new graph mounts. This is an explicit user action,
     // not a default insertion or a provider call.
     window.setTimeout(() => openLayerEditor('story-premise'), 0);
-  }, [firstRunOpen, recordHistory, openLayerEditor]);
+  }, [firstRunOpen, recordHistory, setNodes, setEdges, setCinema, setTitle, openLayerEditor]);
 
   const chooseSampleProject = useCallback(() => {
     if (!firstRunOpen) recordHistory();
@@ -2939,33 +2875,29 @@ function EditorInner() {
     setNodes(sample.nodes.map((node) => ({ ...node, selected: node.id === 'cine-shot-03' })));
     setEdges(sample.edges.map((edge) => ({ ...edge, selected: false })));
     setTitle(REEL_KNOWS_TOMORROW.title);
-    setCinema(structuredClone(MOCK_CINEMA_PROJECT_DATA));
+    // Opening a new sample is a new project, not a restore of every other
+    // browser's sample. Saved backups retain their identity on restoration.
+    setCinema({ ...structuredClone(MOCK_CINEMA_PROJECT_DATA), projectId: crypto.randomUUID() });
     setWorkspaceView('canvas');
     setFirstRunOpen(false);
     window.setTimeout(() => fitView({ duration: 320, padding: 0.14 }), 0);
     announce('Sample opened locally with fixture sources. No external request was made.', 'success');
-  }, [announce, firstRunOpen, fitView, recordHistory]);
+  }, [announce, firstRunOpen, fitView, recordHistory, setCinema, setEdges, setNodes, setTitle]);
 
   const recoverLastNonEmptyCanvas = useCallback(async () => {
     if (!recoveryDocument) return;
     try {
-      recordHistory();
       const restored = structuredClone(recoveryDocument);
-      setNodes(restored.nodes.map((node) => ({ ...node, selected: false })));
-      setEdges(restored.edges.map((edge) => ({ ...edge, selected: false })));
-      setTitle(restored.title);
-      setCinema(restored.cinema);
+      await documentController.replace(restored, documentController.capture(), (document, assertCurrent) => replaceLocalDocument(document, { clearRecovery: true, assertCurrent }), true);
       setWorkspaceView('canvas');
       setSelectedPath(null);
-      await queueDocumentSave(restored);
-      await clearLocalRecoveryDocument();
       setRecoveryDocument(null);
       window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
       announce('Last non-empty canvas recovered.', 'success');
     } catch {
       announce('The recovery copy could not be restored. Try a checkpoint or project backup.', 'error');
     }
-  }, [announce, fitView, queueDocumentSave, recordHistory, recoveryDocument]);
+  }, [announce, fitView, documentController, recoveryDocument]);
 
   const openExport = useCallback(() => setExportOpen(true), []);
   const openBackup = useCallback(() => setBackupOpen(true), []);
@@ -3007,7 +2939,7 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'Project backup failed.', 'error');
     }
-  }, [announce, getCurrentDocument]);
+  }, [announce, getCurrentDocument, titleRef]);
 
   const createCheckpoint = useCallback(async () => {
     try {
@@ -3020,6 +2952,7 @@ function EditorInner() {
   }, [announce, getCurrentDocument]);
 
   const restoreCheckpoint = useCallback(async (checkpoint: LocalCheckpoint) => {
+    const source = documentController.capture();
     const confirmed = await requestConfirmation({
       tone: 'warning',
       eyebrow: 'Version checkpoint',
@@ -3030,12 +2963,10 @@ function EditorInner() {
       confirmLabel: 'Restore checkpoint',
     });
     if (!confirmed) return;
-    recordHistory();
+    try {
     const restored = structuredClone(checkpoint.document);
-    setNodes(restored.nodes);
-    setEdges(restored.edges);
-    setTitle(restored.title);
-    setCinema(restored.cinema);
+    conversionControllerRef.current?.abort(); planningControllerRef.current?.abort('restore-checkpoint');
+    await documentController.replace(restored, source, (document, assertCurrent) => replaceLocalDocument(document, { assertCurrent }), true);
     setSelectedPath(null);
     setMockProposalPreview(null);
     setMockProposalStage('idle');
@@ -3044,11 +2975,11 @@ function EditorInner() {
     setProposalCinema(null);
     setProposalMode(null);
     setWorkspaceView('canvas');
-    await queueDocumentSave(restored);
     setBackupOpen(false);
     window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 0);
     announce('Checkpoint restored.', 'success');
-  }, [announce, fitView, queueDocumentSave, recordHistory, requestConfirmation]);
+    } catch (error) { announce(error instanceof Error ? error.message : 'Checkpoint restoration failed.', 'error'); }
+  }, [announce, fitView, documentController, requestConfirmation]);
 
   const removeCheckpoint = useCallback(async (id: string) => {
     try {
@@ -3061,6 +2992,7 @@ function EditorInner() {
   }, [announce]);
 
   const restoreProject = useCallback(async (file: File) => {
+    const source = documentController.capture();
     try {
       if (file.size > MAX_PROJECT_FILE_SIZE) throw new Error('The project backup is larger than 40 MB.');
       const parsed = await parseProjectBackupWithMedia(await file.text());
@@ -3076,14 +3008,9 @@ function EditorInner() {
         confirmLabel: 'Restore backup',
       });
       if (!confirmed) return;
-      await Promise.all(parsed.media.map((entry) => saveLocalMediaBlob(entry.blob, entry)));
       conversionControllerRef.current?.abort();
-      pastRef.current = [];
-      futureRef.current = [];
-      setNodes(restored.nodes);
-      setEdges(restored.edges);
-      setTitle(restored.title);
-      setCinema(restored.cinema);
+      planningControllerRef.current?.abort('restore-project');
+      await documentController.replace(restored, source, (document, assertCurrent) => replaceLocalDocument(document, { media: parsed.media, assertCurrent }));
       setSelectedPath(null);
       setMockProposalPreview(null);
       setMockProposalStage('idle');
@@ -3093,15 +3020,13 @@ function EditorInner() {
       setProposalMode(null);
       setExpandedVectors(new Set());
       setWorkspaceView('canvas');
-      refreshHistoryState();
-      await queueDocumentSave(restored);
       setBackupOpen(false);
       window.setTimeout(() => fitView({ duration: 300, padding: 0.22 }), 60);
       announce(`Project backup restored. ${parsed.media.length} verified local media ${parsed.media.length === 1 ? 'item' : 'items'} included.`, 'success');
     } catch (error) {
       announce(error instanceof Error ? error.message : 'The project backup could not be restored.', 'error');
     }
-  }, [announce, fitView, queueDocumentSave, refreshHistoryState, requestConfirmation]);
+  }, [announce, fitView, documentController, requestConfirmation]);
 
   const performExport = useCallback(() => {
     try {
@@ -3115,9 +3040,9 @@ function EditorInner() {
     } catch (error) {
       announce(error instanceof Error ? error.message : 'Export failed.', 'error');
     }
-  }, [announce, title]);
+  }, [announce, edgesRef, nodesRef, title]);
 
-  const hasChildren = useCallback((id: string) => edgesRef.current.some((edge) => edge.source === id), []);
+  const hasChildren = useCallback((id: string) => edgesRef.current.some((edge) => edge.source === id), [edgesRef]);
 
   const toggleBranch = useCallback((id: string) => {
     updateNode(id, (node) => node.data.kind === 'concept'
@@ -3159,7 +3084,6 @@ function EditorInner() {
               style: { ...node.style, width: dimensions.width, height: dimensions.height },
             }
           : node);
-        nodesRef.current = resizedNodes;
         setNodes(resizedNodes);
       },
       recordResizeEnd: (id) => {
@@ -3178,26 +3102,7 @@ function EditorInner() {
         resizeOriginRef.current = null;
       },
     }),
-    [
-      beginConceptEdit,
-      addConceptRelative,
-      openStoryEditor,
-      storyReferenceCount,
-      storyEnabled,
-      cancelConceptEdit,
-      cancelVectorization,
-      commitConceptEdit,
-      convertingId,
-      editingConceptId,
-      openLayerEditor,
-      hasChildren,
-      keepImage,
-      recordHistory,
-      toggleBranch,
-      updateConceptBody,
-      updateConceptTitle,
-      vectorizeImage,
-    ],
+    [convertingId, editingConceptId, openLayerEditor, keepImage, vectorizeImage, cancelVectorization, beginConceptEdit, updateConceptTitle, updateConceptBody, commitConceptEdit, cancelConceptEdit, toggleBranch, hasChildren, addConceptRelative, openStoryEditor, storyReferenceCount, storyEnabled, nodesRef, edgesRef, cinemaRef, setNodes, recordHistory],
   );
 
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase();
@@ -3251,7 +3156,7 @@ function EditorInner() {
 
     layerSelectionAnchorRef.current = id;
     revealAndSelectNode(id);
-  }, [mockProposalPreview, revealAndSelectNode, selectNode, sidebarLayerNodes]);
+  }, [mockProposalPreview, revealAndSelectNode, selectNode, setEdges, setNodes, sidebarLayerNodes]);
   const handleOutlineSelection = useCallback((id: string, additive = false) => {
     if (mockProposalPreview) {
       setPreviewSelectedNodeId(id);
@@ -3259,9 +3164,10 @@ function EditorInner() {
     } else if (additive) {
       selectNode(id, true);
     } else {
-      revealAndSelectNode(id);
+      revealAndSelectNode(id, { padding: 0.6, maxZoom: 1.35 });
+      return;
     }
-    window.setTimeout(() => fitView({ nodes: [{ id }], duration: 280, padding: 0.6, maxZoom: 1.35 }), 0);
+    runAfterCanvasLayout(() => { void fitView({ nodes: [{ id }], duration: 280, padding: 0.6, maxZoom: 1.35 }); });
   }, [fitView, mockProposalPreview, revealAndSelectNode, selectNode]);
   const openSceneCreationPalette = useCallback((id: string) => {
     const scene = nodesRef.current.find((node) => node.id === id);
@@ -3269,10 +3175,10 @@ function EditorInner() {
     selectNode(id);
     layerSelectionAnchorRef.current = id;
     setCreationPaletteOpen(true);
-  }, [mockProposalPreview, selectNode]);
+  }, [mockProposalPreview, nodesRef, selectNode]);
   const focusOutlineNodes = useCallback((ids: string[]) => {
     if (!ids.length) return;
-    fitView({ nodes: ids.map((id) => ({ id })), duration: 300, padding: 0.3, maxZoom: 1.2 });
+    runAfterCanvasLayout(() => { void fitView({ nodes: ids.map((id) => ({ id })), duration: 300, padding: 0.3, maxZoom: 1.2 }); });
   }, [fitView]);
   const toggleOutlineBranch = useCallback((id: UnifiedOutlineBranchId) => {
     setCollapsedOutlineBranches((current) => {
@@ -3299,10 +3205,15 @@ function EditorInner() {
         deletable: false,
         data: { ...node.data, locked: true },
       } : {};
+      const cinemaKind = activeCinemaProject.nodes[node.id]?.kind;
+      const simplifiedContextClass = cinemaKind && !['story', 'scene'].includes(cinemaKind) ? 'simplified-nonstory-context' : '';
+      const presentedClass = mockProposalPreview ? (previewNodeIds.has(node.id) ? 'proposal-ghost-node' : 'proposal-context-node') : node.className;
+      const className = [presentedClass, simplifiedContextClass].filter(Boolean).join(' ') || undefined;
       if (node.data.kind !== 'concept') {
         return {
           ...node,
           ...previewPresentation,
+          className,
           hidden: Boolean(node.hidden || collapsedNodeIds.has(node.id)),
         };
       }
@@ -3316,11 +3227,12 @@ function EditorInner() {
       return {
         ...node,
         ...previewPresentation,
+        className,
         style,
         hidden: Boolean(node.hidden || collapsedNodeIds.has(node.id)),
       };
     }),
-    [collapsedNodeIds, mockProposalPreview, presentedNodes, previewNodeIds, layerEditorId, toolMode, temporaryPanActive, layerFocus],
+    [activeCinemaProject.nodes, collapsedNodeIds, mockProposalPreview, presentedNodes, previewNodeIds, layerEditorId, toolMode, temporaryPanActive, layerFocus],
   );
   const canvasEdges = useMemo(
     () => {
@@ -3332,6 +3244,12 @@ function EditorInner() {
       return visibleEdges.map((edge) => {
         const route = routes.get(edge.id);
         const affected = affectedEdgeIds.has(edge.id);
+        const contextual = [edge.source, edge.target].some((id) => {
+          const kind = activeCinemaProject.nodes[id]?.kind;
+          return kind && !['story', 'scene'].includes(kind);
+        });
+        const className = [affected ? 'proposal-ghost-edge' : route ? 'cinema-hierarchy-bus-edge' : edge.className,
+          contextual ? 'simplified-nonstory-context' : ''].filter(Boolean).join(' ');
         return ({
           ...edge,
           ...(route && !affected ? {
@@ -3355,15 +3273,24 @@ function EditorInner() {
             animated: true,
             style: { stroke: '#716af2', strokeWidth: 1.75, strokeDasharray: '6 5' },
           } : {}),
+          className,
           ariaLabel: `Connector from ${nodeNames.get(edge.source) ?? edge.source} to ${nodeNames.get(edge.target) ?? edge.target}${edge.data?.label ? `: ${edge.data.label}` : ''}`,
         });
       });
     },
-    [canvasNodes, collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
+    [activeCinemaProject.nodes, canvasNodes, collapsedNodeIds, mockProposalPreview, presentedEdges, presentedNodes],
   );
 
-  const layerDocument: EditorDocument = { schemaVersion: 5, title, nodes, edges, cinema, updatedAt: 0 };
-  const storyAssistant = useStoryAssistant(layerDocument, getCurrentDocument, commitStoryDocument, () => queueDocumentSave(getCurrentDocument()));
+  const layerDocument = useMemo<EditorDocument>(() => ({ schemaVersion: 5, title, nodes, edges, cinema, updatedAt: 0 }), [cinema, edges, nodes, title]);
+  const operationSnapshot = useSyncExternalStore(subscribeClientOperations, () => {
+    try { return JSON.stringify(listClientOperations(cinema?.projectId)); }
+    catch { return '[]'; }
+  }, () => '[]');
+  const stageProjection = useMemo(() => projectStageProjection({ cinema,
+    hasPremise: Boolean(storyPremise(layerDocument)?.text.trim()), operations: JSON.parse(operationSnapshot),
+    capabilities: workspaceCapabilities.value, capabilityError: workspaceCapabilities.status === 'error',
+  }), [cinema, layerDocument, operationSnapshot, workspaceCapabilities.status, workspaceCapabilities.value]);
+  const storyAssistant = useStoryAssistant(layerDocument, getCurrentDocument, commitStoryDocument, () => queueDocumentSave(getCurrentDocument()), workspaceCapabilities.value);
   const assistantState = cinema?.storyWorkflow?.assistant;
   const acceptedSession = storyReviewSession(cinema?.storyWorkflow);
   const compactProduction = Boolean(acceptedSession?.accepted.length && acceptedSession.presentation !== 'scene-review' && !cinema?.storyWorkflow?.shotPlanning && expandedShotSetup !== acceptedSession.id);
@@ -3379,10 +3306,52 @@ function EditorInner() {
     if (!premise?.text.trim() && !cinemaRef.current?.sceneOrder.length && cinemaRef.current?.storyWorkflow?.draft?.mode !== 'surprise') { openStoryEditor(); return; }
     storyAssistant.open(); closeLayerEditor(); setWorkspaceView('canvas'); setAssistantOpenEpoch((value) => value + 1);
   };
+  const openSimplifiedStory = () => {
+    const current = getCurrentDocument();
+    if (!storyPremise(current)) {
+      // Explicit creation adds a premise; it must never replace an existing project.
+      const node = { ...createStoryStarterDocument().nodes[0], id: crypto.randomUUID() };
+      const next = ensureStoryProject({ ...current, nodes: [...current.nodes, node],
+        // Older projects can point at a generic planning/root card. Keep that
+        // card and its links, but make the explicitly added premise canonical.
+        cinema: current.cinema ? { ...current.cinema, projectNodeId: node.id } : undefined });
+      commitStoryDocument(next);
+      window.setTimeout(() => openLayerEditor(node.id), 0);
+    } else openStoryAssistant();
+  };
+  const openSimplifiedLayer = (id: string) => {
+    setShotDetailOpen(true); setWorkspaceView('canvas');
+    // The Shots overview hides the React Flow surface. Let that surface regain
+    // real dimensions before mounting and framing the expanded editor.
+    requestAnimationFrame(() => requestAnimationFrame(() => openLayerEditor(id)));
+  };
+  const applyStageAction = (action: StageAction) => {
+    if (action.kind === 'open-story-editor') { openSimplifiedStory(); return; }
+    if (action.kind === 'open-story-assistant') { openStoryAssistant(); return; }
+    if (action.kind === 'open-scene' || action.kind === 'open-shot') {
+      if (!action.targetId) return;
+      openSimplifiedLayer(action.targetId); return;
+    }
+    if (action.kind === 'select-stage' && action.targetId) {
+      filmmaking.select(action.targetId as FilmmakingStage); setShotDetailOpen(false); setWorkspaceView('canvas'); return;
+    }
+    if (action.kind === 'refresh-status') void workspaceCapabilities.refresh();
+  };
+  const switchWorkspacePreview = async (enabled: boolean) => {
+    const destination = enabled ? 'simplified preview' : 'original workspace';
+    if (await requestConfirmation({ tone: 'warning', eyebrow: 'Workspace preview', title: `Switch to the ${destination}?`,
+      description: 'Your project edits stay in memory; this does not reload the page.',
+      impact: 'Temporary Final Cut trims and undownloaded exports will reset. An active local render request will be cancelled.',
+      reassurance: 'Download your rendered cut first. Story, shots and saved media are kept.', confirmLabel: `Switch to ${destination}` })) setSimplifiedPreview(enabled);
+  };
   const focusStoryAssistant = () => {
     const node = assistantProjection?.node;
     const canvas = document.querySelector('.canvas-region .react-flow')?.getBoundingClientRect();
     if (node && canvas) {
+      if (filmmaking.enabled && filmmaking.workspace === 'story' && assistantState && focusSpace.width >= 1_000) {
+        requestAnimationFrame(() => { void fitView({ nodes: [{ id: assistantState.premiseNodeId }, { id: node.id }], padding: 0.08, maxZoom: 1, duration: 0 }); });
+        return;
+      }
       void setCenter(node.position.x + assistantFocus.width / 2, node.position.y + assistantFocus.height / 2 + assistantFocus.centerOffsetY, { zoom: assistantFocus.zoom, duration: 0 });
     }
   };
@@ -3416,11 +3385,15 @@ function EditorInner() {
     if (!assistantVisible || layerEditorId) return;
     const state = cinemaRef.current?.storyWorkflow?.assistant;
     if (!state) return;
+    if (filmmaking.enabled && filmmaking.workspace === 'story' && assistantProjection && focusSpace.width >= 1_000) {
+      requestAnimationFrame(() => { void fitView({ nodes: [{ id: state.premiseNodeId }, { id: assistantProjection.node.id }], padding: 0.08, maxZoom: 1, duration: 0 }); });
+      return;
+    }
     const geometry = editorFocusGeometry(focusSpace, 460, assistantPreferredHeight);
     void setCenter(state.position.x + geometry.width / 2, state.position.y + geometry.height / 2 + geometry.centerOffsetY, { zoom: geometry.zoom, duration: 0 });
     // Stage height alone must not navigate; only explicit open/focus/resize does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistantVisible, assistantOpenEpoch, focusSpace, layerEditorId, setCenter]);
+  }, [assistantVisible, assistantOpenEpoch, focusSpace, layerEditorId, setCenter, filmmaking.enabled, filmmaking.workspace, fitView]);
   const revealAcceptedScenes = (sceneIds: string[]) => {
     const current = getCurrentDocument(), helper = current.cinema?.storyWorkflow?.assistant;
     if (!helper || !sceneIds.length) return;
@@ -3434,6 +3407,12 @@ function EditorInner() {
       obstacles.push(node); y = node.position.y + editorNodeDimensions(node).height + 32;
     }
     commitStoryDocument(next, false);
+    const completedSession = storyReviewSession(next.cinema?.storyWorkflow);
+    if (filmmaking.enabled && completedSession?.proposals.length
+      && completedSession.proposals.every((proposal) => completedSession.accepted.some((item) => item.proposalId === proposal.id))) {
+      // Acceptance may advance session navigation, but never dispatches shot planning.
+      filmmaking.select('plan'); setExpandedShotSetup(completedSession.id);
+    }
     // Explicit Add-scenes navigation: show the new result, not a background auto-fit.
     // Mobile preserves readable controls and reveals the first card; further cards remain below it.
     const shown = narrow ? newHosts.slice(0, 1) : newHosts;
@@ -3472,7 +3451,7 @@ function EditorInner() {
   const sceneBriefEditor = sceneBriefDefaults ? (
           <SceneBriefDialog embedded
             defaults={sceneBriefDefaults}
-            providerMode={configuredProviderMode === 'live' ? 'live' : 'fixture'}
+            providerMode={configuredProviderMode}
             livePreflight={configuredProviderStatus?.livePreflight ?? null}
             inheritedContext={(() => {
               const scene = cinema && Object.values(cinema.scenes).find((item) => item.nodeId === sceneBriefDefaults.sceneNodeId);
@@ -3524,8 +3503,8 @@ function EditorInner() {
           {layerTarget.shot && cinema && <section className="layer-editor-media" aria-label="Shot media workbench"><h3>{layerTarget.shot.title}</h3>
             <ShotMediaPreview cinema={cinema} shot={layerTarget.shot} />
             <p>Existing consent, approved-frame and provider capability checks apply. Opening these controls does not generate.</p>
-            <fieldset disabled={layerTarget.readOnly}><VisualPreproductionPanel cinema={cinema} sceneId={layerTarget.shot.sceneId} shot={layerTarget.shot} accepted={true}
-              providerMode={configuredProviderMode === 'live' ? 'live' : 'fixture'} onCleanupMedia={cleanupUnusedMedia}
+            <fieldset disabled={layerTarget.readOnly}><VisualPreproductionPanel key={JSON.stringify([visualOwnerEpoch, cinema.projectId, layerTarget.shot.id])} cinema={cinema} sceneId={layerTarget.shot.sceneId} shot={layerTarget.shot} accepted={true}
+              capabilities={workspaceCapabilities.value} onCleanupMedia={cleanupUnusedMedia}
               onUpdate={updateVisualPreproduction} onNotice={announce}
               canvasImages={presentedNodes.flatMap((node) => node.data.kind === 'raster' ? [{ nodeId: node.id, name: node.data.name, fileName: node.data.fileName,
                 src: node.data.src, width: node.data.naturalWidth, height: node.data.naturalHeight }] : [])} /></fieldset>
@@ -3538,11 +3517,15 @@ function EditorInner() {
 
   return (
     <CinemaMediaContext.Provider value={cinema ?? null}><StoryAssistantContext.Provider value={assistantProjection ? <StoryAssistantLayer controller={storyAssistant} document={layerDocument}
+      capabilities={workspaceCapabilities.value}
       getDocument={getCurrentDocument} commit={commitStoryDocument} flush={() => queueDocumentSave(getCurrentDocument())}
       providerMode={configuredProviderMode}
       onScenesAccepted={revealAcceptedScenes}
       shotPlanning={<AssistantShotPlanning document={layerDocument} getDocument={getCurrentDocument} commit={commitStoryDocument} flush={() => queueDocumentSave(getCurrentDocument())}
-        providerMode={configuredProviderMode} onExpand={() => { setExpandedShotSetup(acceptedSession?.id ?? null); setAssistantOpenEpoch((value) => value + 1); }} onOpenLayer={(id) => { storyAssistant.change((value) => { value.collapsed = true; }); setWorkspaceView('canvas'); openLayerEditor(id); }} />}
+        capabilities={workspaceCapabilities.value}
+        onReviewSequence={filmmaking.enabled ? () => filmmaking.select('final-cut') : undefined}
+        providerMode={configuredProviderMode} reviewOnOpen={filmmaking.enabled && expandedShotSetup === acceptedSession?.id}
+        onExpand={() => { setExpandedShotSetup(acceptedSession?.id ?? null); setAssistantOpenEpoch((value) => value + 1); }} onOpenLayer={(id) => { storyAssistant.change((value) => { value.collapsed = true; }); setWorkspaceView('canvas'); openLayerEditor(id); }} />}
       onPlanScene={(id) => { storyAssistant.change((value) => { value.collapsed = true; }); setWorkspaceView('canvas'); openLayerEditor(id); }} /> : null}>
     <ExpandedStoryContext.Provider value={layerEditorId ? { nodeId: layerEditorId, editor: expandedStoryId ?
       <ExpandedPremiseNode nodeId={expandedStoryId} onClose={closeLayerEditor}>
@@ -3556,11 +3539,12 @@ function EditorInner() {
         <ProposedNodeIdsContext.Provider value={previewNodeIds}>
           <NodeActionContext.Provider value={nodeActionValue}>
         {writer === 'reader' && <div className="document-reader-banner" role="alert">This tab is read-only: another editor owns this local document, or safe browser locking is unavailable. Close the other editor, then <button type="button" onClick={() => window.location.reload()}>Reload to edit</button>. Your saved work is unchanged.</div>}
+        {replacingDocument && <div className="document-reader-banner" role="status">Replacing the local project safely. Editing resumes when storage finishes.</div>}
         <main
-        inert={writer !== 'writer'}
-        className={`editor-shell cinema-outline-active ${inspectorOpen ? '' : 'inspector-closed'}`}
+        inert={writer !== 'writer' || !hydrated || replacingDocument}
+        className={`editor-shell cinema-outline-active ${filmmaking.enabled ? `simplified-flow stage-${filmmaking.stage}` : ''} ${(filmmaking.enabled ? simplifiedInspectorOpen : inspectorOpen) ? '' : 'inspector-closed'}`}
         aria-label={APP_CONFIG.editorAriaLabel}
-        aria-busy={!hydrated}
+        aria-busy={!hydrated || replacingDocument}
         data-ready={hydrated && writer !== 'pending' ? 'true' : 'false'}
         data-save-state={saveState}
       >
@@ -3578,22 +3562,36 @@ function EditorInner() {
               {saveState === 'saving' ? 'Saving…' : saveState === 'error' ? 'Save failed' : 'Saved on device'}
             </span>
           </label>
-          {mockPlanAccepted && !mockProposalPreview ? <div className="editor-view-switch" role="group" aria-label="Workspace view">
+          {filmmaking.enabled ? <FilmmakingNavigation stage={filmmaking.stage} recommendedStage={stageProjection.recommendedStage} onSelect={(stage) => {
+            filmmaking.select(stage); setShotDetailOpen(false); setWorkspaceView('canvas');
+          }} /> : mockPlanAccepted && !mockProposalPreview ? <div className="editor-view-switch" role="group" aria-label="Workspace view">
             <button type="button" className={workspaceView === 'canvas' ? 'active' : ''} aria-pressed={workspaceView === 'canvas'} onClick={() => setWorkspaceView('canvas')}>Canvas</button>
             <button type="button" className={workspaceView === 'project' ? 'active' : ''} aria-pressed={workspaceView === 'project'} onClick={() => setWorkspaceView('project')}>Project</button>
             <button type="button" className={workspaceView === 'table' ? 'active' : ''} aria-pressed={workspaceView === 'table'} onClick={() => setWorkspaceView('table')}>Shot table</button>
             <button type="button" className={workspaceView === 'board' ? 'active' : ''} aria-pressed={workspaceView === 'board'} onClick={() => setWorkspaceView('board')}>Board</button>
           </div> : null}
           <div className="topbar-actions">
+            {filmmaking.enabled ? <>
+              <WorkspaceStatus state={workspaceCapabilities} onRefresh={() => void workspaceCapabilities.refresh()} onDiagnostics={() => setTraceOpen(true)} />
+              <details className="simplified-advanced"><summary>Advanced</summary><div>
+                <button type="button" onClick={() => { filmmaking.select('idea'); setWorkspaceView('canvas'); setShotDetailOpen(true); }}>Canvas</button>
+                {mockPlanAccepted && !mockProposalPreview && <>
+                  <button type="button" onClick={() => { filmmaking.select('plan'); setWorkspaceView('project'); setShotDetailOpen(true); }}>Production overview</button>
+                  <button type="button" onClick={() => { filmmaking.select('plan'); setWorkspaceView('table'); setShotDetailOpen(true); }}>Shot table</button>
+                  <button type="button" onClick={() => { filmmaking.select('plan'); setWorkspaceView('board'); setShotDetailOpen(true); }}>Board</button>
+                </>}
+                <button type="button" onClick={() => void switchWorkspacePreview(false)}>Original workspace</button>
+              </div></details>
+            </> : <button type="button" className="ghost-button workspace-preview-button" onClick={() => void switchWorkspacePreview(true)}>Try simplified flow</button>}
             <button
               type="button"
               className={`provider-mode-badge desktop-provider-mode mode-${configuredProviderMode === 'live' ? 'live' : 'fixture'}`}
               aria-label={configuredProviderMode === 'loading'
-                ? 'Provider status loading'
+                ? `${workspaceCapabilities.status === 'error' ? 'Provider availability unknown' : 'Provider status loading'}. Open provider status and local traces.`
                 : `${configuredProviderMode} provider mode. Open provider status and local traces.`}
               onClick={() => setTraceOpen(true)}
             >
-              {configuredProviderMode === 'live' ? 'Live mode' : configuredProviderMode === 'fixture' ? 'Fixture mode' : 'Checking…'}
+              {configuredProviderMode === 'live' ? 'Live mode' : configuredProviderMode === 'fixture' ? 'Fixture mode' : workspaceCapabilities.status === 'error' ? 'Availability unknown' : 'Checking…'}
             </button>
             <button
               type="button"
@@ -3608,8 +3606,8 @@ function EditorInner() {
               type="button"
               className="icon-button desktop-inspector-button"
               aria-label="Toggle properties panel"
-              aria-expanded={inspectorOpen}
-              onClick={() => setInspectorOpen((current) => !current)}
+              aria-expanded={filmmaking.enabled ? simplifiedInspectorOpen : inspectorOpen}
+              onClick={() => filmmaking.enabled ? setSimplifiedInspectorOpen((current) => !current) : setInspectorOpen((current) => !current)}
             >
               <SlidersHorizontal size={16} />
             </button>
@@ -3649,7 +3647,7 @@ function EditorInner() {
             >
               <Redo2 size={16} />
             </button>
-            <button type="button" className="primary-button" aria-label="Export SVG" onClick={openExport}>
+            <button type="button" className={filmmaking.enabled ? 'secondary-button' : 'primary-button'} aria-label="Export SVG" onClick={openExport}>
               <Download size={14} /> <span className="button-label">Export SVG</span>
             </button>
             <ProjectActionsMenu
@@ -3657,6 +3655,7 @@ function EditorInner() {
               onBackup={openBackup}
               onNew={() => void resetDocument()}
               onExport={openExport}
+              onTrySimplified={filmmaking.enabled ? undefined : () => void switchWorkspacePreview(true)}
             />
           </div>
         </header>
@@ -3722,8 +3721,21 @@ function EditorInner() {
               proposalPreview={Boolean(mockProposalPreview)}
               searchActive={Boolean(normalizedSearch)}
               onToggleBranch={toggleOutlineBranch}
-              onSelectNode={handleOutlineSelection}
-              onFocusNodes={focusOutlineNodes}
+              onSelectNode={(id, additive) => {
+                if (filmmaking.enabled && !canvasVisible) {
+                  const target = layerEditTarget(getCurrentDocument(), id);
+                  filmmaking.select(target?.role === 'story' ? 'idea' : target?.role === 'shot' ? 'references' : 'plan');
+                  setShotDetailOpen(true);
+                  if (target) openLayerEditor(id);
+                }
+                handleOutlineSelection(id, additive);
+              }}
+              onFocusNodes={(ids) => {
+                if (filmmaking.enabled && !canvasVisible) {
+                  filmmaking.select('plan'); setShotDetailOpen(true);
+                  window.setTimeout(() => focusOutlineNodes(ids), 0);
+                } else focusOutlineNodes(ids);
+              }}
               onAddToScene={openSceneCreationPalette}
               onToggleVisibility={toggleNodeVisibility}
               onToggleLock={toggleNodeLock}
@@ -3877,9 +3889,15 @@ function EditorInner() {
           className={`canvas-region tool-${toolMode} ${layerEditorId || (assistantProjection && !assistantState?.hidden && !assistantState?.collapsed) ? 'editor-active' : ''} ${dragActive ? 'drag-active' : ''} ${temporaryPanActive ? 'temporary-pan' : ''} ${selectedNodeCount > 1 ? 'multi-selection-active' : ''}`}
           aria-label="Canvas workspace"
           tabIndex={-1}
+          onPointerDownCapture={(event) => {
+            if (event.button !== 0) return;
+            // XYFlow resets selection before its onSelectionStart callback.
+            // This is a gesture origin, not a second document snapshot.
+            selectionOriginRef.current = new Set(nodesRef.current.filter(node => node.selected).map(node => node.id));
+          }}
           onDragEnter={(event) => {
             event.preventDefault();
-            if (mockProposalPreview) return;
+            if (!canvasVisible || mockProposalPreview) return;
             dragDepthRef.current += 1;
             setDragActive(true);
           }}
@@ -3890,29 +3908,46 @@ function EditorInner() {
           }}
           onDragOver={(event) => {
             event.preventDefault();
-            event.dataTransfer.dropEffect = 'copy';
+            event.dataTransfer.dropEffect = canvasVisible ? 'copy' : 'none';
           }}
           onDrop={(event) => {
             event.preventDefault();
-            if (mockProposalPreview) return;
+            if (!canvasVisible || mockProposalPreview) return;
             dragDepthRef.current = 0;
             setDragActive(false);
             void ingestFiles(Array.from(event.dataTransfer.files), { x: event.clientX, y: event.clientY });
           }}
           onDoubleClick={(event) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (mockProposalPreview || toolMode !== 'select' || !target?.classList.contains('react-flow__pane')) return;
+            if (!canvasVisible || mockProposalPreview || toolMode !== 'select' || !target?.classList.contains('react-flow__pane')) return;
             event.preventDefault();
             addConceptAt({ x: event.clientX, y: event.clientY }, true);
           }}
         >
-          {workspaceView === 'project' && cinema && mockPlanAccepted && !mockProposalPreview ? <ProjectProductionWorkspace
+          {filmmaking.enabled && <WorkspaceGuide guidance={stageProjection.guidance[filmmaking.stage]}
+            workbenchOwnsAction={filmmaking.stage === 'final-cut' || filmmaking.stage === 'idea' && Boolean(expandedStoryId || assistantVisible)
+              || filmmaking.stage === 'plan' && Boolean(!layerEditorId && assistantVisible && !assistantState?.collapsed)
+              || (filmmaking.stage === 'references' || filmmaking.stage === 'video') && shotDetailOpen}
+            onAction={applyStageAction} onOverview={() => { setShotDetailOpen(false); setWorkspaceView('canvas'); }} />}
+          {filmmaking.enabled && <ProjectOperationSummary projectId={cinema?.projectId} onOpen={(workspace) => {
+            filmmaking.select(workspace); setShotDetailOpen(false); setWorkspaceView('canvas');
+          }} />}
+          {filmmaking.enabled && <div className="simplified-surface" hidden={!['references', 'video'].includes(filmmaking.stage) || shotDetailOpen}>
+            <ShotsOverview stage={filmmaking.stage === 'video' ? 'video' : 'references'} cinema={cinema} onPlan={() => filmmaking.select('plan')}
+              onOpenScene={(id) => { const nodeId = cinema?.scenes[id]?.nodeId; if (nodeId) openSimplifiedLayer(nodeId); }}
+              onOpenShot={openSimplifiedLayer}
+              renderPreview={(shot) => cinema ? <ShotMediaPreview cinema={cinema} shot={shot} emptyDescription="Open this shot to review image settings and generate a storyboard." /> : null} />
+          </div>}
+          {filmmaking.enabled && <div className="simplified-surface" hidden={filmmaking.stage !== 'final-cut'}>
+            <div className="simplified-edit">{cinema ? <SequenceReview key={JSON.stringify([visualOwnerEpoch, cinema.projectId])} cinema={cinema} capabilities={workspaceCapabilities.value} onNotice={announce} /> : <div className="workspace-empty"><h3>Your cut starts with a story</h3><p>Accept a shot plan and approve takes before rendering.</p><button type="button" onClick={() => filmmaking.select('plan')}>Go to Plan</button></div>}</div>
+          </div>}
+          {(!filmmaking.enabled || filmmaking.stage === 'plan') && workspaceView === 'project' && cinema && mockPlanAccepted && !mockProposalPreview ? <ProjectProductionWorkspace
             cinema={cinema}
             onCommand={applyProfessionalPlanningCommand}
             onOpenScene={openProjectScene}
             onNotice={announce}
           /> : null}
-          {(workspaceView === 'table' || workspaceView === 'board') && cinema && mockPlanAccepted && !mockProposalPreview ? <ProfessionalPlanningWorkspace
+          {(!filmmaking.enabled || filmmaking.stage === 'plan') && (workspaceView === 'table' || workspaceView === 'board') && cinema && mockPlanAccepted && !mockProposalPreview ? <ProfessionalPlanningWorkspace
             cinema={cinema}
             view={workspaceView}
             onViewChange={setWorkspaceView}
@@ -3921,6 +3956,7 @@ function EditorInner() {
             onNotice={announce}
           /> : null}
           <ReactFlow<EditorNode, EditorEdge>
+            hidden={filmmaking.enabled && (filmmaking.stage === 'final-cut' || (filmmaking.stage === 'references' || filmmaking.stage === 'video') && !shotDetailOpen)}
             className={workspaceView === 'canvas' ? '' : 'workspace-canvas-hidden'}
             nodes={assistantProjection ? [...canvasNodes, assistantProjection.node] : canvasNodes}
             edges={assistantProjection ? [...canvasEdges, assistantProjection.edge] : canvasEdges}
@@ -3955,7 +3991,6 @@ function EditorInner() {
             onPaneClick={() => setSelectedPath(null)}
             onMove={(_, viewport) => setViewportZoom(viewport.zoom)}
             fitView={false}
-            fitViewOptions={{ padding: 0.22, nodes: nodes.map(({ id }) => ({ id })) }}
             minZoom={0.15}
             maxZoom={4}
             panOnDrag={toolMode === 'hand' ? true : [1]}
@@ -3979,7 +4014,7 @@ function EditorInner() {
             autoPanOnNodeFocus={!layerEditorId}
             edgesFocusable
             selectNodesOnDrag={toolMode === 'select' && !temporaryPanActive}
-            deleteKeyCode={mockProposalPreview ? null : ['Backspace', 'Delete']}
+            deleteKeyCode={!canvasVisible || mockProposalPreview ? null : ['Backspace', 'Delete']}
             ariaLabelConfig={{
               'controls.ariaLabel': 'Canvas controls',
               'minimap.ariaLabel': 'Diagram overview',
@@ -3992,7 +4027,7 @@ function EditorInner() {
               position={Position.Top}
               offset={18}
             >
-              <div
+              <CanvasBoundActionbar
                 className="multi-node-actionbar nodrag nowheel"
                 role="group"
                 aria-label={`${selectedNodeCount} selected layer actions`}
@@ -4047,11 +4082,11 @@ function EditorInner() {
                   disabled={selectedUnlockedCount === 0}
                   onClick={deleteSelectedNodes}
                 ><Trash2 size={14} /></button>
-              </div>
+              </CanvasBoundActionbar>
             </NodeToolbar>
             <CanvasZoomGestures />
             <Controls position="bottom-right" showInteractive={false} fitViewOptions={{ nodes: nodes.map(({ id }) => ({ id })), padding: 0.22 }} />
-            {!layerEditorId && (!assistantProjection || cinema?.storyWorkflow?.assistant?.hidden) && <MiniMap
+            {nodesInitialized && !layerEditorId && (!assistantProjection || cinema?.storyWorkflow?.assistant?.hidden) && <MiniMap
               position="bottom-left"
               pannable
               zoomable
@@ -4222,7 +4257,7 @@ function EditorInner() {
             />
           ) : selectedNode && selectedCinemaDetail ? (
             <CinemaInspector
-              key={selectedCinemaDetail.nodeId}
+              key={JSON.stringify([visualOwnerEpoch, selectedCinemaDetail.nodeId])}
               detail={selectedCinemaDetail}
               project={activeCinemaProject}
               proposed={previewNodeIds.has(selectedNode.id)}
@@ -4240,8 +4275,8 @@ function EditorInner() {
               cinemaSceneId={selectedAcceptedShot?.sceneId
                 ?? Object.values(activeCinemaData!.scenes).find((scene) => scene.nodeId === selectedNode.id)?.id
                 ?? activeCinemaData!.activeSceneId!}
-              providerMode={configuredProviderMode === 'live' ? 'live' : 'fixture'}
               onUpdateVisual={updateVisualPreproduction}
+              capabilities={workspaceCapabilities.value}
               canvasImages={presentedNodes.flatMap((node) => node.data.kind === 'raster' ? [{
                 nodeId: node.id,
                 name: node.data.name,
@@ -4324,7 +4359,7 @@ function EditorInner() {
           aria-labelledby="trace-title"
           onClose={() => setTraceOpen(false)}
         >
-          <form method="dialog">
+          {traceOpen && <form method="dialog">
             <div className="dialog-icon"><Sparkles size={19} /></div>
             <div className="dialog-copy">
               <span className="eyebrow">Developer diagnostics</span>
@@ -4333,11 +4368,15 @@ function EditorInner() {
             </div>
             <dl className="export-summary">
               <div><dt>Mode</dt><dd>{configuredProviderMode === 'loading' ? 'Unavailable' : configuredProviderMode}</dd></div>
-              <div><dt>Research</dt><dd>{configuredProviderStatus ? `${configuredProviderStatus.research.provider} · ${configuredProviderStatus.research.configured ? 'ready' : 'not configured'}` : 'Unavailable'}</dd></div>
-              <div><dt>Planning</dt><dd>{configuredProviderStatus ? `${configuredProviderStatus.planning.provider}${configuredProviderStatus.planning.model ? ` · ${configuredProviderStatus.planning.model}` : ''} · ${configuredProviderStatus.planning.configured ? 'ready' : 'not configured'}` : 'Unavailable'}</dd></div>
-              <div><dt>Live preflight</dt><dd>{configuredProviderStatus ? (configuredProviderStatus.livePreflight.ready ? `ready · ceiling ${configuredProviderStatus.livePreflight.maxLiveRunCost ?? 'missing'}` : configuredProviderStatus.livePreflight.blockers[0] ?? 'blocked') : 'Unavailable'}</dd></div>
+              {workspaceCapabilities.value && (Object.keys(capabilityLabels) as Array<keyof typeof capabilityLabels>).map((key) => {
+                const stage = workspaceCapabilities.value!.stages[key];
+                return <div key={key}><dt>{capabilityLabels[key]}</dt><dd>{stage.provider}{stage.model ? ` · ${stage.model}` : ''} · {capabilityStatusLabels[stage.status]}<p>{capabilityDescription(stage)}</p></dd></div>;
+              })}
+              <div><dt>Advanced single-scene preflight</dt><dd>{configuredProviderStatus ? (configuredProviderStatus.livePreflight.ready ? `Request review required · ceiling ${configuredProviderStatus.livePreflight.maxLiveRunCost ?? 'not applicable in fixture mode'}` : configuredProviderStatus.livePreflight.blockers.join(' ')) : 'Unavailable'}</dd></div>
               <div><dt>Telemetry</dt><dd>{configuredProviderStatus?.telemetryPolicy ?? 'no-content-v1'}</dd></div>
             </dl>
+            {workspaceCapabilities.error && <p role="alert">{workspaceCapabilities.error}</p>}
+            <button type="button" onClick={() => void workspaceCapabilities.refresh()}>Refresh workspace status</button>
             <section className="trace-section" aria-labelledby="local-traces-title">
               <div className="trace-heading">
                 <div><span className="eyebrow">On this device</span><h3 id="local-traces-title">Recent agent runs</h3></div>
@@ -4367,7 +4406,7 @@ function EditorInner() {
               <button type="button" className="secondary-button" onClick={() => setTraceOpen(false)}>Close</button>
               <button type="button" className="primary-button" disabled={!localCinemaTraces.length} onClick={exportLocalTraces}><Download size={14} /> Export trace JSON</button>
             </div>
-          </form>
+          </form>}
         </dialog>
 
         <dialog

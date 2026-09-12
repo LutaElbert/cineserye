@@ -3,7 +3,9 @@ import AxeBuilder from '@axe-core/playwright';
 import { openEditor, waitForSaved, createDiagramPng } from './helpers';
 
 test('returning from Project to the Story canvas node preserves an already open editor', async ({ page }) => {
-  await page.goto('/');
+  // The app's readiness marker is the contract; optional resources may still
+  // keep the browser load event open under a saturated built-artifact run.
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
   await page.getByRole('dialog', { name: /Start with your scene/ }).getByRole('button', { name: /Explore the sample/ }).click();
   for (let attempt = 0; attempt < 2; attempt++) {

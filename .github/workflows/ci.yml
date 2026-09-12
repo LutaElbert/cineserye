@@ -49,5 +49,7 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox webkit
       - name: Built native Node fixture workflow matrix
         run: npm run test:built:node
+      - name: Assert all six native Final Cut checks executed
+        run: node scripts/assert-renderer-report.mjs artifacts/simplified-flow/node-fixture.json 6
       - name: Built local Worker compatibility and negative matrix
         run: npm run test:built:worker

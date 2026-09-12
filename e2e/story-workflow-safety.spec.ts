@@ -1,14 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { confirmCineseryeDialog, openEditor, waitForSaved } from './helpers';
 import { installStorageHarness } from './storage-harness';
+import { fulfillWorkspaceMode } from './workspace-capability-helpers';
 
 test('SAFE-02 image estimate review shows model and price, and refreshing clears approval without generating', async ({ page }) => {
   let model = 'reviewed-image-model'; let posts = 0;
-  await page.route('**/api/cinema/provider-status', (route) => route.fulfill({ json: {
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, 'live', {
     mode: 'live', requiresContentTransferConsent: true, research: { configured: true, provider: 'parallel' },
     planning: { configured: true, provider: 'vertex-gemini', model: 'reviewed-model' },
     telemetryPolicy: 'no-content-v1', livePreflight: { ready: true, blockers: [], maxLiveRunCost: 1 },
-  } }));
+  }));
   await page.route('**/api/cinema/generate-storyboard', async (route) => {
     if (route.request().method() === 'POST') { posts++; await route.abort(); return; }
     await route.fulfill({ json: { mode: 'live', model, unitCost: 0.1, maxCost: 1, maxOutputs: 4, quoteId: 'a'.repeat(64), ready: true, blockers: [] } });

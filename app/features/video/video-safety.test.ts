@@ -6,6 +6,7 @@ import { MOCK_CINEMA_PROJECT_DATA } from '../../domain/cinema/mock/reel-knows-to
 import { acceptCinemaPlanRevision } from '../../domain/cinema/project-data';
 import type { CinemaStoryboardFrameRecord } from '../../domain/cinema/visual-preproduction';
 import { VideoPreproductionPanel, videoGenerationInputs, recommendedClipDuration } from './VideoPreproductionPanel';
+import { workflowCapabilities } from '../../server/cinema/workflow-capabilities';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function sample() {
@@ -30,7 +31,7 @@ describe('video input provenance', () => {
   it('warns before purchasing footage shorter than the shot', async () => {
     const { cinema, shot } = sample(); shot.durationSeconds = 12;
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ ok: false, error: { message: 'Unavailable' } }) }));
-    render(createElement(VideoPreproductionPanel, { cinema, shot, providerMode: 'fixture', onUpdate: vi.fn(), onNotice: vi.fn() }));
+    render(createElement(VideoPreproductionPanel, { cinema, shot, capabilities: workflowCapabilities({ CINESERYE_E2E_FIXTURE: 'true' }), onUpdate: vi.fn(), onNotice: vi.fn() }));
     expect((screen.getByLabelText('Video duration') as unknown as HTMLSelectElement).value).toBe('8');
     expect(screen.getByRole('status').textContent).toContain('shorter than the planned 12s shot');
     expect(shot.durationSeconds).toBe(12);
@@ -68,7 +69,7 @@ describe('video input provenance', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ json: async () => ({ ok: true, version: 1, mode: 'fixture', ready: true, blockers: [], quoteId: 'a'.repeat(64),
       usdPerSecond: 0, maximumEstimatedUsd: 0, capability: { version: 'fixture', provider: 'fixture', model: 'fixture', supportsEndFrame: true,
         supportsReferenceImages: false, supportsAudio: false, durations: [4, 6, 8], aspectRatios: ['9:16', '16:9'], resolutions: ['720p', '1080p'], maxOutputs: 1 } }) }));
-    const props = { cinema, shot, providerMode: 'fixture' as const, onUpdate: vi.fn(), onNotice: vi.fn() };
+    const props = { cinema, shot, capabilities: workflowCapabilities({ CINESERYE_E2E_FIXTURE: 'true' }), onUpdate: vi.fn(), onNotice: vi.fn() };
     const view = render(createElement(VideoPreproductionPanel, props));
     await waitFor(() => expect((screen.getByRole('checkbox') as HTMLInputElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('checkbox'));

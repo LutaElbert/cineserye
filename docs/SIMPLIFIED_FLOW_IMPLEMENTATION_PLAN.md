@@ -1,6 +1,6 @@
 # Cineserye simplified flow — implementation plan
 
-Date: 2026-09-10. Revision 2: completeness audit strengthened preservation and outcome criteria; planning only.
+Date: 2026-09-10. Revision 3: user-approved Story / Shots / Edit workspace grouping; all 58 revision-2 acceptance criteria and gates retained. No full phase accepted yet.
 Baseline: private `main` merge `23af84303dd7571932e9faa94c80b2fd9b84d497` (tree matches `cf695d0`).
 
 ## Outcome and boundaries
@@ -9,7 +9,7 @@ Give a filmmaker one understandable journey: **Idea → Plan → References → 
 
 This document authorizes no deployment or paid execution. Implementation is separate private-repository work following user approval. The frozen public hackathon source, hosted reviewer site, credentials, existing media, and spend ledgers remain untouched. Live provider proof requires separate explicit authorization; fixture completion never implies live or hosted readiness. The previous merge's accepted failures are not permission to waive future acceptance gates.
 
-Use a new `codex/simplified-flow` branch based on the merged baseline when implementation begins; confirm it does not already exist and preserve unrelated work. This planning turn does not create that branch, change application code, commit, push, or merge.
+Continue on `feature/simplified-flow`, as explicitly requested by the user. The active checkout is `/Users/elbert/Documents/ChatGPT/Cineserye`; preserve unrelated work and untracked artifacts. The earlier `codex/` branch-name proposal is superseded.
 
 ## Source-grounded starting point
 
@@ -31,7 +31,15 @@ Use a new `codex/simplified-flow` branch based on the merged baseline when imple
 | Video | Review scope, estimate and approval; generate/review takes | A current usable take is explicitly approved for every shot included in the cut |
 | Final Cut | Review sequence, trims, missing media, render and download | Current selected clips validate and produce a playable downloadable local silent MP4 |
 
-The five stages are navigation, not five new document stores. Research is a capability within Plan. Reference upload, reference-image generation, and video generation are distinct capabilities. Manual planning and local uploads remain possible when AI is blocked. Users may inspect any stage; unavailable actions show an adjacent reason and safe next step. Never trap users in a linear wizard or trigger work by selecting a stage.
+The five stages are task states within three top-level workspaces, not five new document stores or five mandatory top-level tabs. The user approved this refinement after revisiting the concept screens:
+
+| Workspace | Journey coverage |
+| --- | --- |
+| Story | Idea and scene planning: develop direction, review proposals, accept scenes |
+| Shots | Scoped shot planning, References and Video: refine shots, attach references, generate and review takes |
+| Edit | Final Cut: order approved clips, preview, render and download |
+
+Plan spans scene planning in Story and scoped shot planning in Shots; stable scene/shot identity connects them. Research is a capability within Plan. Reference upload, reference-image generation, and video generation are distinct capabilities. Manual planning and local uploads remain possible when AI is blocked. Users may inspect any stage; unavailable actions show an adjacent reason and safe next step. Never trap users in a linear wizard or trigger work by selecting a workspace or stage. The actual-screen and walkthrough approval gates below remain mandatory; approval of this grouping is not approval of unimplemented UI.
 
 Keep one contextual primary action per active stage; secondary actions include back/review, manual editing, and recovery. Advanced controls remain accessible with stable project/scene/shot identity. Changes upstream mark dependent outputs stale and require review; they never silently delete approved work or regenerate media.
 
@@ -53,6 +61,8 @@ Intentionally excluded, not forgotten: cloud sync/accounts/team collaboration; n
 ## Delivery sequence
 
 Each phase is a small reviewable slice with a completion packet and a freshly spawned independent critic. Dependencies: P0 → P1 → P2 → P3 → P4 → P5 → P6 → P7. Planning/design previews may be prepared earlier, but no dependent phase is accepted before its prerequisites. No big-bang rewrite or arbitrary line-count target.
+
+Implementation-order exception authorized by the user's “proceed, use your best judgements” after the ordering question: document/operation separation and other safe local simplification work may proceed before P0 acceptance. This changes implementation order only, not acceptance dependencies, the 58 criteria, fresh-critic reviews, exact-SHA CI, cost controls or actual user visual/walkthrough approval. Keep the Worker baseline gate open; do not let it prevent independent safety repairs. An interim fail-closed undo boundary is not completion of the durable operation/controller extraction.
 
 ### P0 — restore a trustworthy baseline and CI coverage
 
@@ -103,9 +113,11 @@ Acceptance criteria:
 - **P2.7:** Backup UI distinguishes included reference/storyboard image bytes, video-clip metadata only, and excluded rendered-cut files; users are told before relying on the backup to download videos separately. A restore into an empty isolated browser store restores included images, marks missing video bytes unavailable, and cannot render or approve a metadata-only clip as usable. Preserve individual downloads while bytes exist. For missing bytes, show only supported recovery options (retained source browser or an existing verified retrieval path); if none exists, say it cannot be restored from that backup. Do not promise a new clip-upload/relink feature or silently expand the backup format. Missing required images, corrupt hashes or oversize archives reject atomically without replacing current work.
 - **P2.8:** Controller migration retains all media-cleanup roots: current project, undo/redo, in-progress drag/resize/field/text edits, proposals, recovery, checkpoints and pinned media. Existing destructive confirmation, transactional reachability recheck and cross-tab cleanup lease remain enforced. Tests prove newly reachable/pinned media survives cleanup, another editor tab blocks it, cancellation deletes nothing, and unsupported lock capability fails closed. Cleanup is an explicit user action, never a consequence of changing stages.
 
-### P3 — the simplified five-stage journey
+### P3 — the five-stage journey within Story / Shots / Edit
 
 Work: build a lightweight stage shell and one shared stage model over existing project data. Keep the existing canvas/Outline and use the approved light visual direction as inspiration, with real screenshots for approval rather than treating a generated image as an exact specification.
+
+Implement the complete Story slice first within this phase: idea → proposal review → atomic scene acceptance → undo → safe reload. Then extend the same ownership patterns into Shots and Edit. This is a delivery slice, not permission to accept P3 before its remaining criteria or bypass P0–P2. Document/session/capability/operation state each retain their own authoritative owner; no giant combined store is required.
 
 Acceptance criteria:
 

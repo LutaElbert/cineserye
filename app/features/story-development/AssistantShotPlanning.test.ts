@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createElement } from 'react';
 import { webcrypto } from 'node:crypto';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AssistantShotPlanning } from './AssistantShotPlanning';
 import { initialDocument } from '../../editor/initial-document';
@@ -12,9 +12,12 @@ import type { EditorDocument } from '../../editor/types';
 import { richTextFromPlainText } from '../../editor/rich-text';
 import { applyCinemaDomainCommand } from '../../editor/cinema-domain-commands';
 import { fixtureWorkflowDependencies, runCinemaPlanningWorkflow } from '../../server/cinema/workflow';
+import { workflowCapabilities } from '../../server/cinema/workflow-capabilities';
+import { OPERATION_JOURNAL_KEY } from '../simplified-flow/operation-journal';
 
 vi.mock('../assembly/SequenceReview', () => ({ SequenceReview: () => null }));
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => { localStorage.clear(); });
 async function source(sceneCount = 1) {
   vi.stubGlobal('crypto', webcrypto);
   let document = setStorySceneAllocation(ensureStoryProject(structuredClone(initialDocument)), 'scene-01', 20);
@@ -31,14 +34,66 @@ async function source(sceneCount = 1) {
   document = changeStory(document, (workflow) => { workflow.shotPlanning = state; });
   return { document, state };
 }
-function mount(initial: EditorDocument) {
+function mount(initial: EditorDocument, flush: () => Promise<unknown> = async () => undefined) {
   let current = initial;
+  const capabilities = workflowCapabilities({ CINESERYE_E2E_FIXTURE: 'true' });
   const props = () => ({ document: current, getDocument: () => current, commit: (next: EditorDocument) => { current = next; view.rerender(createElement(AssistantShotPlanning, props())); },
-    flush: async () => undefined, providerMode: 'fixture' as const, onOpenLayer: vi.fn() });
+    flush, providerMode: 'fixture' as const, capabilities, onOpenLayer: vi.fn() });
   const view = render(createElement(AssistantShotPlanning, props()));
-  return { get: () => current, replace: (next: EditorDocument) => { current = next; view.rerender(createElement(AssistantShotPlanning, props())); } };
+  return { get: () => current, unmount: view.unmount, replace: (next: EditorDocument) => { current = next; view.rerender(createElement(AssistantShotPlanning, props())); } };
 }
 describe('Assistant scoped operation UI safety', () => {
+  for (const attempt of ['new', 'retry'] as const) for (const mutation of ['source', 'lock', 'cancel', 'replacement', 'project', 'review'] as const) {
+    it(`${attempt} prevents dispatch after ${mutation} changes during the final source digest`, async () => {
+      const { document, state } = await source();
+      state.status = 'review';
+      state.jobs = state.jobs.map((job) => ({ ...job, status: 'failed', dispatchState: 'not-dispatched', error: 'Not sent.' }));
+      const initial = changeStory(document, (workflow) => { if (attempt === 'retry') workflow.shotPlanning = state; else delete workflow.shotPlanning; });
+      const posts: unknown[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, options?: RequestInit) => {
+        if (options?.method === 'POST') { posts.push(options.body); return Response.json({ ok: false, error: 'UNEXPECTED POST', dispatchCertainty: 'not-dispatched' }, { status: 400 }); }
+        if (url.includes('?')) return Response.json({ ok: true, state });
+        return Response.json({ ok: true, quote: { version: 1, mode: 'fixture', model: 'fixture-planner-v1', quoteId: 'b'.repeat(64), ready: true, blockers: [], perSceneEstimate: 0, ceiling: 1, maxScenes: 10, maxAttemptsPerScene: 1 } });
+      }));
+      let afterSave = false, held = false;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const digest = webcrypto.subtle.digest.bind(webcrypto.subtle);
+      vi.spyOn(webcrypto.subtle, 'digest').mockImplementation(async (...args) => {
+        if (afterSave && !held) { held = true; await gate; }
+        return digest(...args);
+      });
+      const harness = mount(initial, async () => { afterSave = true; });
+      if (attempt === 'retry') fireEvent.click(screen.getByRole('button', { name: 'Review retry for 1 scenes' }));
+      else {
+        fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+        fireEvent.click(screen.getByRole('checkbox', { name: 'Scene 01' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Plan shots' }));
+      }
+      fireEvent.click(await screen.findByRole('button', { name: attempt === 'retry' ? 'Approve retry for 1 scenes' : 'Create 1 fixture plans' }));
+      await waitFor(() => expect(held).toBe(true));
+      const changed = structuredClone(harness.get());
+      const host = changed.nodes.find((node) => node.id === 'scene-01')!;
+      if (mutation === 'source' && host.data.kind === 'concept') host.data.body = richTextFromPlainText('A different scene, edited while preparing.');
+      if (mutation === 'lock') {
+        host.data.locked = true;
+        Object.assign(changed, changeStory(changed, () => {}));
+      }
+      if (mutation === 'cancel') changed.cinema!.storyWorkflow!.shotPlanning!.status = 'cancelled';
+      if (mutation === 'replacement') changed.cinema!.storyWorkflow!.shotPlanning!.requestId = crypto.randomUUID();
+      if (mutation === 'project') changed.cinema!.projectId = 'replacement-project';
+      if (mutation === 'review') fireEvent.click(screen.getByRole('button', { name: 'Change scope' }));
+      else act(() => harness.replace(changed));
+      await act(async () => release());
+      const alert = await screen.findByRole('alert');
+      expect(posts).toHaveLength(0);
+      expect(alert.textContent).toMatch(/changed.*(?:dispatch|again)|review changed/i);
+      if (mutation === 'cancel') expect(harness.get().cinema!.storyWorkflow!.shotPlanning!.status).toBe('cancelled');
+      if (mutation === 'replacement') expect(harness.get().cinema!.storyWorkflow!.shotPlanning!.requestId).toBe(changed.cinema!.storyWorkflow!.shotPlanning!.requestId);
+      if (mutation === 'project') expect(harness.get().cinema).toEqual(changed.cinema);
+      if (mutation === 'source' || mutation === 'lock') expect(harness.get().nodes).toEqual(changed.nodes);
+    });
+  }
   it('marks cancellation locally before the server response and does not resurrect a replaced operation', async () => {
     const { document, state } = await source();
     let finish!: (value: Response) => void;
@@ -69,6 +124,25 @@ describe('Assistant scoped operation UI safety', () => {
     mount(empty);
     expect((screen.getByRole('button', { name: 'Plan shots' }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it('persists recoverable intent before POST and fails closed when that store is corrupt', async () => {
+    const { document } = await source();
+    const empty = changeStory(document, (workflow) => { delete workflow.shotPlanning; });
+    let posts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, options?: RequestInit) => {
+      if (options?.method === 'POST') { posts++; return Response.json({ ok: false, error: 'Unexpected POST' }, { status: 400 }); }
+      return Response.json({ ok: true, quote: { version: 1, mode: 'fixture', model: 'fixture-planner-v1', quoteId: 'b'.repeat(64), ready: true,
+        blockers: [], perSceneEstimate: 0, ceiling: 1, maxScenes: 10, maxAttemptsPerScene: 1 } });
+    }));
+    mount(empty);
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Scene 01' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Plan shots' }));
+    const approve = await screen.findByRole('button', { name: 'Create 1 fixture plans' });
+    localStorage.setItem(OPERATION_JOURNAL_KEY, '{');
+    fireEvent.click(approve);
+    await screen.findByText('Local operation recovery data is unreadable. No request was started.');
+    expect(posts).toBe(0);
   });
   it('reviews only proven unstarted scenes and keeps the successful parent after a pre-dispatch rejection', async () => {
     const { document, state } = await source(2);

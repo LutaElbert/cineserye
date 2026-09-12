@@ -26,6 +26,7 @@ import {
 import type { CinemaVisualPreproductionData } from '../../domain/cinema/visual-preproduction';
 import { VisualPreproductionPanel } from '../storyboard/VisualPreproductionPanel';
 import { planningLabel } from './planning-labels';
+import type { WorkflowCapabilities } from '../story-development/workflow-capabilities';
 
 type InspectorTab = 'details' | 'prompt' | 'visuals' | 'sources' | 'cost';
 
@@ -129,7 +130,7 @@ export function CinemaInspector({
   onNotice,
   cinemaDomain,
   cinemaSceneId,
-  providerMode,
+  capabilities,
   onUpdateVisual,
   canvasImages,
   onCleanupMedia,
@@ -151,7 +152,7 @@ export function CinemaInspector({
   onNotice: (message: string, tone?: 'info' | 'success' | 'error') => void;
   cinemaDomain: CinemaProjectData;
   cinemaSceneId: string;
-  providerMode: 'fixture' | 'live';
+  capabilities: WorkflowCapabilities | null;
   onUpdateVisual: (updater: (current: CinemaVisualPreproductionData) => CinemaVisualPreproductionData) => void;
   canvasImages: Array<{ nodeId: string; name: string; fileName: string; src: string; width: number; height: number }>;
   onCleanupMedia: () => Promise<void>;
@@ -357,7 +358,7 @@ export function CinemaInspector({
             sceneId={cinemaSceneId}
             shot={shot}
             accepted={accepted}
-            providerMode={providerMode}
+            capabilities={capabilities}
             canvasImages={canvasImages}
             onCleanupMedia={onCleanupMedia}
             onUpdate={onUpdateVisual}

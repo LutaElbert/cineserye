@@ -1,6 +1,6 @@
-# P0 preservation inventory — work in progress
+# P0 preservation inventory — final local candidate
 
-Baseline: private main `23af84303dd7571932e9faa94c80b2fd9b84d497`. Implementation worktree: `codex/simplified-flow`. This is a retention map, not a claim that the new journey or all tests pass. No baseline action is authorized for removal merely because it is secondary.
+Baseline: private main `23af84303dd7571932e9faa94c80b2fd9b84d497`. Current candidate is the detached private worktree based on `abfa0fab2fb26c775f639358521d9a29c3a6b640`; the historical `feature/simplified-flow`/`codex/` naming notes below are retained as provenance. Every inventoried action is locally verified on the final candidate. No baseline action is authorized for removal merely because it is secondary.
 
 | Action / invariant | Existing ownership and characterization | Intended retained location |
 | --- | --- | --- |
@@ -50,4 +50,38 @@ Freeze before P3: five identical fixtures/tasks at 1440×900 on native fixture b
 4. Reconcile interrupted work after reload (`story-assistant.spec.ts`, durable GET recovery).
 5. Find a usable take → local cut (`SequenceReview.tsx`, synthetic local media; existing fixture sample is not production footage).
 
-Measurements are NOT VERIFIED yet. The P0 gate must not pass until the repaired baseline has measured action logs, including an honest blocked result if a baseline task cannot finish. P3 candidate must remove navigation steps in at least one task and add none without reviewed justification. User walkthrough and visual approval remain mandatory.
+Baseline measurements are VERIFIED in `P0-baseline-task-measurements.md` with raw action logs and the exact harness under `artifacts/simplified-flow/baseline-task-measurements/`. The five-case serial Chromium run passed with zero retries; the blocked live capability remained an expected zero-POST outcome, and the usable-take task honestly records the frozen baseline's `Failed to parse body as FormData.` local-assembly defect instead of claiming an export. The candidate comparison is VERIFIED mechanically in `P3-candidate-task-measurements.md`: task 1 removes one navigation click and one panel switch, no task adds navigation, and all five candidate tasks reach their expected outcome. User walkthrough and visual approval remain mandatory external gates.
+
+## Final per-entry verification index
+
+All browser entries below passed in the final `npm run test:built:node` three-engine report except the two explicitly documented Chromium-only stress cases; retained unit entries passed in `npm test`. Exact `file:line` locators identify the candidate test, and `P7-integrated-attempt-3.md` records the repaired packet and aggregate commands/results.
+
+| Inventory entry (same order as above) | Exact candidate evidence | Final verdict |
+| --- | --- | --- |
+| Typed cinema layers and relationships | `e2e/manual-creation-recovery.spec.ts:34`, `:155` | VERIFIED |
+| Canvas/layer editing actions | `e2e/canvas-behavior.spec.ts:14`, `:61`, `:201`; `e2e/layer-behavior.spec.ts:46`, `:89`, `:189`, `:654`, `:721` | VERIFIED |
+| Connector lifecycle | `e2e/layer-behavior.spec.ts:553`, `:570`, `:614` | VERIFIED |
+| Nonlinear hierarchy and views | `e2e/manual-creation-recovery.spec.ts:388`, `:669`, `:726` | VERIFIED |
+| Premise/timing/format/genres/aliases | `e2e/story-composer.spec.ts:28`, `:80` | VERIFIED |
+| Surprise confirmation | `e2e/story-development.spec.ts:388`; `e2e/story-assistant.spec.ts:204` | VERIFIED |
+| Continue/additional runtime | `e2e/story-revision-history.spec.ts:115`, `:134`; `e2e/story-development.spec.ts:549` | VERIFIED |
+| Full brief/notes/permissions/manual access | `e2e/story-development.spec.ts:58`, `:327`, `:442`; `e2e/story-composer.spec.ts:80` | VERIFIED |
+| Proposal edit/reorder/partial atomic accept | `e2e/story-development.spec.ts:327`, `:404`; `e2e/assistant-compact-review.spec.ts:98` | VERIFIED |
+| Revision lineage/stale review | `e2e/story-revision-history.spec.ts:51`; `app/editor/story-revision-history.test.ts` | VERIFIED |
+| Scoped shot planning | `e2e/scoped-shot-assistant.spec.ts:3`; `e2e/capability-dispatch.spec.ts:76` | VERIFIED |
+| Research/assumptions/transfer review | `e2e/scene-planner.spec.ts:285`; `e2e/story-assistant.spec.ts:237` | VERIFIED |
+| Table/board/shot synchronization | `e2e/professional-planning.spec.ts:12` | VERIFIED |
+| Narrative/production order and setups | `e2e/professional-planning.spec.ts:36` | VERIFIED |
+| Continuity review/exceptions/audit undo | `e2e/multi-scene-project.spec.ts:69`, `:103` | VERIFIED |
+| Reference inheritance/history | `e2e/story-development.spec.ts:442`; `e2e/visual-preproduction.spec.ts:38` | VERIFIED |
+| Image local import/review/download | `e2e/visual-preproduction.spec.ts:58`, `:109`, `:140` | VERIFIED |
+| Video consent/recovery/retry/download | `e2e/video-preproduction.spec.ts:23`, `:42`, `:52`; `app/features/video/video-safety.test.ts` | VERIFIED |
+| Sequence/trims/silent MP4 | `e2e/final-cut-export.spec.ts:10`; `app/features/assembly/sequence-manifest.test.ts` | VERIFIED |
+| Six-file planning handoff | `e2e/professional-planning.spec.ts:62`; `app/domain/cinema/handoff.test.ts` test `S5-IT-02` | VERIFIED |
+| Canvas SVG export | `e2e/editor.spec.ts:4`; `app/editor/export-svg.test.ts` | VERIFIED |
+| Save/history/checkpoint/restore | `e2e/editor.spec.ts:4`, `:256`; `e2e/story-data-foundation.spec.ts:12` | VERIFIED |
+| Writer lock/CAS | `e2e/story-data-foundation.spec.ts:56`; `e2e/story-development.spec.ts:380` | VERIFIED |
+| Explicit safe media cleanup | `e2e/story-workflow-safety.spec.ts:49`, `:84` | VERIFIED |
+| Backup media distinctions | `e2e/final-cut-export.spec.ts:10`; `e2e/visual-preproduction.spec.ts:109`; `app/editor/story-workflow-persistence.test.ts` | VERIFIED |
+| Keyboard/focus/viewports/a11y | `e2e/accessibility.spec.ts:5`, `:15`, `:111`, `:126`; `e2e/editor-focus.spec.ts:18` | VERIFIED |
+| 500-node/800-edge and hierarchy scale | `e2e/story-assistant-stress.spec.ts:5`; `e2e/stress.spec.ts:71`; `app/editor/cinema-hierarchy.test.ts` 10-scene/100-shot case | VERIFIED with unchanged historical Chromium-only browser scope |

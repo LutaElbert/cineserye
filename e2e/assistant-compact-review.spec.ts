@@ -18,7 +18,11 @@ async function onePrimary(page: Page, assistant: Locator) {
   await expect(assistant.locator('.assistant-stage-footer .primary-button:visible')).toBeInViewport();
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   expect(await assistant.evaluate((node) => Boolean(node.closest('.react-flow__node')))).toBe(true);
-  await expect(assistant.locator('details:visible, select:visible')).toHaveCount(0);
+  await expect(assistant.locator('details:not(.assistant-secondary-tools):visible, select:visible')).toHaveCount(0);
+  const advanced = assistant.locator('details.assistant-secondary-tools');
+  await expect(advanced).toHaveCount(1);
+  await expect(advanced).not.toHaveAttribute('open', '');
+  await expect(advanced.getByRole('button', { name: 'Edit full brief manually', exact: true })).toBeHidden();
   await expect(assistant.getByRole('button', { name: 'Collapse story assistant', exact: true })).toHaveCount(0);
 }
 
@@ -86,7 +90,7 @@ test('sparse idea asks compact missing questions with a pinned Continue', async 
   await assistant.getByRole('button', { name: '30s', exact: true }).click();
   await assistant.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(assistant.getByRole('radio', { name: '9:16', exact: true })).toBeChecked();
-  await expect(assistant.locator('details, select')).toHaveCount(0);
+  await expect(assistant.locator('details:not(.assistant-secondary-tools):visible, select:visible')).toHaveCount(0);
   await onePrimary(page, assistant);
   await page.screenshot({ path: info.outputPath('narrow-questions.png') });
 });

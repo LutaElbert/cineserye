@@ -5,7 +5,7 @@ import { MOCK_CINEMA_PROJECT_DATA } from './mock/reel-knows-tomorrow';
 import {
   emptyStoryWorkflow, resolveStoryReferences, reviewStoryReferenceTransfer, reviseStoryReference,
   StoryCreativeBriefSchema, StoryReferenceVersionSchema, storySourceIsStale, updateStoryWorkflow, validateStoryWorkflow,
-  reconcileStoryWorkflow, affectedStorySessions, type StoryReferenceVersion,
+  reconcileStoryWorkflow, affectedStorySessions, hasUnresolvedStoryOutcome, type StoryReferenceVersion,
 } from './story-workflow';
 
 const note = (title = 'Direction'): StoryReferenceVersion => ({ version: 1, title, category: 'style',
@@ -28,6 +28,27 @@ const brief = () => StoryCreativeBriefSchema.parse({ version: 1, mode: 'expand',
   durationScope: 'whole-story', tone: 'Suspense', ending: 'Ambiguous', constraints: ['No gore'], assumptions: [], status: 'approved', answers: [] });
 
 describe('story foundation — versions and inheritance', () => {
+  it.each(['running', 'outcome-unknown', 'cancelled'] as const)('keeps %s outcome and identity after deleting a Continue anchor and reloading', (stage) => {
+    let project = sample();
+    const anchor = Object.values(project.scenes)[0];
+    project = updateStoryWorkflow(project, project.storyWorkflow!.revision, (draft) => {
+      draft.briefs.push({ ...brief(), mode: 'continue', durationScope: 'new-material' });
+      draft.sessions.push({ id: 'pending', operationId: 'saved-operation', mode: 'continue', anchorSceneId: anchor.id,
+        stage, source: { sourceDigest: 'a'.repeat(64), briefVersion: 1, bindingRevision: draft.bindingRevision, references: [] },
+        proposals: [], accepted: [], error: null });
+    });
+    const deleted = removeCinemaRecordsForNodes(project, new Set([anchor.nodeId]), new Set([...hostIds(project)].filter((id) => id !== anchor.nodeId)))!;
+    const reloaded = validateCinemaProjectData(JSON.parse(JSON.stringify(deleted)), hostIds(deleted));
+    const session = reloaded.storyWorkflow!.sessions[0];
+    expect(session.stage).toBe(stage);
+    expect(session.operationId).toBe('saved-operation');
+    expect(session.anchorSceneId).toBe(anchor.id);
+    expect(hasUnresolvedStoryOutcome(session)).toBe(true);
+    // A recovered result can be marked creatively stale without erasing its provenance.
+    const recovered = structuredClone(reloaded);
+    recovered.storyWorkflow!.sessions[0].stage = 'proposal-review';
+    expect(reconcileStoryWorkflow(recovered).storyWorkflow!.sessions[0].stage).toBe('stale');
+  });
   it('keeps old project format and upgrades only when new data is written', () => {
     const old = createEmptyCinemaProjectData();
     expect(validateCinemaProjectData(old, new Set()).schemaVersion).toBe(2);

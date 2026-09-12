@@ -1,4 +1,5 @@
 import 'server-only';
+import { assertNativeRuntime } from '../../../server/cinema/native-runtime';
 
 import { z } from 'zod';
 import { storyboardApprovalContent, type GenerateStoryboardResponse } from '../../../features/storyboard/storyboard-api';
@@ -51,6 +52,7 @@ export async function GET(): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    assertNativeRuntime();
     const source = await request.text();
     if (new TextEncoder().encode(source).byteLength > MAX_REQUEST_BYTES) throw new ProviderError('INVALID_REQUEST', 'The storyboard request is too large.');
     let json: unknown;

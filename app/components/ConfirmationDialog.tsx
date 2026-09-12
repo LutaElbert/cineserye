@@ -5,7 +5,15 @@ import {
   useEffect,
   useId,
   useRef,
+  type KeyboardEvent,
 } from 'react';
+
+/** Keep canvas deletion and browser Backspace navigation behind modal controls. */
+export function containModalDeletionKey(event: KeyboardEvent<HTMLDialogElement>) {
+  if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+  const editing = event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]');
+  if (!editing) { event.preventDefault(); event.stopPropagation(); }
+}
 
 export type ConfirmationTone = 'default' | 'warning' | 'danger';
 
@@ -70,7 +78,8 @@ export function ConfirmationDialog({
   return (
     <dialog
       ref={dialogRef}
-      className={`confirmation-dialog tone-${tone}`}
+      className={`confirmation-dialog nokey tone-${tone}`}
+      onKeyDownCapture={containModalDeletionKey}
       role="alertdialog"
       aria-modal="true"
       aria-labelledby={request ? titleId : undefined}

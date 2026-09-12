@@ -26,6 +26,9 @@ test('Story editor preserves geometry, retains drafts on Escape, synchronizes br
   await expect(story).toContainText('A cinema reveals tomorrow.');
   await waitForSaved(page); await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  // Reload readiness precedes the intentional fit animation. Wait for stable
+  // node geometry so a double-click cannot straddle the moving action bar.
+  await story.hover();
   await story.dblclick();
   await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
   await expect(editor.getByRole('textbox', { name: 'Premise for development', exact: true })).toHaveValue('A cinema reveals tomorrow.');
@@ -36,6 +39,20 @@ test('Story editor preserves geometry, retains drafts on Escape, synchronizes br
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(story).toContainText('Changed again');
   expect(posts).toEqual([]);
+});
+
+test('local story editing remains available when assisted development is unavailable', async ({ page }) => {
+  await page.route('**/api/cinema/develop-story', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ mode: 'fixture', enabled: false, ready: false, blockers: ['Unavailable in this runtime.'] }),
+  }));
+  await openEditor(page);
+  await expect(page.getByRole('button', { name: 'Open story assistant', exact: true })).toHaveCount(0);
+  await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
+  const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByLabel('Layer title', { exact: true })).toBeEditable();
 });
 
 test('Scene review targets edited scene and does not dispatch generation', async ({ page }) => {

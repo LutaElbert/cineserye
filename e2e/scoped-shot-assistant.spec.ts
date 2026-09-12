@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
 
 test('idea to accepted three-scene shot plans uses explicit scope and survives reload without redispatch', async ({ page }, info) => {
+  const runtimeErrors: string[] = [];
+  page.on('pageerror', (error) => runtimeErrors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') runtimeErrors.push(message.text()); });
   expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -50,4 +53,5 @@ test('idea to accepted three-scene shot plans uses explicit scope and survives r
   await shotScope.getByRole('button', { name: /Open shots & media/ }).first().click();
   await expect(page.getByRole('button', { name: 'Close layer editor', exact: true })).toBeVisible();
   expect(posts.filter((path) => /generate-storyboard|generate-video/.test(path))).toHaveLength(0);
+  expect(runtimeErrors).toEqual([]);
 });

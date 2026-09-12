@@ -500,6 +500,9 @@ test('locked layers reject canvas editing, renaming, and new connections', async
   await expect(page.getByLabel('Layer name')).toHaveCount(0);
 
   const edgeCount = await page.locator('.react-flow__edge').count();
+  // Sidebar focus can pan the other endpoint beneath Properties. Bring both
+  // handles back into the canvas using the same control a creator would use.
+  await page.getByRole('button', { name: 'Fit View', exact: true }).click();
   await connectLayers(page, 'Shot 01', 'Scene 01');
   await expect(page.locator('.react-flow__edge')).toHaveCount(edgeCount);
 });

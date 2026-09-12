@@ -44,6 +44,7 @@ for (const width of [1440, 390]) {
       await expect(menu.getByRole('menuitem', { name: 'Backup or restore' })).toBeFocused();
       await expect(menu.getByRole('menuitem', { name: 'Export SVG' })).toBeVisible();
       await expect(menu.getByRole('menuitem', { name: 'New project' })).toBeVisible();
+      await expect(menu.getByRole('menuitem', { name: 'Try simplified flow', exact: true })).toBeInViewport();
       await page.keyboard.press('Escape');
     }
     expect(posts).toEqual([]);

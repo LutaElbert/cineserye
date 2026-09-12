@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createDiagramPng, waitForSaved, openSelectedScenePlanner } from './helpers';
 import { readFile } from 'node:fs/promises';
+import { fulfillWorkspaceMode } from './workspace-capability-helpers';
 
 test.beforeEach(async ({ request }) => {
   expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
@@ -56,7 +57,10 @@ test('detailed direction skips required questions, saves optional corrections an
   await page.setViewportSize({ width: 1440, height: 900 });
   const assistant = await openAssistant(page);
   expect(posts).toEqual([]);
-  await expect(assistant.locator('details')).toHaveCount(0);
+  await expect(assistant.locator('details:not(.assistant-secondary-tools)')).toHaveCount(0);
+  await expect(assistant.locator('details.assistant-secondary-tools')).toHaveCount(1);
+  await expect(assistant.locator('details.assistant-secondary-tools')).not.toHaveAttribute('open');
+  await expect(assistant.getByRole('button', { name: 'Edit full brief manually', exact: true })).not.toBeVisible();
   await expect(assistant.getByRole('button', { name: /Collapse|Expand assistant/ })).toHaveCount(0);
   const canonicalGeometry = () => page.locator('.react-flow__node:not([data-id^="story-assistant:"])').evaluateAll((elements) => elements.map((element) => ({ id: element.getAttribute('data-id'), position: (element as HTMLElement).style.transform })));
   const before = await canonicalGeometry();
@@ -312,10 +316,7 @@ test('an incomplete idea asks only missing runtime and format before confirming,
 test('Assistant follows workspace mode and blocks an unavailable live feature without sending a paid request', async ({ page }) => {
   const posts: string[] = [];
   page.on('request', (request) => { if (request.method() === 'POST') posts.push(request.url()); });
-  await page.route('**/api/cinema/provider-status', async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ json: { ...await response.json(), mode: 'live' } });
-  });
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, 'live'));
   await page.route('**/api/cinema/story-assistant?mode=live', (route) => route.fulfill({ json: {
     enabled: true, mode: 'live', model: 'review-only-test-model', quoteId: 'a'.repeat(64), cost: 0.01, ceiling: 1,
     ready: false, blockers: ['Live story understanding is not enabled for this workspace.'],

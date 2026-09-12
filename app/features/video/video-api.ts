@@ -42,8 +42,8 @@ export function videoApprovalContent(request: GenerateVideoRequest, quoteId: str
     referenceIds: request.referenceIds, settings: request.settings, liveProviderConsent: request.liveProviderConsent };
 }
 
-export function ownedVideoOperationUrl(scope: { projectId: string; sceneId: string; shotId: string; revisionId: string; operationId: string }) {
-  return `/api/cinema/generate-video?${new URLSearchParams(scope).toString()}`;
+export function ownedVideoOperationUrl(scope: { projectId: string; sceneId: string; shotId: string; revisionId: string; operationId: string }, reconcile = false) {
+  return `/api/cinema/generate-video?${new URLSearchParams({ ...scope, ...(reconcile ? { reconcile: '1' } : {}) }).toString()}`;
 }
 
 export type VideoCapabilitySummary = {
@@ -59,6 +59,7 @@ export type VideoOperationSnapshot = {
   operationId: string;
   providerOperationId: string | null;
   status: CinemaVideoOperationStatus;
+  failureConfirmed?: boolean;
   provider: string;
   model: string;
   capability: VideoCapabilitySummary;
@@ -85,6 +86,7 @@ export type VideoOperationResponse = {
 } | {
   ok: false;
   error: { code: ProviderErrorCode; message: string; retryable: boolean };
+  unavailable?: { operationId: string; reason: 'expired' | 'not-found' };
 };
 
 export type VideoPreflightResponse = {

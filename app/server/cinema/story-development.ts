@@ -1,4 +1,5 @@
 import 'server-only';
+import { assertNativeRuntime } from './native-runtime';
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { StoryInputSchema, StoryResultSchema, storyApprovalContent, type StoryInput, type StoryResult, type StoryQuote } from '../../features/story-development/contracts';
@@ -89,6 +90,7 @@ const envelope = z.object({ mode: z.enum(['fixture', 'live']), operationId: z.st
 export function createStoryHandler(environment: Record<string, string | undefined> = process.env, dispatch = liveStory, executor?: OperationExecutor) {
   return async (request: Request) => {
     try {
+      assertNativeRuntime();
       const source = await request.text();
       if (new TextEncoder().encode(source).length > 24 * 1024 * 1024) throw Error('Story request is too large.');
       const payload = envelope.parse(JSON.parse(source));
@@ -106,12 +108,13 @@ export function createStoryHandler(environment: Record<string, string | undefine
       if (bytes > 12 * 1024 * 1024 || notes > 20_000) throw Error('Reduce reference size before generating.');
       if (payload.input.brief.mode !== 'surprise' && requestedStoryAllocation(payload.input) < (payload.input.revise.length || payload.input.count)) throw Error('Allocate at least one second per scene.');
       const streaming = request.headers.get('accept')?.includes('text/event-stream') === true;
-      // Open durability before dispatch. Streaming fixture runs use the same recovery contract.
-      const durable = payload.mode === 'live' || streaming || payload.input.revision ? (executor ?? await localOperationExecutor()) : null;
+      // Manual, streaming and fixture requests share one durable recovery path.
+      // Open storage before dispatch; no mode silently falls back to memory.
+      const durable = executor ?? await localOperationExecutor();
       let sourceOutline: StoryResult['proposals'] | null = null;
       if (payload.input.revision) {
         const revision = payload.input.revision;
-        const parent = durable!.read(`story:${payload.input.projectId}:${revision.sourceSessionId}`);
+        const parent = durable.read(`story:${payload.input.projectId}:${revision.sourceSessionId}`);
         if (parent?.status !== 'completed' || !parent.result) throw Error('The reviewed outline version is unavailable. No revision was started.');
         const saved = StoryResultSchema.parse(JSON.parse(parent.result)); sourceOutline = saved.outline ?? saved.proposals;
         if (revision.sourceVersion !== (saved.outlineVersion ?? 1)) throw Error('The outline version changed. Review its current version.');
@@ -136,7 +139,8 @@ export function createStoryHandler(environment: Record<string, string | undefine
           runId: payload.operationId, startedAt, completedAt: new Date().toISOString(), status: 'completed', usage };
         progress({ step: 'validation', status: 'completed' }); return result;
       };
-      const execute = (progress: OperationProgressSink = () => {}) => durable ? durable.execute(`story:${payload.input.projectId}:${payload.operationId}`, approved, () => run(progress)) : run(progress);
+      const scope = `story:${payload.input.projectId}:`;
+      const execute = (progress: OperationProgressSink = () => {}) => durable.execute(`${scope}${payload.operationId}`, approved, () => run(progress), scope);
       if (streaming) return storyEventStream(payload.input.projectId, payload.operationId, execute);
       const result = await execute();
       return Response.json({ ok: true, result });

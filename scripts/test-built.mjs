@@ -46,7 +46,11 @@ try {
   }
   if (!ready) throw new Error(`Built server did not become ready: ${logs}`);
   console.log(`Testing built ${runtime} at ${baseURL}; fixture-only, retries disabled.`);
-  browserTests = spawn('./node_modules/.bin/playwright', ['test', '--workers=3', ...process.argv.slice(3)], { env, stdio: 'inherit' });
+  // Wrangler dev owns one shared local Worker isolate. Serializing this lane
+  // avoids emulator teardown under concurrent cross-browser requests; the
+  // native Node artifact remains intentionally exercised with three workers.
+  const workers = runtime === 'worker' ? '1' : '3';
+  browserTests = spawn('./node_modules/.bin/playwright', ['test', `--workers=${workers}`, ...process.argv.slice(3)], { env, stdio: 'inherit' });
   const exitCode = await new Promise((resolve, reject) => { browserTests.once('error', reject); browserTests.once('exit', resolve); });
   const report = JSON.parse(await readFile(`artifacts/simplified-flow/${runtime}.json`, 'utf8'));
   const tests = [];

@@ -27,6 +27,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Zod documents this pre-import configuration hook. Set it before
+            any browser schema is constructed: even its caught eval probe
+            violates our CSP. This fixed script contains no user input. */}
+        <script dangerouslySetInnerHTML={{ __html: 'globalThis.__zod_globalConfig = Object.assign(globalThis.__zod_globalConfig || {}, { jitless: true });' }} />
+      </head>
       <body>{children}</body>
     </html>
   );

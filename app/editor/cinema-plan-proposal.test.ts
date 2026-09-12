@@ -13,8 +13,26 @@ import {
 } from './cinema-plan-proposal';
 import { initialDocument } from './initial-document';
 import { nodeRectangle, rectanglesOverlap } from './node-layout';
+import { ensureStoryProject } from './story-development-commands';
 
 describe('cinema proposal canvas layout', () => {
+  it('replaces the starter shot after a durable project owner is initialized', () => {
+    const source = ensureStoryProject(structuredClone(initialDocument));
+    const runId = Object.keys(MOCK_CINEMA_PROJECT_DATA.agentRuns)[0];
+    const preserved = prepareCinemaPlanProposal(
+      source,
+      source.cinema,
+      compileCinemaCanvasProposal(runId, MOCK_CINEMA_PROJECT_DATA),
+    );
+    const proposal = prepareCinemaPlanProposal(source, source.cinema, MOCK_SHOT_PLAN_PROPOSAL, { replaceStarterShot: true });
+    const deletion = proposal.commands.find((command) => command.type === 'delete-nodes');
+
+    expect(source.cinema?.projectId).toBeTruthy();
+    expect(source.cinema?.activeRevisionId).toBeNull();
+    expect(preserved.commands.some((command) => command.type === 'delete-nodes')).toBe(false);
+    expect(deletion).toMatchObject({ type: 'delete-nodes', ids: ['shot-01'] });
+  });
+
   it('packs generated context and shot lanes without moving existing anchors', () => {
     const source = structuredClone(initialDocument);
     source.nodes.find((node) => node.id === 'story-premise')!.position = { x: 180, y: 540 };
@@ -32,6 +50,8 @@ describe('cinema proposal canvas layout', () => {
 
     expect(nodeById.get('story-premise')!.position).toEqual({ x: 180, y: 540 });
     expect(nodeById.get('scene-01')!.position).toEqual({ x: 620, y: 640 });
+    expect(nodeById.get('story-premise')!.data).toEqual(source.nodes.find((node) => node.id === 'story-premise')!.data);
+    expect(nodeById.get('scene-01')!.data).toEqual(source.nodes.find((node) => node.id === 'scene-01')!.data);
 
     const scene = cinema.scenes[cinema.activeSceneId!];
     const contextIds = [

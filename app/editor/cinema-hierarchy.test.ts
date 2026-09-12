@@ -6,6 +6,7 @@ import {
   cinemaHierarchyParentId,
   cinemaHierarchyRootId,
   isCinemaHierarchyEdge,
+  isCinemaHierarchyEdgeInIndex,
   planCinemaHierarchyLayout,
   resolveCinemaHierarchyInsertion,
 } from './cinema-hierarchy';
@@ -32,6 +33,26 @@ function hierarchyEdge(id: string, source: string, target: string): EditorEdge {
 }
 
 describe('cinema hierarchy resolution', () => {
+  it('indexed classification preserves every relationship and endpoint case without reusing stale roles', () => {
+    const nodes = structuredClone(initialDocument.nodes);
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const endpoints = ['story-premise', 'scene-01', 'shot-01', 'missing'];
+    const relationships = [undefined, 'hierarchy', 'attachment', 'reference', 'sequence'] as const;
+    for (const source of endpoints) for (const target of endpoints) for (const relationship of relationships) {
+      const edge: EditorEdge = { id: `${source}-${target}`, source, target,
+        data: { label: '', kind: 'default', ...(relationship ? { relationship } : {}) } };
+      const expectedPair = (source === 'story-premise' && target === 'scene-01')
+        || (source === 'scene-01' && target === 'shot-01');
+      const expected = expectedPair && (relationship === undefined || relationship === 'hierarchy');
+      expect(isCinemaHierarchyEdgeInIndex(byId, edge)).toBe(expected);
+      expect(isCinemaHierarchyEdge(nodes, edge)).toBe(expected);
+    }
+    const edge = hierarchyEdge('story-scene', 'story-premise', 'scene-01');
+    const changed = nodes.map(node => node.id === 'scene-01' ? cinemaNode(node.id, 'shot', 0, 0) : node);
+    expect(isCinemaHierarchyEdgeInIndex(new Map(changed.map(node => [node.id, node])), edge)).toBe(false);
+    byId.delete('scene-01');
+    expect(isCinemaHierarchyEdgeInIndex(byId, edge)).toBe(false);
+  });
   it('classifies only valid hierarchy role pairs and safely recognizes legacy pairs', () => {
     const nodes = structuredClone(initialDocument.nodes);
     expect(isCinemaHierarchyEdge(nodes, { id: 'legacy', source: 'story-premise', target: 'scene-01', data: { label: '', kind: 'default' } })).toBe(true);

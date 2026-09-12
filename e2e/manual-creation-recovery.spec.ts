@@ -342,6 +342,15 @@ test('centers a draft scene against three shots and moves the next draft scene b
 
   const scene03BeforeThirdShot = await modelPosition('Scene 03');
   await selectOutline('Shot 03');
+  // Every action must be hit-testable inside the canvas, not under Properties.
+  await expect.poll(() => page.locator('[aria-label="Concept actions"]').evaluate(bar => {
+    const canvas = bar.closest('.react-flow')!.getBoundingClientRect();
+    return Array.from(bar.querySelectorAll('button')).every(button => {
+      const rect = button.getBoundingClientRect(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+      return x >= canvas.left && x <= canvas.right && y >= canvas.top && y <= canvas.bottom
+        && document.elementFromPoint(x, y)?.closest('button') === button;
+    });
+  })).toBe(true);
   await page.getByRole('button', { name: 'Add next shot', exact: true }).click();
   await page.getByRole('button', { name: 'Finish editing', exact: true }).click();
 
@@ -632,18 +641,18 @@ test('sparkle restores outlier Scenes to a dominant bottom row', async ({ page }
   expect(arrangedScenes.map((position) => position.x)).toEqual(
     [...arrangedScenes.map((position) => position.x)].sort((left, right) => left - right),
   );
-  const [storyBox, firstSceneBox, lastSceneBox] = await Promise.all([
-    canvasNode(page, 'Story Premise').boundingBox(),
-    canvasNode(page, 'Scene 01').boundingBox(),
-    canvasNode(page, 'Scene 05').boundingBox(),
-  ]);
-  expect(storyBox).toBeTruthy();
-  expect(firstSceneBox).toBeTruthy();
-  expect(lastSceneBox).toBeTruthy();
-  expect(Math.abs(
-    storyBox!.x + storyBox!.width / 2
-    - (firstSceneBox!.x + lastSceneBox!.x + lastSceneBox!.width) / 2,
-  )).toBeLessThan(3);
+  // Read one rendered frame: separate protocol calls can sample different
+  // points in the same camera animation and invent a centering error.
+  const centerDelta = await page.evaluate(([story, firstScene, lastScene]) => {
+    if (!story || !firstScene || !lastScene) throw Error('Expected all three layout nodes.');
+    const storyBox = story.getBoundingClientRect(), firstSceneBox = firstScene.getBoundingClientRect(), lastSceneBox = lastScene.getBoundingClientRect();
+    return Math.abs(storyBox.x + storyBox.width / 2 - (firstSceneBox.x + lastSceneBox.x + lastSceneBox.width) / 2);
+  }, await Promise.all([
+    canvasNode(page, 'Story Premise').elementHandle(),
+    canvasNode(page, 'Scene 01').elementHandle(),
+    canvasNode(page, 'Scene 05').elementHandle(),
+  ]));
+  expect(centerDelta).toBeLessThan(3);
   await expect.poll(() => visibleCinemaHierarchyOverlaps(page)).toEqual([]);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();

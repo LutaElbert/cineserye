@@ -13,7 +13,23 @@ test('Worker discovery does not advertise native story execution', async ({ requ
   expect(capability.proof).toBe('configuration-only');
   expect(capability.story.ready).toBe(false);
   expect(capability.analysis.ready).toBe(false);
+  for (const stage of ['research', 'analysis', 'story', 'shots', 'images', 'video', 'assembly']) {
+    expect(capability.stages[stage].ready).toBe(false);
+    expect(capability.stages[stage].status).toBe('blocked');
+  }
+  expect(capability.stages.uploads.status).toBe('local-only');
+  expect(capability.legacyPlanning.livePreflight.ready).toBe(false);
 });
+
+for (const route of ['develop-story', 'story-assistant', 'plan-scenes', 'generate-video', 'generate-storyboard']) {
+  test(`Worker rejects same-origin ${route} before parsing or dispatch`, async ({ request, baseURL }) => {
+    const response = await request.post(`/api/cinema/${route}`, {
+      headers: { origin: baseURL!, 'content-type': 'application/json', 'x-host-runtime': 'node', hostruntime: 'node' }, data: 'not JSON',
+    });
+    expect(response.status()).toBe(400);
+    expect(await response.text()).toContain('native local operator');
+  });
+}
 
 test('Worker cannot admit local rendering, even with a forged approval', async ({ request }) => {
   const capability = await (await request.get('/api/cinema/assemble')).json();

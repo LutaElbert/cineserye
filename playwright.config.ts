@@ -11,6 +11,10 @@ const baseURL = externalBaseUrl ?? 'http://localhost:3000';
 export default defineConfig({
   testDir: runtime === 'worker' ? '.' : './e2e',
   testMatch: runtime === 'worker' ? ['e2e-worker/*.spec.ts', 'e2e/editor.spec.ts', 'e2e/layer-behavior.spec.ts', 'e2e/layer-editor.spec.ts'] : undefined,
+  testIgnore: runtime === 'node-fixture' ? [
+    ...(!process.env.CINESERYE_MEASUREMENT_OUTPUT ? ['candidate-task-measurements.spec.ts'] : []),
+    ...(!process.env.CINESERYE_VISUAL_OUTPUT ? ['simplified-flow-visual-captures.spec.ts'] : []),
+  ] : undefined,
   globalSetup: './scripts/e2e-setup.ts',
   outputDir: `test-results/${runtime}`,
   fullyParallel: true,
