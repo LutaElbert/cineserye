@@ -1,6 +1,14 @@
 # Private release attempt 1 — September 12, 2026
 
-Status: authorized release preparation; exact-SHA CI acceptance pending.
+Status: first exact-SHA CI attempt failed; narrow workflow-order repair prepared, full acceptance pending.
+
+## Exact-SHA attempt 1 and follow-up
+
+Private commit `b2a61572987fe9afe4f9667b188ccd037b7a9681` is pushed to `feature/simplified-flow-release`; [PR #1](https://github.com/LutaElbert/cineserye/pull/1) is open. [Actions run 34664019846](https://github.com/LutaElbert/cineserye/actions/runs/34664019846) failed after 2m5s: `check:client-boundary` ran before build and could not find `dist/client`. Dependency install, renderer environment, compatibility, typecheck and lint passed; subsequent test/build/runtime steps did not execute. GitGuardian passed. The PR merge-ref tree matched the exact candidate tree `e07748800768f1bf849ef7da42ac6de150d8df3f`.
+
+Follow-up moves `check:client-boundary` immediately after `npm run build`; no check is removed or weakened. The unchanged scanner passed against the accepted attempt-6 credential-free build. This second workflow-only correction yields 429-input digest `92ffaf77e37b8929bb3a6ed2dbfc0a01e3944bfa9564a8ab21b1594c5eadf280`. Full CI still must execute successfully for the follow-up SHA. No application source changed; failure history is preserved rather than overwritten by a rerun.
+
+Fresh `ci_order_critic` accepted the bounded follow-up at **9.5/10**, no blockers: all workflow prerequisites now ordered, scanner passes on the accepted built app, six Final Cut executions required, fixture/local isolation and spending controls unchanged. This score is not a substitute for actual CI.
 
 Fresh `release_candidate_critic` accepted the bounded private checkpoint at **9.3/10**, confidence **0.97**. It independently verified all 429 input hashes, the workflow-only difference, the 186-file staged scope and whitespace check. Conservative credential/private-submission-link scans found no matches; this is not a universal secret guarantee. Playwright enumeration confirms six Final Cut cases. Synthetic assertion checks accepted six passes and rejected missing, skipped or failed cases; enumeration and synthetic checks do not replace actual runtime CI.
 

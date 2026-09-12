@@ -5,6 +5,8 @@ Purpose: private continuity notes for a new Codex task. This is not a public sub
 
 ## Authorized private release checkpoint — September 12, 2026
 
+Latest release evidence: private [PR #1](https://github.com/LutaElbert/cineserye/pull/1), initial head `b2a61572987fe9afe4f9667b188ccd037b7a9681`, [CI run 34664019846](https://github.com/LutaElbert/cineserye/actions/runs/34664019846). The run failed because the bundle security scan preceded build (`dist/client` absent), not because the scan found a leak. The follow-up moves that unchanged scan after build. Updated implementation digest: `92ffaf77e37b8929bb3a6ed2dbfc0a01e3944bfa9564a8ab21b1594c5eadf280`. All runtime gates remain pending until a successful run for the final head. The earlier digest below is the first release attempt, not the follow-up.
+
 This section supersedes the historical uncommitted/authority notes below. Elbert authorized the manager's judgment to commit and push the accepted candidate and run GitHub Actions only after verifying zero-cost controls. The original dirty `feature/simplified-flow` checkout is preserved; the accepted worktree uses `feature/simplified-flow-release`. The private repository remains `LutaElbert/cineserye`; no merge, deployment, public-submission change or paid provider execution is authorized by this checkpoint.
 
 The account billing UI was freshly inspected on September 12: Actions has an account-wide **$0 budget, Stop usage Yes, $0 spent**. Controls were not changed. CI remains enabled, fixture-only, standard Ubuntu, bounded to 30 minutes, with no artifact upload. If GitHub blocks the run for allowance exhaustion, stop rather than raise the budget or purchase minutes.
