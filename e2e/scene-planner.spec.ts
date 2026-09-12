@@ -118,6 +118,35 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
 
   const review = page.getByRole('region', { name: 'Shot proposal review' });
   await expect(review).toBeVisible();
+  const operationOwnership = await page.evaluate(() => Promise.all([
+    new Promise<{ currentProjectId: string; pendingProjectId: string }>((resolve, reject) => {
+      const request = indexedDB.open('cineserye-local');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction(['documents', 'pending-proposals'], 'readonly');
+        const documentRequest = transaction.objectStore('documents').get('current');
+        const pendingRequest = transaction.objectStore('pending-proposals').getAll();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.oncomplete = () => {
+          resolve({
+            currentProjectId: documentRequest.result.cinema.projectId,
+            pendingProjectId: pendingRequest.result[0].projectId,
+          });
+          database.close();
+        };
+      };
+    }),
+    JSON.parse(localStorage.getItem('cineserye.operation-journal.v1') ?? '{}') as {
+      entries?: Array<{ projectId: string; phase: string }>;
+    },
+  ]));
+  expect(operationOwnership[0].currentProjectId).toBeTruthy();
+  expect(operationOwnership[0].pendingProjectId).toBe(operationOwnership[0].currentProjectId);
+  expect(operationOwnership[1].entries).toContainEqual(expect.objectContaining({
+    projectId: operationOwnership[0].currentProjectId,
+    phase: 'awaiting-review',
+  }));
   await expectVisibleNodesNotToOverlap(page);
   await expect(page.locator('.topbar').getByRole('button', { name: 'Review shot plan' })).toHaveCount(0);
   await expect(review.getByRole('button', { name: 'Accept plan' })).toBeVisible();
@@ -125,7 +154,7 @@ test('generates, curates, accepts, rejects, and persists a trustworthy fixture s
   await expect(outline.locator('.outline-status-badge.status-proposed').first()).toContainText('Proposed');
   await expect(outline).toContainText('6 shots · 42s');
   await expect(outline).toContainText('₱820');
-  await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await outline.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('tab', { name: 'Cost' }).click();
   await expect(page.getByRole('tabpanel', { name: 'Cost' })).toContainText('above the ₱700 AI-generation ceiling');
   await expect(page.getByRole('tabpanel', { name: 'Cost' })).toContainText('Physical-production constraints are tracked separately');
@@ -256,18 +285,15 @@ test('keeps first-run planning and all project actions keyboard-accessible at 39
 test('shows live mode before submission and requires explicit transfer consent', async ({ page }) => {
   let planningRequests = 0;
   let planningBody: Record<string, unknown> | null = null;
-  await page.route('**/api/cinema/provider-status', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
+  const { fulfillWorkspaceMode } = await import('./workspace-capability-helpers');
+  await page.route('**/api/cinema/workflow-capabilities', async (route) => {
+    await fulfillWorkspaceMode(route, 'live', {
         mode: 'live',
         requiresContentTransferConsent: true,
         research: { configured: true, provider: 'parallel' },
         planning: { configured: true, provider: 'vertex-gemini', model: 'gemini-test' },
         telemetryPolicy: 'no-content-v1',
         livePreflight: { ready: true, blockers: [], maxLiveRunCost: 1 },
-      }),
     });
   });
   page.on('request', (request) => {
@@ -307,6 +333,9 @@ test('shows live mode before submission and requires explicit transfer consent',
 });
 
 test('recovers a pending proposal, edits an accepted shot, and preserves revision history', async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on('pageerror', (error) => runtimeErrors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') runtimeErrors.push(message.text()); });
   let planningRequests = 0;
   page.on('request', (request) => {
     if (request.url().includes('/api/cinema/plan-scene')) planningRequests += 1;
@@ -335,7 +364,7 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await expect(traceDialog.locator('.trace-list > li')).toHaveCount(1);
   await traceDialog.getByRole('button', { name: 'Close' }).click();
   await review.getByRole('button', { name: 'Accept plan' }).click();
-  await page.getByRole('navigation', { name: 'Project outline' }).getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Project outline' }).getByRole('button', { name: 'Scene 01', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Create revision' })).toBeVisible();
 
   const outline = page.getByRole('navigation', { name: 'Project outline' });
@@ -350,7 +379,7 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await page.getByRole('tab', { name: 'Prompt' }).click();
   await expect(page.getByRole('tabpanel', { name: 'Prompt' })).toContainText('stale');
 
-  await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await outline.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('tab', { name: 'Details' }).click();
   await page.getByRole('button', { name: 'Create revision' }).click();
   brief = page.getByRole('region', { name: 'Generate shot plan' });
@@ -358,7 +387,7 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await brief.getByRole('button', { name: 'Generate shot plan' }).click();
   await expect(review).toBeVisible();
   await review.getByRole('button', { name: 'Accept plan' }).click();
-  await outline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await outline.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('tab', { name: 'Details' }).click();
   const history = page.locator('.revision-history');
   await expect(history).toContainText('2 revisions');
@@ -382,7 +411,8 @@ test('recovers a pending proposal, edits an accepted shot, and preserves revisio
   await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
   const restoredOutline = page.getByRole('navigation', { name: 'Project outline' });
-  await restoredOutline.getByRole('button', { name: 'Scene 01 · The Abandoned Cinema', exact: true }).click();
+  await restoredOutline.getByRole('button', { name: 'Scene 01', exact: true }).click();
   await page.getByRole('tab', { name: 'Details' }).click();
   await expect(page.locator('.revision-history')).toContainText('3 revisions');
+  expect(runtimeErrors).toEqual([]);
 });

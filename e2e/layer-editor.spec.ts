@@ -26,6 +26,9 @@ test('Story editor preserves geometry, retains drafts on Escape, synchronizes br
   await expect(story).toContainText('A cinema reveals tomorrow.');
   await waitForSaved(page); await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  // Reload readiness precedes the intentional fit animation. Wait for stable
+  // node geometry so a double-click cannot straddle the moving action bar.
+  await story.hover();
   await story.dblclick();
   await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
   await expect(editor.getByRole('textbox', { name: 'Premise for development', exact: true })).toHaveValue('A cinema reveals tomorrow.');
@@ -36,6 +39,20 @@ test('Story editor preserves geometry, retains drafts on Escape, synchronizes br
   await page.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect(story).toContainText('Changed again');
   expect(posts).toEqual([]);
+});
+
+test('local story editing remains available when assisted development is unavailable', async ({ page }) => {
+  await page.route('**/api/cinema/develop-story', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ mode: 'fixture', enabled: false, ready: false, blockers: ['Unavailable in this runtime.'] }),
+  }));
+  await openEditor(page);
+  await expect(page.getByRole('button', { name: 'Open story assistant', exact: true })).toHaveCount(0);
+  await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
+  const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
+  await expect(editor).toBeVisible();
+  await expect(editor.getByLabel('Layer title', { exact: true })).toBeEditable();
 });
 
 test('Scene review targets edited scene and does not dispatch generation', async ({ page }) => {
@@ -86,13 +103,15 @@ test('accepted shot edits keep geometry locks and reuse media consent controls',
   expect(await editor.evaluate((element) => element.closest<HTMLElement>('.react-flow__node')?.dataset.id)).toBe('cine-shot-03');
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await expect(editor).toContainText('Generated host');
+  await editor.getByText('Edit shot details', { exact: true }).click();
   await editor.getByLabel('Camera movement', { exact: true }).fill('Slow push toward Mara');
-  await editor.getByText('Review image / video generation', { exact: true }).click();
+  await expect(editor.getByRole('region', { name: 'Shot media workbench' })).toBeVisible();
   await expect(editor.getByRole('button', { name: 'Generate storyboard', exact: true })).toBeDisabled();
   await editor.getByRole('button', { name: 'Done', exact: true }).click();
   await expect(shot.locator('.react-flow__resize-control.handle')).toHaveCount(0);
   await shot.dblclick();
   await page.getByRole('button', { name: 'Focus layer editor', exact: true }).click();
+  await editor.getByText('Edit shot details', { exact: true }).click();
   await expect(editor.getByLabel('Camera movement', { exact: true })).toHaveValue('Slow push toward Mara');
   expect(posts).toBe(0);
 });
@@ -102,18 +121,22 @@ test('discard restores text only while retaining newly saved references', async 
   await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
   const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
   await editor.getByLabel('Layer title', { exact: true }).fill('Discard this title');
-  await editor.getByRole('button', { name: 'Add story reference', exact: true }).click();
+  await editor.getByText('Story tools', { exact: true }).click();
+  await editor.getByRole('button', { name: 'Reference library', exact: true }).click();
+  await editor.getByText('Advanced library: notes, scope and archive', { exact: true }).click();
   await editor.getByLabel('Reference title', { exact: true }).fill('Keep this reference');
   await editor.getByLabel('Reference note', { exact: true }).fill('Warm practical light.');
   await editor.getByRole('button', { name: 'Add note reference', exact: true }).click();
   await editor.getByRole('button', { name: 'Back to premise', exact: true }).click();
-  await editor.getByRole('button', { name: 'Optional details', exact: true }).click();
+  await editor.getByText('Story tools', { exact: true }).click();
   const nativeDialogs: string[] = [];
   page.on('dialog', async (dialog) => { nativeDialogs.push(dialog.message()); await dialog.dismiss(); });
   await editor.getByRole('button', { name: 'Discard text / direction changes', exact: true }).click();
   await expect(editor.getByLabel('Layer title', { exact: true })).toHaveValue('Discard this title');
   await editor.getByRole('button', { name: 'Confirm discard', exact: true }).click();
   await expect(editor.getByLabel('Layer title', { exact: true })).toHaveValue('Story Premise');
+  await editor.getByRole('button', { name: 'Reference library', exact: true }).click();
+  await editor.getByText('Advanced library: notes, scope and archive', { exact: true }).click();
   await expect(editor.getByText('Keep this reference', { exact: true })).toBeVisible();
   expect(nativeDialogs).toEqual([]);
   await expect(page.locator('dialog[open]')).toHaveCount(0);

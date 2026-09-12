@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MOCK_CINEMA_PROJECT_DATA } from '../../domain/cinema/mock/reel-knows-tomorrow';
 import { createEmptyVisualPreproductionData, type CinemaStoryboardFrameRecord, type CinemaVideoClipRecord } from '../../domain/cinema/visual-preproduction';
-import { buildSequenceManifest, defaultSequenceTrim, SequenceManifestSchema, sequenceRows, sequenceRuntime } from './sequence-manifest';
+import { buildSequenceManifest, defaultSequenceTrim, SequenceManifestSchema, sequenceRows, sequenceRuntime, sequenceTimingIssue } from './sequence-manifest';
 
 const manifest = {
   version: 1, aspectRatio: '9:16', resolution: '720p', fps: 24, audio: 'silent', confirmedLocalRender: true,
@@ -12,6 +12,11 @@ describe('local sequence manifest', () => {
   it('tracks edit runtime separately from provider clip duration', () => {
     expect(sequenceRuntime(SequenceManifestSchema.parse(manifest))).toBe(5);
     expect(defaultSequenceTrim({ ...Object.values(MOCK_CINEMA_PROJECT_DATA.shots)[0], durationSeconds: 5 })).toEqual({ startFrame: 0, durationFrames: 120 });
+  });
+  it('reports trims that exceed decoded footage before local rendering', () => {
+    expect(sequenceTimingIssue({ startFrame: 0, durationFrames: 48 }, 1)).toMatch(/Decoded clip is 1.00s/);
+    expect(sequenceTimingIssue({ startFrame: 12, durationFrames: 24 }, 1)).toMatch(/selected 0.50s start and 1.00s use/);
+    expect(sequenceTimingIssue({ startFrame: 0, durationFrames: 24 }, 1)).toBeNull();
   });
   it('rejects unbounded, duplicate, non-MP4 settings and arbitrary paths', () => {
     expect(SequenceManifestSchema.safeParse({ ...manifest, path: '/etc/passwd' }).success).toBe(false);

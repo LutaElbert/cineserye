@@ -152,7 +152,7 @@ export function validateStoryWorkflow(value: unknown, project: CinemaProjectData
     const brief = data.briefs[item.source.briefVersion - 1];
     if (!brief || brief.mode !== item.mode || item.source.bindingRevision > data.bindingRevision) throw new Error('Session has invalid brief or binding provenance.');
     for (const used of item.source.references) if (!refs.get(used.id)?.versions[used.version - 1]) throw new Error('Session references missing historical content.');
-    if (item.anchorSceneId && !project.scenes[item.anchorSceneId] && item.stage !== 'stale') throw new Error('Session anchor is missing.');
+    if (item.anchorSceneId && !project.scenes[item.anchorSceneId] && item.stage !== 'stale' && !hasUnresolvedStoryOutcome(item)) throw new Error('Session anchor is missing.');
     if (item.accepted.some((mapping) => !item.proposals.some((proposal) => proposal.id === mapping.proposalId))) throw new Error('Acceptance refers to a missing proposal.');
     if (item.revision) {
       const parentIndex = data.sessions.findIndex((parent) => parent.id === item.revision!.sourceSessionId);
@@ -310,7 +310,14 @@ export function reconcileStoryWorkflow(project: CinemaProjectData): CinemaProjec
   if (next.draft?.anchorSceneId && !project.scenes[next.draft.anchorSceneId]) next.draft.anchorSceneId = null;
   next.bindings = next.bindings.filter((binding) => storyOwnerExists(project, binding.owner));
   if (next.bindings.length !== project.storyWorkflow.bindings.length) next.bindingRevision++;
-  for (const item of next.sessions) if (item.anchorSceneId && !project.scenes[item.anchorSceneId]) item.stage = 'stale';
+  // A deleted creative input says nothing about whether a provider dispatched,
+  // finished or charged. Keep its operation identity recoverable until checked.
+  for (const item of next.sessions) if (item.anchorSceneId && !project.scenes[item.anchorSceneId]
+    && !hasUnresolvedStoryOutcome(item)) item.stage = 'stale';
   if (canonicalRequest(next) !== canonicalRequest(project.storyWorkflow)) next.revision++;
   return { ...project, schemaVersion: 3, storyWorkflow: next };
+}
+
+export function hasUnresolvedStoryOutcome(session: Pick<StoryWorkflowData['sessions'][number], 'stage'>) {
+  return session.stage === 'running' || session.stage === 'outcome-unknown' || session.stage === 'cancelled';
 }

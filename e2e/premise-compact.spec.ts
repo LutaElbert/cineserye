@@ -1,14 +1,17 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { openEditor, waitForSaved, createDiagramPng } from './helpers';
+import { openEditor, waitForCanvasSettled, waitForSaved, createDiagramPng } from './helpers';
 
-test('Story entry from Project view reveals the actual canvas node, including an already open editor', async ({ page }) => {
-  await page.goto('/');
+test('returning from Project to the Story canvas node preserves an already open editor', async ({ page }) => {
+  // The app's readiness marker is the contract; optional resources may still
+  // keep the browser load event open under a saturated built-artifact run.
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
   await page.getByRole('dialog', { name: /Start with your scene/ }).getByRole('button', { name: /Explore the sample/ }).click();
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.getByRole('button', { name: 'Project', exact: true }).click();
-    await page.getByRole('button', { name: /^(Story workspace|Develop this story)$/ }).click();
+    await page.getByRole('button', { name: 'Canvas', exact: true }).click();
+    await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
     await expect(page.getByRole('button', { name: 'Canvas', exact: true })).toHaveAttribute('aria-pressed', 'true');
     const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
     await expect(editor).toBeVisible();
@@ -38,7 +41,9 @@ test('premise expands inside the actual node with local editing, references and 
   await editor.getByRole('button', { name: 'Surprise me', exact: true }).click();
   await expect(editor.getByRole('button', { name: 'Surprise me', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await editor.getByRole('button', { name: 'Expand my idea', exact: true }).click();
-  await editor.getByRole('button', { name: 'Add story reference', exact: true }).click();
+  await editor.getByText('Story tools', { exact: true }).click();
+  await editor.getByRole('button', { name: 'Reference library', exact: true }).click();
+  await editor.getByText('Advanced library: notes, scope and archive', { exact: true }).click();
   await expect(editor.getByLabel('Tone', { exact: true })).toHaveCount(0);
   await editor.getByLabel('Reference title', { exact: true }).fill('Board layout reference');
   const png = await createDiagramPng(page);
@@ -48,7 +53,7 @@ test('premise expands inside the actual node with local editing, references and 
   await editor.getByLabel('Reference note', { exact: true }).fill('Dim practical lighting, a confined living room.');
   await editor.getByRole('button', { name: 'Add note reference', exact: true }).click();
   await editor.getByRole('button', { name: 'Back to premise', exact: true }).click();
-  await expect(editor.getByRole('button', { name: 'References · 2' })).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Review reference permissions · 1' })).toBeVisible();
   await expect(editor.getByRole('img', { name: 'Board layout reference', exact: true })).toBeVisible();
   await waitForSaved(page);
   const violations = (await new AxeBuilder({ page }).include('.premise-expanded-node').analyze()).violations;
@@ -60,10 +65,11 @@ test('premise expands inside the actual node with local editing, references and 
   await expect(editor).toHaveCount(0);
   await waitForSaved(page); await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await waitForCanvasSettled(page);
   await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
   await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
   await expect(editor.getByLabel('Layer title', { exact: true })).toHaveValue('The Cursed Game');
-  await expect(editor.getByRole('button', { name: 'References · 2' })).toBeVisible();
+  await expect(editor.getByRole('button', { name: 'Review reference permissions · 1' })).toBeVisible();
   await editor.getByRole('button', { name: 'Generate', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Story Assistant', exact: true })).toBeVisible();
   await expect(editor).toHaveCount(0);
@@ -90,9 +96,9 @@ test('premise stays inside the canvas on mobile; explicit focus and Escape work 
   await expect(page.locator('.react-flow__node[data-id="story-premise"]')).toContainText('A smaller screen');
 });
 
-test('Story toolbar and keyboard use the compact editor; pasted images inside it do not reach the canvas', async ({ page }) => {
+test('Story canvas entry and keyboard use the compact editor; pasted images inside it do not reach the canvas', async ({ page }) => {
   await openEditor(page);
-  await page.getByRole('button', { name: 'Story workspace', exact: true }).click();
+  await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
   const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
   await expect(editor).toBeVisible();
   await editor.getByLabel('Layer title', { exact: true }).fill('One editor');

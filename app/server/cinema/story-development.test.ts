@@ -10,15 +10,35 @@ const input: StoryInput = { version: 1, projectId: 'project', count: 3, context:
   brief: { version: 1, mode: 'expand', sourceDigest: 'a'.repeat(64), premise: 'A caretaker finds a haunted projector.', aspectRatio: '9:16',
     platform: 'short-form', durationSeconds: 60, durationScope: 'whole-story', tone: 'Suspense', ending: 'A choice', constraints: ['No dialogue'], assumptions: [], status: 'approved', answers: [] } };
 const operationId = '11111111-1111-4111-8111-111111111111';
-function request(value = input, env = environment, mode: 'live' | 'fixture' = 'live') {
+function request(value = input, env = environment, mode: 'live' | 'fixture' = 'live', id = operationId) {
   const quote = storyQuote(mode, env);
-  return new Request('http://localhost/api/cinema/develop-story', { method: 'POST', body: JSON.stringify({ mode, input: value, operationId,
+  return new Request('http://localhost/api/cinema/develop-story', { method: 'POST', body: JSON.stringify({ mode, input: value, operationId: id,
     consent: true, quoteId: quote.quoteId, contentDigest: operationDigest(storyApprovalContent(value, quote.quoteId)) }) });
 }
 const stores: OperationRepository[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
 async function executor() { const store = await OperationRepository.open(':memory:'); stores.push(store); return new OperationExecutor(store); }
 describe('story provider boundary — mocked live, no paid calls', () => {
+  it('rejects a NUL project identity before dispatch or durable claim', async () => {
+    const store = await executor(); const dispatch = vi.fn(async (value: StoryInput) => fixtureStory(value));
+    const handle = createStoryHandler(environment, dispatch, store);
+    const value = { ...input, projectId: 'project\0suffix' };
+    const response = await handle(request(value));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ ok: false, error: expect.stringContaining('scope') });
+    expect(store.read(`story:${value.projectId}:${operationId}`)).toBeUndefined();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+  it('rejects a new operation ID after an uncertain provider outcome even if browser history was restored', async () => {
+    const dispatch = vi.fn(async () => { throw Error('Disconnected after dispatch'); });
+    const store = await executor(); const handle = createStoryHandler(environment, dispatch, store);
+    expect((await handle(request())).status).toBe(400);
+    const second = await handle(request(input, environment, 'live', '22222222-2222-4222-8222-222222222222'));
+    expect(second.status).toBe(400);
+    expect(await second.json()).toMatchObject({ ok: false, error: expect.stringContaining('earlier Story request') });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(store.read(`story:project:${operationId}`)?.status).toBe('unknown');
+  });
   it('streams a durable fixture checkpoint and replays it without generating twice', async () => {
     const store = await executor(); const dispatch = vi.fn(); const handle = createStoryHandler(environment, dispatch, store);
     const streamed = request(input, environment, 'fixture'); streamed.headers.set('accept', 'text/event-stream');
@@ -32,8 +52,10 @@ describe('story provider boundary — mocked live, no paid calls', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
   it('fixture results allocate duration without calling a live provider', async () => {
-    const dispatch = vi.fn(); const response = await createStoryHandler(environment, dispatch)(request(input, environment, 'fixture'));
+    const store = await executor();
+    const dispatch = vi.fn(); const response = await createStoryHandler(environment, dispatch, store)(request(input, environment, 'fixture'));
     expect(response.status).toBe(200); expect(dispatch).not.toHaveBeenCalled();
+    expect(store.read(`story:project:${operationId}`)?.status).toBe('completed');
     expect(fixtureStory(input).proposals.reduce((sum, item) => sum + item.durationSeconds, 0)).toBe(60);
     expect(fixtureStory(input).proposals.map((item) => item.durationSeconds)).toEqual([15, 20, 25]);
   });

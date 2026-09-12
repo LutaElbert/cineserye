@@ -11,8 +11,9 @@ import { saveLocalMediaBlob } from '../../editor/persistence';
 import { StoryDevelopmentPanel, StoryReferencePreview } from './StoryDevelopmentPanel';
 import { STORY_GENRES, storyImageAliases } from './prompt-composer-model';
 import { StoryReferencePermissions } from './StoryReferencePermissions';
+import { InlineDiscardButton } from '../../editor/InlineDiscardButton';
 
-export function StoryComposer({ document, nodeId, getDocument, commit, flush, onClose, saveState, error, onDevelop }: ComponentProps<typeof PremiseLayerEditor>) {
+export function StoryComposer({ document, nodeId, getDocument, commit, flush, onClose, onDiscard, saveState, error, onDevelop }: ComponentProps<typeof PremiseLayerEditor>) {
   const [referencesOpen, setReferencesOpen] = useState(false);
   const [genresOpen, setGenresOpen] = useState(false);
   const [localError, setLocalError] = useState('');
@@ -111,6 +112,10 @@ export function StoryComposer({ document, nodeId, getDocument, commit, flush, on
           <button type="button" disabled={readOnly} onClick={() => setReferencesOpen(true)}>Review reference permissions · {aliases.length}</button>
           <small>Local only until you approve their use.</small>
         </section>}
+        <details className="premise-tools"><summary>Story tools</summary>
+          <button type="button" disabled={readOnly} onClick={() => setReferencesOpen(true)}>Reference library</button>
+          <InlineDiscardButton onConfirm={onDiscard} disabled={readOnly} />
+        </details>
         <p className="premise-help">Only your idea is needed. The Assistant will confirm missing details.</p>
       </>}
       {(localError || error) && <p role="alert" className="premise-error">{localError || error}</p>}

@@ -138,6 +138,21 @@ test('S3-E2E-03 and S4-E2E-02 restore the approved anchor and portable local pix
 });
 
 test('S4-E2E-03 cancels cleanly and permits an explicit retry', async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let enteredResolve!: () => void;
+  const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+  let fulfilledResolve!: () => void;
+  const fulfilled = new Promise<void>((resolve) => { fulfilledResolve = resolve; });
+  let calls = 0;
+  await page.route('**/api/cinema/generate-storyboard', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const call = ++calls;
+    if (call !== 1) return route.continue();
+    const response = await route.fetch();
+    enteredResolve(); await gate;
+    try { await route.fulfill({ response }); } catch {} finally { fulfilledResolve(); }
+  });
   await openAcceptedSample(page);
   const panel = page.getByRole('tabpanel', { name: 'Visuals' });
   await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
@@ -147,12 +162,14 @@ test('S4-E2E-03 cancels cleanly and permits an explicit retry', async ({ page })
   await panel.getByRole('button', { name: '3 storyboard variants' }).click();
   await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
-  await panel.getByRole('button', { name: 'Cancel' }).click();
+  await entered; await panel.getByRole('button', { name: 'Cancel' }).click(); release();
+  await fulfilled;
   await expect(page.getByText('Storyboard generation cancelled.')).toBeVisible();
   await expect(panel.locator('.storyboard-frame')).toHaveCount(0);
   await panel.getByRole('checkbox', { name: /I confirm the .* direction/ }).check();
   await panel.getByRole('button', { name: 'Generate storyboard' }).click();
   await expect(panel.locator('.storyboard-frame')).toHaveCount(3);
+  expect(calls).toBe(2);
 });
 
 test('S3-SEC-01 and S4-IT-02 reject unapproved references and excessive outputs at the API boundary', async ({ request }) => {

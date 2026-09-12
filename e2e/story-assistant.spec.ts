@@ -2,9 +2,10 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createDiagramPng, waitForSaved, openSelectedScenePlanner } from './helpers';
 import { readFile } from 'node:fs/promises';
+import { fulfillWorkspaceMode } from './workspace-capability-helpers';
 
 test.beforeEach(async ({ request }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Assistant verification uses only the task-owned fixture server on 3040.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   const status = await request.get('/api/cinema/provider-status');
   expect((await status.json()).mode).toBe('fixture');
 });
@@ -56,7 +57,10 @@ test('detailed direction skips required questions, saves optional corrections an
   await page.setViewportSize({ width: 1440, height: 900 });
   const assistant = await openAssistant(page);
   expect(posts).toEqual([]);
-  await expect(assistant.locator('details')).toHaveCount(0);
+  await expect(assistant.locator('details:not(.assistant-secondary-tools)')).toHaveCount(0);
+  await expect(assistant.locator('details.assistant-secondary-tools')).toHaveCount(1);
+  await expect(assistant.locator('details.assistant-secondary-tools')).not.toHaveAttribute('open');
+  await expect(assistant.getByRole('button', { name: 'Edit full brief manually', exact: true })).not.toBeVisible();
   await expect(assistant.getByRole('button', { name: /Collapse|Expand assistant/ })).toHaveCount(0);
   const canonicalGeometry = () => page.locator('.react-flow__node:not([data-id^="story-assistant:"])').evaluateAll((elements) => elements.map((element) => ({ id: element.getAttribute('data-id'), position: (element as HTMLElement).style.transform })));
   const before = await canonicalGeometry();
@@ -163,19 +167,27 @@ test('complete direction requires explicit confirmation; correcting a known fiel
 });
 test('hide/reopen during an analysis does not abort or duplicate it, and cancel never applies late output', async ({ page }) => {
   const assistant = await openAssistant(page);
-  let release!: () => void;
-  let gate = new Promise<void>((resolve) => { release = resolve; });
+  const requestGate = () => {
+    let markResponseReady!: () => void, release!: () => void, markFulfilled!: () => void;
+    return {
+      responseReady: new Promise<void>((resolve) => { markResponseReady = resolve; }), markResponseReady,
+      hold: new Promise<void>((resolve) => { release = resolve; }), release,
+      fulfilled: new Promise<void>((resolve) => { markFulfilled = resolve; }), markFulfilled,
+    };
+  };
+  let gate = requestGate();
   let calls = 0;
   await page.route('**/api/cinema/story-assistant', async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
-    calls++; const response = await route.fetch(); await gate; await route.fulfill({ response }).catch(() => {});
+    calls++; const held = gate; const response = await route.fetch(); held.markResponseReady(); await held.hold;
+    await route.fulfill({ response }).catch(() => {}); held.markFulfilled();
   });
-  await analyze(page); await expect(assistant.getByRole('button', { name: 'Stop request', exact: true })).toBeVisible();
+  await analyze(page); await gate.responseReady; await expect(assistant.getByRole('button', { name: 'Stop request', exact: true })).toBeVisible();
   await assistant.getByRole('button', { name: 'Hide story assistant' }).click();
   await expect(assistant).not.toBeVisible();
   await page.getByRole('button', { name: 'Focus story assistant' }).click();
   await expect(assistant.getByRole('button', { name: 'Stop request', exact: true })).toBeVisible();
-  release(); await expect(assistant.getByRole('button', { name: 'Continue', exact: true })).toBeVisible(); expect(calls).toBe(1);
+  gate.release(); await gate.fulfilled; await expect(assistant.getByRole('button', { name: 'Continue', exact: true })).toBeVisible(); expect(calls).toBe(1);
   await assistant.getByRole('button', { name: 'Correct understood details' }).click();
   await showQuestion(assistant, 'Ending direction');
   await assistant.getByLabel('Ending direction', { exact: true }).fill('Keep this earlier ending for comparison.');
@@ -187,8 +199,8 @@ test('hide/reopen during an analysis does not abort or duplicate it, and cancel 
   await page.getByRole('region', { name: 'Story premise layer editor' }).getByRole('button', { name: 'Done', exact: true }).click();
   await page.getByRole('button', { name: 'Focus story assistant' }).click();
   await expect(assistant.getByText('Your idea changed. Review it once more; your earlier draft is saved.', { exact: true })).toBeVisible();
-  gate = new Promise<void>((resolve) => { release = resolve; });
-  await analyze(page); await assistant.getByRole('button', { name: 'Stop request', exact: true }).click(); release();
+  gate = requestGate();
+  await analyze(page); await gate.responseReady; await assistant.getByRole('button', { name: 'Stop request', exact: true }).click(); gate.release(); await gate.fulfilled;
   await expect(assistant).toContainText('Your request was stopped');
   await assistant.getByRole('button', { name: 'Saved drafts', exact: true }).click();
   const earlierAnswers = assistant.getByRole('region', { name: 'Earlier answers', exact: true });
@@ -312,10 +324,7 @@ test('an incomplete idea asks only missing runtime and format before confirming,
 test('Assistant follows workspace mode and blocks an unavailable live feature without sending a paid request', async ({ page }) => {
   const posts: string[] = [];
   page.on('request', (request) => { if (request.method() === 'POST') posts.push(request.url()); });
-  await page.route('**/api/cinema/provider-status', async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ json: { ...await response.json(), mode: 'live' } });
-  });
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, 'live'));
   await page.route('**/api/cinema/story-assistant?mode=live', (route) => route.fulfill({ json: {
     enabled: true, mode: 'live', model: 'review-only-test-model', quoteId: 'a'.repeat(64), cost: 0.01, ceiling: 1,
     ready: false, blockers: ['Live story understanding is not enabled for this workspace.'],

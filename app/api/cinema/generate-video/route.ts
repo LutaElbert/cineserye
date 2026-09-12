@@ -3,20 +3,17 @@ import 'server-only';
 import { z } from 'zod';
 import { videoApprovalContent } from '../../../features/video/video-api';
 import { operationDigest } from '../../../server/cinema/operation-repository';
-import { readCinemaProviderConfig } from '../../../server/cinema/provider-config';
-import { buildCinemaLivePreflight } from '../../../server/cinema/live-preflight';
+import { videoPolicy } from '../../../server/cinema/video-policy';
 import { detectImageType } from '../../../editor/image-file';
 import { assertLocalRequest } from '../../../server/cinema/local-request';
 import { inspectVideoBytes, videoDecoderAvailable } from '../../../server/cinema/video-media';
-import { localVideoOperationStore, type SavedVideoOperation, type VideoOwner } from '../../../server/cinema/video-operation-store';
+import { localVideoOperationStore, VideoResultUnavailable, type SavedVideoOperation, type VideoOwner } from '../../../server/cinema/video-operation-store';
 import type {
   GenerateVideoRequest,
   VideoOperationResponse,
   VideoPreflightResponse,
 } from '../../../features/video/video-api';
 import {
-  FIXTURE_VIDEO_CAPABILITIES,
-  createVertexVideoCapabilities,
   estimateVideoSpend,
   validateVideoSettings,
   type VideoCapabilityProfile,
@@ -24,6 +21,7 @@ import {
 import { ProviderError, publicProviderError } from '../../../server/cinema/provider-errors';
 import {
   FixtureVideoProvider,
+  ConfirmedVideoFailure,
   VertexVideoProvider,
   validateVideoProviderClip,
   type VideoGenerationProvider,
@@ -93,8 +91,10 @@ const RequestSchema = z.object({
 }).strict();
 
 const OwnerSchema = z.object({ operationId: z.string().regex(/^[a-zA-Z0-9_-]{8,160}$/), projectId: z.string().min(1).max(160), sceneId: z.string().min(1).max(160), shotId: z.string().min(1).max(160), revisionId: z.string().min(1).max(160) }).strict();
-function requestOwner(url: URL): VideoOwner {
-  const parsed = OwnerSchema.safeParse(Object.fromEntries(url.searchParams));
+function requestOwner(url: URL, allowReconcile = false): VideoOwner {
+  const parameters = Object.fromEntries(url.searchParams);
+  if (allowReconcile && parameters.reconcile === '1') delete parameters.reconcile;
+  const parsed = OwnerSchema.safeParse(parameters);
   if (!parsed.success) throw new ProviderError('INVALID_REQUEST', 'Video polling and cancellation require the exact project, scene, shot, revision and operation IDs.');
   return parsed.data;
 }
@@ -107,41 +107,16 @@ function configuration(): {
   spendLimit: number | null;
   blockers: string[];
 } {
-  const common = readCinemaProviderConfig(process.env, false);
-  const mode = common.mode;
-  if (mode === 'fixture') {
-    return {
-      mode,
-      profile: FIXTURE_VIDEO_CAPABILITIES,
-      provider: new FixtureVideoProvider(FIXTURE_VIDEO_CAPABILITIES),
-      unitCost: 0,
-      spendLimit: 0,
-      blockers: [],
-    };
-  }
-  const model = process.env.CINESERYE_VERTEX_VIDEO_MODEL?.trim() || 'veo-3.1-fast-generate-001';
-  const profile = createVertexVideoCapabilities(model);
-  const unitCost = process.env.CINESERYE_VIDEO_USD_PER_SECOND ? Number(process.env.CINESERYE_VIDEO_USD_PER_SECOND) : null;
-  const spendLimit = process.env.CINESERYE_VIDEO_MAX_ESTIMATED_USD ? Number(process.env.CINESERYE_VIDEO_MAX_ESTIMATED_USD) : null;
-  const blockers = [...buildCinemaLivePreflight(common).blockers];
-  if (unitCost === null || !Number.isFinite(unitCost) || unitCost <= 0) blockers.push('A positive finite live video unit price is required.');
-  if (spendLimit === null || !Number.isFinite(spendLimit) || spendLimit <= 0 || common.maxLiveRunCost === null || spendLimit > common.maxLiveRunCost) blockers.push('A positive video ceiling within the common live run ceiling is required.');
-  // Correctness tests are not live proof. Keep an independent operator release gate.
-  if (process.env.CINESERYE_VIDEO_LIVE_ENABLED !== 'true' || process.env.CINESERYE_VIDEO_LIVE_VERIFIED !== 'true') {
-    blockers.push('Live video awaits separately approved live verification and explicit operator enablement. Local durability tests do not establish provider readiness.');
-  }
+  const policy = videoPolicy();
+  const { mode, profile } = policy;
   return {
-    mode,
-    profile,
-    provider: new VertexVideoProvider(
+    ...policy,
+    provider: mode === 'fixture' ? new FixtureVideoProvider(profile) : new VertexVideoProvider(
       process.env.GOOGLE_CLOUD_PROJECT?.trim() || 'cineserye',
       process.env.CINESERYE_VERTEX_VIDEO_LOCATION?.trim() || 'us-central1',
-      model,
+      profile.model,
       profile,
     ),
-    unitCost,
-    spendLimit,
-    blockers,
   };
 }
 
@@ -158,6 +133,7 @@ function operationResponse(operationId: string, stored: SavedVideoOperation, can
       operationId,
       providerOperationId: stored.handle.name || null,
       status: stored.status,
+      failureConfirmed: stored.status === 'failed' && stored.outcomeVersion === 1,
       provider: stored.provider.id,
       model: stored.provider.model,
       capability: {
@@ -178,6 +154,9 @@ function operationResponse(operationId: string, stored: SavedVideoOperation, can
 }
 
 function safeError(error: unknown): Response {
+  if (error instanceof VideoResultUnavailable) return Response.json({ ok: false,
+    error: { code: error.code, message: error.message, retryable: false },
+    unavailable: { operationId: error.operationId, reason: error.reason } }, { status: error.reason === 'expired' ? 410 : 400, headers: { 'cache-control': 'no-store' } });
   const safe = publicProviderError(error);
   const response: VideoOperationResponse = { ok: false, error: safe };
   const status = safe.code === 'INVALID_REQUEST' ? 400 : safe.code === 'CANCELLED' ? 499 : 503;
@@ -275,10 +254,12 @@ export async function GET(request: Request): Promise<Response> {
       };
       return Response.json(response, { headers: { 'cache-control': 'no-store' } });
     }
-    const owner = requestOwner(url), store = await localVideoOperationStore();
+    const owner = requestOwner(url, true), store = await localVideoOperationStore();
     const saved = await store.poll(owner, async (stored) => {
-    if (Date.now() - stored.handle.startedAt > MAX_OPERATION_AGE_MS || (stored.mode === 'fixture' && process.env.CINESERYE_VIDEO_FIXTURE_BEHAVIOR === 'timeout')) {
-      return { ...stored, status: 'timed-out', error: 'Local tracking timed out. Provider processing and billing may continue.' };
+    const reconcile = url.searchParams.get('reconcile') === '1' && stored.status === 'unknown';
+    if (stored.status === 'unknown' && !reconcile) return stored;
+    if (!reconcile && Date.now() > (stored.trackingDeadline ?? stored.handle.startedAt + MAX_OPERATION_AGE_MS) || (stored.mode === 'fixture' && process.env.CINESERYE_VIDEO_FIXTURE_BEHAVIOR === 'timeout')) {
+      return { ...stored, status: stored.mode === 'live' ? 'unknown' : 'timed-out', error: 'Local tracking timed out. Provider processing and billing may continue.' };
     }
     if (stored.mode === 'fixture' && process.env.CINESERYE_VIDEO_FIXTURE_BEHAVIOR === 'fail') {
       return { ...stored, status: 'failed', error: 'The fixture video operation failed as requested.' };
@@ -287,7 +268,8 @@ export async function GET(request: Request): Promise<Response> {
       const provider = stored.mode === 'fixture' ? new FixtureVideoProvider(stored.capability)
         : new VertexVideoProvider(stored.provider.project!, stored.provider.location!, stored.provider.model, stored.capability);
       const polled = await provider.poll(stored.handle, { settings: stored.settings });
-      const next: SavedVideoOperation = { ...stored, handle: { name: polled.handle.name, startedAt: polled.handle.startedAt }, status: polled.status };
+      const next: SavedVideoOperation = { ...stored, handle: { name: polled.handle.name, startedAt: stored.handle.startedAt }, status: polled.status, error: null,
+        ...(reconcile ? { trackingDeadline: Date.now() + MAX_OPERATION_AGE_MS } : {}) };
       if (polled.status === 'ready' && polled.clip) {
         validateVideoProviderClip(polled.clip, stored.capability);
         next.clip = {
@@ -298,7 +280,8 @@ export async function GET(request: Request): Promise<Response> {
       if (next.status === 'ready' && !next.clip) throw new ProviderError('UNEXPECTED_RESPONSE', 'The provider completed without verified clip bytes.');
       return next;
     } catch (error) {
-      return { ...stored, status: 'failed', error: publicProviderError(error).message };
+      return { ...stored, status: error instanceof ConfirmedVideoFailure ? 'failed' : 'unknown',
+        error: error instanceof ConfirmedVideoFailure ? error.message : 'The video outcome is unknown. Check this existing request; provider processing and billing may continue.' };
     }
     });
     return Response.json(operationResponse(operationId, saved), { headers: { 'cache-control': 'no-store' } });

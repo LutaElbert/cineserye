@@ -1,13 +1,15 @@
 import { expect, test } from '@playwright/test';
 import { confirmCineseryeDialog, openEditor, waitForSaved } from './helpers';
+import { installStorageHarness } from './storage-harness';
+import { fulfillWorkspaceMode } from './workspace-capability-helpers';
 
 test('SAFE-02 image estimate review shows model and price, and refreshing clears approval without generating', async ({ page }) => {
   let model = 'reviewed-image-model'; let posts = 0;
-  await page.route('**/api/cinema/provider-status', (route) => route.fulfill({ json: {
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, 'live', {
     mode: 'live', requiresContentTransferConsent: true, research: { configured: true, provider: 'parallel' },
     planning: { configured: true, provider: 'vertex-gemini', model: 'reviewed-model' },
     telemetryPolicy: 'no-content-v1', livePreflight: { ready: true, blockers: [], maxLiveRunCost: 1 },
-  } }));
+  }));
   await page.route('**/api/cinema/generate-storyboard', async (route) => {
     if (route.request().method() === 'POST') { posts++; await route.abort(); return; }
     await route.fulfill({ json: { mode: 'live', model, unitCost: 0.1, maxCost: 1, maxOutputs: 4, quoteId: 'a'.repeat(64), ready: true, blockers: [] } });
@@ -45,10 +47,11 @@ test('SAFE-06 changed source cannot be overwritten by accepting a pending plan',
 });
 
 test('SAFE-07 storage transaction protects recovery, checkpoint, pending, and newly reachable media', async ({ page }) => {
+  await installStorageHarness(page);
   await openEditor(page);
   await waitForSaved(page);
   const result = await page.evaluate(async () => {
-    const modulePath = '/app/editor/persistence.ts';
+    const modulePath = '/__test-modules/persistence.js';
     const persistence = await import(/* @vite-ignore */ modulePath) as typeof import('../app/editor/persistence');
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('cineserye-local');

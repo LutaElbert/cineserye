@@ -23,7 +23,11 @@ describe('truthful decoded video output', () => {
     for (const changed of [{ durationSeconds: 1 }, { width: 1280, height: 720 }, { audio: true }, { format: 'webm' }]) expect(() => validateDecodedVideo({ ...metadata, ...changed }, settings)).toThrow();
   });
   it('decodes real synthetic MP4 bytes rather than trusting a provider metadata claim', async (context) => {
-    if (!(await localAssemblyCapability()).available) { context.skip(); return; }
+    const capability = await localAssemblyCapability();
+    if (!capability.available) {
+      if (process.env.CINESERYE_REQUIRE_RENDERER_TESTS === 'true') throw new Error(`Required video decoder tests cannot run: ${capability.reason}`);
+      context.skip(); return;
+    }
     const directory = await mkdtemp(join(tmpdir(), 'cineserye-video-real-test-'));
     try {
       const file = join(directory, 'synthetic.mp4');

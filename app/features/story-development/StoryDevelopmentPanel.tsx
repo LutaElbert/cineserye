@@ -1,17 +1,17 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useScopedConfirmation } from '../../components/useScopedConfirmation';
 import { requestDigest, canonicalRequest } from '../../domain/cinema/request-digest';
 import { StoryCreativeBriefSchema, resolveStoryReferences, reviewStoryReferenceTransfer, storySourceIsStale, storyReviewSession,
   type StoryReferenceOwner, type StoryReferenceVersion, type StoryWorkflowData } from '../../domain/cinema/story-workflow';
-import { changeStory, storyContextDigest, storySessionContextDigest, storyAllocationReview, storySceneContext, storyPremise, acceptStoryScenes, acceptStoryConcept, commitReviewedStoryDocument } from '../../editor/story-development-commands';
+import { changeStory, storyContextDigest, storySessionContextDigest, storyAllocationReview, storySceneContext, storyPremise, acceptStoryScenes, acceptStoryConcept, commitReviewedStoryDocument, assertStoryEditable, unresolvedStoryOperation } from '../../editor/story-development-commands';
 import { loadLocalMediaBlob, saveLocalMediaBlob } from '../../editor/persistence';
 import { validateImageFile, fileToDataUrl } from '../../editor/image-file';
 import type { EditorDocument } from '../../editor/types';
 import { syncPremiseDraft } from '../../editor/layer-editing';
 import { initialPremiseDraft } from '../../editor/premise-draft';
-import { StoryResultSchema, storyApprovalContent, type StoryInput, type StoryQuote } from './contracts';
+import { StoryQuoteSchema, StoryResultSchema, storyApprovalContent, type StoryInput, type StoryQuote } from './contracts';
 import { readStoryStream } from './story-stream-client';
 import { InlineDiscardButton } from '../../editor/InlineDiscardButton';
 import { resolvePromptReferenceMentions } from './prompt-composer-model';
@@ -20,14 +20,17 @@ import { SceneAllocationCorrection } from './SceneAllocationCorrection';
 import type { OperationProgress } from '../../domain/cinema/generation-operation';
 import { assistantSourceIdentity } from './useStoryAssistant';
 import { AssistantDirectionStage } from './AssistantDirectionStage';
+import { ensureClientOperation, observeClientOperation } from '../simplified-flow/operation-journal';
 
 type Draft = NonNullable<StoryWorkflowData['draft']>;
 const initialDraft = initialPremiseDraft;
 const allUses: StoryReferenceVersion['allowedUses'] = ['research', 'story-development', 'shot-planning', 'image-generation', 'video-generation'];
 const refLimits = { maxImages: 8, maxBytes: 12 * 1024 * 1024, maxNoteCharacters: 20_000 };
+function storyJournalOwner(projectId: string, session: Pick<StoryWorkflowData['sessions'][number], 'mode' | 'anchorSceneId' | 'source'>) {
+  return { projectId, kind: 'story-plan' as const, scopeKey: `${session.mode}:${session.anchorSceneId ?? 'story'}:${session.source.briefVersion}` };
+}
 export function assertDirectionEditable(document: EditorDocument) {
-  const premise = storyPremise(document);
-  if (!premise || document.nodes.find((node) => node.id === premise.nodeId)?.data.locked) throw Error('Unlock the Story premise to change its direction.');
+  assertStoryEditable(document);
 }
 export function StoryReferencePreview({ hash, title }: { hash: string; title: string }) {
   const [url, setUrl] = useState('');
@@ -50,12 +53,18 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [serverMode, setServerMode] = useState<'fixture' | 'live' | null>(null);
-  const mode = providerMode === 'loading' ? serverMode ?? 'loading' : providerMode;
+  // Feature quotes cannot replace unknown workspace discovery with their own mode.
+  const mode = providerMode;
+  const committedMode = useRef(mode);
+  useLayoutEffect(() => {
+    committedMode.current = mode;
+    // Invalidate even before passive effects run. An async approval callback
+    // may resume with an older render's closure after the workspace changes.
+    quoteRequest.current++;
+  }, [mode]);
   const [progress, setProgress] = useState<OperationProgress[]>([]);
   const [count, setCount] = useState(3);
-  const [quote, setQuote] = useState<StoryQuote | null>(null);
-  const quoteReady = quote?.mode === mode && quote.ready;
+  const [storedQuote, setQuote] = useState<{ value: StoryQuote; scope: string } | null>(null);
   const [owner, setOwner] = useState(initialOwner);
   const [note, setNote] = useState('');
   const [refTitle, setRefTitle] = useState('');
@@ -73,10 +82,16 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
   const draft = workflow?.draft ?? initialDraft(current);
   const premiseLocked = Boolean(current.nodes.find((node) => node.id === storyPremise(current)?.nodeId)?.data.locked);
   const savedSession = storyReviewSession(workflow);
+  const unresolved = unresolvedStoryOperation(workflow);
   // A freshly confirmed direction starts a new outline; older drafts remain in history.
   const session = planningOnly && !workflow?.reviewSessionId && savedSession?.source.briefVersion !== workflow?.briefs.at(-1)?.version ? undefined : savedSession;
   const brief = planningOnly && session ? workflow?.briefs[session.source.briefVersion - 1] : workflow?.briefs.at(-1);
   const briefVersion = brief?.version;
+  const quoteScope = canonicalRequest({ projectId: project.projectId, briefVersion, mode });
+  const committedQuoteScope = useRef(quoteScope);
+  useLayoutEffect(() => { committedQuoteScope.current = quoteScope; quoteRequest.current++; }, [quoteScope]);
+  const quote = storedQuote?.scope === quoteScope && storedQuote.value.mode === mode ? storedQuote.value : null;
+  const quoteReady = !!quote?.ready;
   const effectiveOwner = owner.kind === 'story' ? { kind: 'story' as const, id: project.projectId }
     : (owner.kind === 'scene' ? project.scenes[owner.id] : project.shots[owner.id]) ? owner : { kind: 'story' as const, id: project.projectId };
   const effective = resolveStoryReferences(project, effectiveOwner);
@@ -84,6 +99,8 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
   const inputIdentity = canonicalRequest({ draft, count, mode, brief, references: manifest, context: digest,
     revisionScope: session?.proposals });
   const [consent, setConsent] = useScopedConfirmation(`${inputIdentity}:${quote?.quoteId ?? ''}`);
+  const currentApproval = useRef({ quote, consent, count });
+  useLayoutEffect(() => { currentApproval.current = { quote, consent, count }; }, [quote, consent, count]);
   const [partial, setPartial] = useScopedConfirmation(canonicalRequest({ id: session?.id, proposals: session?.proposals }));
   const stale = session?.stage === 'stale' || !!session && !!reviewDigest && storySourceIsStale(project, session.source, reviewDigest);
   const approvedDirection = !!brief && brief.status === 'approved' && brief.sourceDigest === (session?.accepted.length ? reviewDigest : digest)
@@ -117,28 +134,32 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
   });
   const close = () => { onClose(); requestAnimationFrame(() => opener.current?.focus()); };
   const refreshQuote = async () => {
+    const requestedMode = committedMode.current;
+    if (requestedMode === 'loading') return;
+    const scope = committedQuoteScope.current;
     const request = ++quoteRequest.current;
     setConsent(false); setQuote(null);
     try {
-      const response = await fetch(`/api/cinema/develop-story${mode === 'loading' ? '' : `?mode=${mode}`}`);
+      const response = await fetch(`/api/cinema/develop-story?mode=${requestedMode}`);
       if (!response.ok) throw Error('Provider status is unavailable.');
-      const value: StoryQuote = await response.json();
-      if (request !== quoteRequest.current) return;
-      if (mode !== 'loading' && value.mode !== mode) throw Error('Provider estimate does not match the workspace mode. Refresh the estimate.');
-      setServerMode(value.mode);
-      setQuote(value);
+      const value = StoryQuoteSchema.parse(await response.json());
+      if (request !== quoteRequest.current || requestedMode !== committedMode.current) return;
+      if (value.mode !== requestedMode) throw Error('Provider estimate does not match the workspace mode. Refresh the estimate.');
+      setQuote({ value, scope });
     } catch (error) { if (request === quoteRequest.current) setError((error as Error).message); }
   };
   useEffect(() => {
-    if (!briefVersion || referencesOnly) return;
+    if (!briefVersion || referencesOnly || mode === 'loading') return;
     let active = true; const request = ++quoteRequest.current;
-    void fetch(`/api/cinema/develop-story${mode === 'loading' ? '' : `?mode=${mode}`}`).then(async (response) => {
+    queueMicrotask(() => { if (active && request === quoteRequest.current) setQuote(null); });
+    void fetch(`/api/cinema/develop-story?mode=${mode}`).then(async (response) => {
       if (!response.ok) throw Error('Provider estimate unavailable.');
-      const value: StoryQuote = await response.json();
-      if (active && request === quoteRequest.current && (mode === 'loading' || value.mode === mode)) { setServerMode(value.mode); setQuote(value); }
-    }).catch((error) => { if (active) setError((error as Error).message); });
+      const value = StoryQuoteSchema.parse(await response.json());
+      if (value.mode !== mode) throw Error('Provider estimate does not match the workspace mode. Refresh the estimate.');
+      if (active && request === quoteRequest.current && mode === committedMode.current) setQuote({ value, scope: quoteScope });
+    }).catch((error) => { if (active && request === quoteRequest.current) setError((error as Error).message); });
     return () => { active = false; };
-  }, [mode, briefVersion, referencesOnly]);
+  }, [mode, briefVersion, referencesOnly, quoteScope]);
   const resetRefForm = () => { setEditingReference(null); setRefTitle(''); setNote(''); setApproved(false); setUses([]); setRights('unknown'); setReplaceInherited(''); };
   const writeReference = (content: StoryReferenceVersion['content']) => {
     const source = getDocument();
@@ -163,6 +184,7 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true);
     try {
+      assertDirectionEditable(getDocument());
       const image = await validateImageFile(file);
       const media = await saveLocalMediaBlob(file, { mimeType: image.type, width: image.width, height: image.height });
       writeReference({ kind: 'image', blobHash: media.hash, mimeType: image.type, width: image.width, height: image.height, byteSize: file.size });
@@ -197,14 +219,24 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
   const generate = async (revise = false, requestApproved = false, instruction = '') => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setError(''); setProgress([]);
-    let sessionId = ''; let captured = ''; let originalProject = ''; let rejectedBeforeDispatch = false;
+    let sessionId = ''; let captured = ''; let originalProject = ''; let rejectedBeforeDispatch = false; let dispatched = false; let journalRecorded = false;
+    const estimateRequest = quoteRequest.current;
+    const assertCurrentApproval = (checkConsent: boolean) => {
+      if (mode !== committedMode.current || estimateRequest !== quoteRequest.current
+        || !quote || currentApproval.current.quote !== quote || currentApproval.current.count !== count
+        || (checkConsent && !requestApproved && !currentApproval.current.consent)) {
+        throw Error('The workspace mode, estimate or approval changed. Review again before generating.');
+      }
+    };
     try {
       const requestController = new AbortController(); controller.current = requestController;
       const source = getDocument(); originalProject = source.cinema!.projectId;
       assertDirectionEditable(source);
+      if (unresolvedStoryOperation(source.cinema?.storyWorkflow)) throw Error('Check the existing Story request before starting another. Its outcome is not yet known.');
       captured = revise && session ? await storySessionContextDigest(source, session.id) : await storyContextDigest(source);
       const activeBrief = source.cinema!.storyWorkflow?.briefs.at(-1);
       if (mode === 'loading' || !activeBrief || !approvedDirection || !(consent || requestApproved) || !quote || !quoteReady || activeBrief.sourceDigest !== captured) throw Error('Review current direction, content and estimate before generating.');
+      assertCurrentApproval(true);
       const allocation = storyAllocationReview(source, activeBrief, revise ? session?.id : undefined);
       if (allocation.blockers.length) throw Error(allocation.blockers.join(' '));
       const acceptedIds = new Set(session?.accepted.map((item) => item.proposalId) ?? []);
@@ -236,8 +268,14 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
       const approval = await requestDigest(storyApprovalContent(input, quote.quoteId));
       requestController.signal.throwIfAborted();
       // No async work may silently widen the approved source before dispatch.
-      if (canonicalRequest(source.cinema?.storyWorkflow) !== canonicalRequest(getDocument().cinema?.storyWorkflow)
-        || captured !== await (revise && session ? storySessionContextDigest(getDocument(), session.id) : storyContextDigest(getDocument()))) throw Error('Source changed while preparing references. Review again.');
+      const checkedSource = getDocument();
+      const checkedDigest = await (revise && session ? storySessionContextDigest(checkedSource, session.id) : storyContextDigest(checkedSource));
+      if (captured !== checkedDigest || source.cinema?.projectId !== getDocument().cinema?.projectId
+        || canonicalRequest(source.cinema?.storyWorkflow) !== canonicalRequest(getDocument().cinema?.storyWorkflow)
+        || canonicalRequest({ ...checkedSource, updatedAt: 0 }) !== canonicalRequest({ ...getDocument(), updatedAt: 0 })) {
+        throw Error('Source changed while preparing references. Review again.');
+      }
+      assertCurrentApproval(true);
       sessionId = crypto.randomUUID();
       mutate((data) => { data.sessions.push({ id: sessionId, operationId: sessionId, mode: draft.mode, anchorSceneId: input.anchorSceneId,
         stage: 'running', source: { sourceDigest: captured, briefVersion: activeBrief.version, bindingRevision: data.bindingRevision,
@@ -247,9 +285,30 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
             sourceOperationId: input.revision.sourceSessionId, selectedProposalIds: input.revision.selectedProposalIds,
             sourceVersion: input.revision.sourceVersion, resultVersion: null, status: 'running' as const,
             requestedAt: new Date().toISOString(), resolvedAt: null } } : {}), error: null }); data.reviewSessionId = null; });
+      const prepared = getDocument();
+      const preparedWorkflow = canonicalRequest(prepared.cinema?.storyWorkflow);
       await flush();
       requestController.signal.throwIfAborted();
+      const dispatchSource = getDocument();
+      if (dispatchSource.cinema?.projectId !== originalProject || preparedWorkflow !== canonicalRequest(dispatchSource.cinema?.storyWorkflow)
+        || captured !== await storySessionContextDigest(dispatchSource, sessionId)
+        || canonicalRequest({ ...dispatchSource, updatedAt: 0 }) !== canonicalRequest({ ...getDocument(), updatedAt: 0 })) {
+        throw Error('Source changed while saving the request. Review again.');
+      }
+      // The running record can reset the presentation's consent scope. Its
+      // creation is ours; mode/estimate/source changes are never ours to approve.
+      assertCurrentApproval(false);
+      requestController.signal.throwIfAborted();
       assertDirectionEditable(getDocument());
+      const persistedSession = getDocument().cinema?.storyWorkflow?.sessions.find((item) => item.id === sessionId);
+      if (!persistedSession) throw Error('The saved Story request is unavailable. No provider request was started.');
+      const journalOwner = storyJournalOwner(originalProject, persistedSession);
+      ensureClientOperation({ id: sessionId, ...journalOwner, sourceFingerprint: approval,
+        provider: mode === 'fixture' ? 'cineserye-story-fixture' : 'configured-story-provider', model: quote.model, estimateUsd: quote.cost },
+      { phase: 'intent', dispatchCertainty: 'not-dispatched' });
+      journalRecorded = true;
+      observeClientOperation(sessionId, journalOwner, { phase: 'dispatched', dispatchCertainty: 'may-have-dispatched' });
+      dispatched = true;
       const response = await fetch('/api/cinema/develop-story', { method: 'POST', headers: { 'content-type': 'application/json', ...(planningOnly ? { accept: 'text/event-stream' } : {}) }, signal: requestController.signal,
         body: JSON.stringify({ mode, operationId: sessionId, input, consent: true, quoteId: quote.quoteId, contentDigest: approval }) });
       // This endpoint's streaming path returns JSON 400 only before creating its
@@ -276,13 +335,18 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
         if (target.revision && target.revision.status !== 'completed') { target.revision.status = 'completed'; target.revision.resultVersion = target.outlineVersion;
           target.revision.resolvedAt = new Date().toISOString(); target.revision.provenance = parsed.provenance; }
         target.stage = storySourceIsStale(getDocument().cinema!, target.source, currentDigest) ? 'stale' : 'proposal-review';
-      }); await flush(); setNotice(mode === 'fixture' ? 'Sample proposals ready. No AI or paid calls.' : 'Proposals ready for review; nothing was inserted.');
+      }); await flush();
+      observeClientOperation(sessionId, journalOwner, { phase: 'awaiting-review', dispatchCertainty: 'completed', lastError: null,
+        completedUnits: parsed.proposals.length, totalUnits: parsed.proposals.length });
+      setNotice(mode === 'fixture' ? 'Sample proposals ready. No AI or paid calls.' : 'Proposals ready for review; nothing was inserted.');
     } catch (error) {
+      rejectedBeforeDispatch ||= !dispatched;
       const message = (error as Error).message; setError(message); setNotice('');
       if (sessionId && getDocument().cinema?.projectId === originalProject) {
         try { mutate((data) => {
-          const target = data.sessions.find((item) => item.id === sessionId); if (target?.stage !== 'running') return;
+          const target = data.sessions.find((item) => item.id === sessionId); if (!target || !['running', 'cancelled'].includes(target.stage)) return;
           target.error = message;
+          if (target.stage === 'cancelled' && !rejectedBeforeDispatch) return;
           if (target.revision) { target.revision.status = rejectedBeforeDispatch ? 'rejected' : 'outcome-unknown';
             target.revision.resolvedAt = rejectedBeforeDispatch ? new Date().toISOString() : null; }
           if (rejectedBeforeDispatch && revise && session) {
@@ -294,19 +358,28 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
           } else target.stage = rejectedBeforeDispatch ? 'failed' : 'outcome-unknown';
         }); } catch (stateError) { setError(`${message} Local state could not be updated: ${(stateError as Error).message}`); }
       }
+      if (journalRecorded) {
+        const persistedSession = getDocument().cinema?.storyWorkflow?.sessions.find((item) => item.id === sessionId);
+        if (persistedSession) try { observeClientOperation(sessionId, storyJournalOwner(originalProject, persistedSession), {
+          phase: rejectedBeforeDispatch ? 'failed' : 'unknown', dispatchCertainty: rejectedBeforeDispatch ? 'not-dispatched' : 'may-have-dispatched',
+          lastError: message, completedUnits: null, totalUnits: null,
+        }); } catch { /* Preserve the document fallback for journals created by older clients. */ }
+      }
     } finally { controller.current = null; busyRef.current = false; setBusy(false); setConsent(false); }
   };
-  const recover = async () => {
-    if (!session?.operationId) return;
-    const id = session.id; const projectId = project.projectId;
+  const recover = async (targetSession = unresolved ?? session) => {
+    if (!targetSession?.operationId) return;
+    const id = targetSession.id; const projectId = project.projectId;
     try {
-      const response = await fetch(`/api/cinema/develop-story?operationId=${session.operationId}&projectId=${encodeURIComponent(projectId)}`);
+      const response = await fetch(`/api/cinema/develop-story?operationId=${targetSession.operationId}&projectId=${encodeURIComponent(projectId)}`);
       const value = await response.json() as { status?: string; result?: unknown };
       if (!response.ok || value.status !== 'completed') throw Error('No saved result yet; outcome may be unknown. No request was dispatched. Check provider activity before approving a new request.');
       const result = StoryResultSchema.parse(value.result);
       if (getDocument().cinema?.projectId !== projectId) return;
       const currentDigest = await storySessionContextDigest(getDocument(), id);
-      mutate((data) => { const target = data.sessions.find((item) => item.id === id)!;
+      if (getDocument().cinema?.projectId !== projectId) return;
+      mutate((data) => { const target = data.sessions.find((item) => item.id === id);
+        if (!target || target.operationId !== targetSession.operationId || !['running', 'outcome-unknown', 'cancelled'].includes(target.stage)) return;
         target.proposals = target.proposals.length ? target.proposals.map((item) => result.proposals.find((replacement) => replacement.id === item.id) ?? item) : result.proposals;
         target.proposalVersion = result.outlineVersion ?? target.proposalVersion ?? 1;
         target.outlineVersion = result.outlineVersion ?? target.proposalVersion;
@@ -314,6 +387,10 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
         if (target.revision && target.revision.status !== 'completed') { target.revision.status = 'completed'; target.revision.resultVersion = target.outlineVersion;
           target.revision.resolvedAt = new Date().toISOString(); target.revision.provenance = result.provenance; }
         target.stage = storySourceIsStale(getDocument().cinema!, target.source, currentDigest) ? 'stale' : 'proposal-review'; });
+      try { observeClientOperation(targetSession.operationId, storyJournalOwner(projectId, targetSession), {
+        phase: 'awaiting-review', dispatchCertainty: 'completed', lastError: null,
+        completedUnits: result.proposals.length, totalUnits: result.proposals.length,
+      }); } catch { /* Old saved Story requests predate the independent journal. */ }
     } catch (error) { setError((error as Error).message); }
   };
   const editProposal = (id: string, patch: Partial<NonNullable<typeof session>['proposals'][number]>) => act(() => { assertDirectionEditable(getDocument()); mutate((data) => {
@@ -337,6 +414,9 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
   const stopRequest = () => {
     controller.current?.abort(); act(() => mutate((data) => { const target = storyReviewSession(data); if (target?.stage === 'running') {
       target.stage = 'cancelled'; if (target.revision) { target.revision.status = 'cancelled'; target.revision.resolvedAt = new Date().toISOString(); }
+      if (target.operationId) try { observeClientOperation(target.operationId, storyJournalOwner(project.projectId, target), {
+        phase: 'tracking-stopped', dispatchCertainty: 'may-have-dispatched', lastError: 'Local tracking stopped. Provider work or billing may continue.',
+      }); } catch { /* Old saved Story requests predate the independent journal. */ }
     } }));
     setNotice('Stopped locally. Dispatched provider work may still be billed; no automatic retry.');
   };
@@ -345,7 +425,7 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
     const reviewAllocation = brief ? storyAllocationReview(current, brief, session?.id) : null;
     const labels: Record<OperationProgress['step'], string> = { preparing: 'Preparing approved context', model: mode === 'fixture' ? 'Preparing fixture scene proposals' : 'Drafting scene proposals', validation: 'Validating scene scope and allocation', checkpoint: 'Saving the reviewed outline' };
     return <AssistantSceneStage key={workflow?.reviewSessionId ?? 'current'} session={session} brief={brief} mode={mode} quote={quote} count={count} busy={busy} stale={stale} locked={premiseLocked}
-      error={error || session?.error || ''} notice={notice} canGenerate={!busy && !premiseLocked && approvedDirection && quoteReady && manifest.ready}
+      error={error || session?.error || (unresolved && unresolved.id !== session?.id ? 'Check the existing Story request in generation history before starting another.' : '')} notice={notice} canGenerate={!busy && !unresolved && !premiseLocked && approvedDirection && quoteReady && manifest.ready}
       referenceTitles={manifest.included.map((item) => `${item.current.title} v${item.current.version}`)} referenceBlockers={manifest.blockers}
       partial={partial} progress={progress.map((step) => ({ label: labels[step.step], status: step.status }))}
       allocation={reviewAllocation ? { existing: reviewAllocation.existingSeconds, selected: reviewAllocation.newSelectedSeconds,
@@ -361,7 +441,9 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
     {!embedded && <header><div><span className="eyebrow">Story workspace</span><h2 id="story-development-title">Develop this story</h2></div><button type="button" onClick={close} aria-label="Close story development">Close</button></header>}
     <p>{referencesOnly ? 'References stay on this device. Sending them to AI requires separate approval.' : 'Local questions and edits never call AI. Manual scenes and shots stay available.'}</p>
     {error && <p role="alert" className="story-error">{error}</p>}{notice && <p role="status">{notice}</p>}
-    <details open={referencesOnly || undefined}><summary>References ({workflow?.references.length ?? 0}) — local library</summary><fieldset disabled={busy}>
+    {premiseLocked && <p role="status">Unlock the Story premise before changing story content or proposals. Existing work remains readable.</p>}
+    {unresolved && !busy && <p role="status">An existing Story request is unresolved. No new request will be started. <button type="button" onClick={() => void recover(unresolved)}>Check existing Story request</button></p>}
+    <details open={referencesOnly || undefined}><summary>References ({workflow?.references.length ?? 0}) — local library</summary><fieldset disabled={busy || premiseLocked}>
       <legend>1. References — local library</legend>
       <label>Reference scope<select value={`${owner.kind}:${owner.id}`} onChange={(event) => { const [kind, ...id] = event.target.value.split(':'); setOwner({ kind: kind as StoryReferenceOwner['kind'], id: id.join(':') }); resetRefForm(); }}>
         <option value={`story:${project.projectId}`}>Story default</option>
@@ -396,7 +478,7 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
       <label>{editingReference ? 'Replace image content' : 'Attach reference image'}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = ''; }} /></label>
       <small>PNG/JPEG/WebP, 15 MB local limit. No upload-time AI. Generation has a separate 12 MB aggregate limit.</small>
     </fieldset></details>
-    {!referencesOnly && <>{!planningOnly && <><fieldset disabled={busy}><legend>2. Creative direction — up to four local questions</legend>
+    {!referencesOnly && <>{!planningOnly && <><fieldset disabled={busy || premiseLocked}><legend>2. Creative direction — up to four local questions</legend>
       {workflow?.draft && draft.premise !== (storyPremise(current)?.text ?? '') && <p role="status">This saved development draft differs from the canvas premise. Nothing was overwritten on open.
         <button type="button" onClick={() => updateDraft({ premise: storyPremise(current)?.text ?? '' })}>Use canvas premise</button>
         <button type="button" onClick={() => updateDraft({ premise: draft.premise })}>Use development draft</button>
@@ -414,7 +496,7 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
       <button type="button" onClick={() => setReview(true)}>Review creative brief</button>
       <InlineDiscardButton label="Discard direction draft" description="Discard local direction answers? Existing scenes and references are kept." onConfirm={() => act(() => mutate((data) => { data.draft = null; }))} />
     </fieldset>
-    {review && <section aria-label="Creative brief review"><h3>3. Review direction</h3><p>{draft.mode} · {draft.aspectRatio || 'Format missing'} · {draft.durationSeconds ?? '?'} seconds · {draft.tone || 'Tone missing'}</p><p>{draft.premise || 'Surprise me: no premise supplied.'}</p><p>Constraints: {draft.constraints.join(', ') || 'None specified'}</p><p>Assumptions: {draft.ending ? 'None added.' : 'Ending is open for proposal.'} Platform defaults to short-form unless you choose another.</p><button type="button" disabled={busy} onClick={() => void approveBrief()}>Approve direction — no AI call</button></section>}
+    {review && <section aria-label="Creative brief review"><h3>3. Review direction</h3><p>{draft.mode} · {draft.aspectRatio || 'Format missing'} · {draft.durationSeconds ?? '?'} seconds · {draft.tone || 'Tone missing'}</p><p>{draft.premise || 'Surprise me: no premise supplied.'}</p><p>Constraints: {draft.constraints.join(', ') || 'None specified'}</p><p>Assumptions: {draft.ending ? 'None added.' : 'Ending is open for proposal.'} Platform defaults to short-form unless you choose another.</p><button type="button" disabled={busy || premiseLocked} onClick={() => void approveBrief()}>Approve direction — no AI call</button></section>}
     </>}{brief && session?.stage !== 'accepted' && <section aria-label="Story generation review"><h3>Turn your direction into scenes</h3><p>Brief v{brief.version} · {brief.durationSeconds}s {brief.durationScope === 'whole-story' ? 'whole story' : 'new material'} · {brief.aspectRatio}. Review proposals before adding them. No images or video yet.</p>
       <p>Workspace provider: {mode === 'loading' ? 'Checking availability…' : mode === 'fixture' ? 'Fixture — sample outputs, no paid calls' : 'Live — explicit approval required'}</p>
       <label>Proposal count<input type="number" min={1} max={10} value={count} disabled={busy} onChange={(event) => setCount(Number(event.target.value))} /></label>
@@ -424,23 +506,23 @@ export function StoryDevelopmentPanel({ open, document: current, getDocument, co
       {!quote && <button type="button" disabled={busy} onClick={() => void refreshQuote()}>Retry story estimate</button>}
       {quote && <><p>{quote.model} · {quote.mode === 'fixture' ? 'No paid calls' : `Operator bounded estimate: USD ${quote.cost}. Ceiling: USD ${quote.ceiling}. Actual charges may differ.`} One attempt, no automatic retry.</p>{quote.blockers.map((message) => <p key={message}>{message}</p>)}</>}
       {mode === 'live' && <label><input type="checkbox" disabled={busy || !quoteReady} checked={consent} onChange={(event) => setConsent(event.target.checked)} />I approve sending this brief, scene context and listed references for this one paid request.</label>}
-      <button type="button" className="primary-button" disabled={busy || !approvedDirection || (mode === 'live' && !consent) || !quoteReady || !manifest.ready} onClick={() => void generate(false, mode === 'fixture')}>Generate {draft.mode === 'surprise' ? 'concepts' : 'scene proposals'}</button>
+      <button type="button" className="primary-button" disabled={busy || premiseLocked || !!unresolved || !approvedDirection || (mode === 'live' && !consent) || !quoteReady || !manifest.ready} onClick={() => void generate(false, mode === 'fixture')}>Generate {draft.mode === 'surprise' ? 'concepts' : 'scene proposals'}</button>
       {busy && <button type="button" onClick={stopRequest}>Cancel story request</button>}
     </section>}
     {session && session.stage !== 'accepted' && <section aria-label="Story proposals"><h3>Review your scenes · {session.stage}</h3>{stale && <p role="alert">Source changed. Accepted work is preserved; review new proposals before inserting anything.</p>}
       {['running', 'outcome-unknown', 'cancelled'].includes(session.stage) && !busy && <button type="button" onClick={() => void recover()}>Check saved result — never generate again</button>}
-      {session.proposals.map((proposal, index) => <article key={proposal.id} className="story-proposal"><label><input type="checkbox" checked={proposal.selected} disabled={session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { selected: event.target.checked })} />Select proposal {index + 1}</label>
+      {session.proposals.map((proposal, index) => <article key={proposal.id} className="story-proposal"><label><input type="checkbox" checked={proposal.selected} disabled={premiseLocked || session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { selected: event.target.checked })} />Select proposal {index + 1}</label>
         <strong>{proposal.title}</strong><p>{proposal.synopsis}</p><small>{proposal.durationSeconds}s · {proposal.purpose}</small><details><summary>Edit this proposal</summary>
-        <label>Proposal {index + 1} title<input value={proposal.title} disabled={session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { title: event.target.value })} /></label>
-        <label>Proposal {index + 1} synopsis<textarea value={proposal.synopsis} disabled={session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { synopsis: event.target.value })} /></label><p>{proposal.purpose}</p>
-        {session.mode !== 'surprise' && <label>Proposal {index + 1} duration<input type="number" min={1} max={3600} value={proposal.durationSeconds} disabled={session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { durationSeconds: Number(event.target.value) })} /></label>}
-        {session.stage === 'proposal-review' && <><button type="button" disabled={!index} onClick={() => act(() => mutate((data) => { const proposals = data.sessions.find((item) => item.id === session.id)!.proposals; [proposals[index - 1], proposals[index]] = [proposals[index], proposals[index - 1]]; }))}>Move proposal {index + 1} up</button>{session.mode === 'surprise' && <InlineDiscardButton disabled={stale} label={`Use concept ${index + 1}`} confirmLabel="Confirm concept replacement" description="Replace the existing premise with this concept? This is undoable and does not generate scenes." onConfirm={() => void chooseConcept(proposal.id)} />}</>}
+        <label>Proposal {index + 1} title<input value={proposal.title} disabled={premiseLocked || session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { title: event.target.value })} /></label>
+        <label>Proposal {index + 1} synopsis<textarea value={proposal.synopsis} disabled={premiseLocked || session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { synopsis: event.target.value })} /></label><p>{proposal.purpose}</p>
+        {session.mode !== 'surprise' && <label>Proposal {index + 1} duration<input type="number" min={1} max={3600} value={proposal.durationSeconds} disabled={premiseLocked || session.stage !== 'proposal-review'} onChange={(event) => editProposal(proposal.id, { durationSeconds: Number(event.target.value) })} /></label>}
+        {session.stage === 'proposal-review' && <><button type="button" disabled={premiseLocked || !index} onClick={() => act(() => mutate((data) => { const proposals = data.sessions.find((item) => item.id === session.id)!.proposals; [proposals[index - 1], proposals[index]] = [proposals[index], proposals[index - 1]]; }))}>Move proposal {index + 1} up</button>{session.mode === 'surprise' && <InlineDiscardButton disabled={premiseLocked || stale} label={`Use concept ${index + 1}`} confirmLabel="Confirm concept replacement" description="Replace the existing premise with this concept? This is undoable and does not generate scenes." onConfirm={() => void chooseConcept(proposal.id)} />}</>}
       </details></article>)}
       {session.stage === 'proposal-review' && <><p>Selected allocation: {session.proposals.filter((item) => item.selected).reduce((sum, item) => sum + item.durationSeconds, 0)}s / {brief?.durationSeconds}s target. Shot runtime remains separate.</p>
         <label><input type="checkbox" checked={partial} onChange={(event) => setPartial(event.target.checked)} />Accept a partial or different total without stretching other scenes</label>
-        {session.mode !== 'surprise' && <button type="button" disabled={stale || busy} onClick={async () => { try { await commitReviewedStoryDocument(getDocument, commit, (document, digest) => acceptStoryScenes(document, session.id, digest, partial)); await flush(); setNotice('Scenes accepted as one undoable change. No AI call.'); onAccepted?.(); } catch (error) { setError((error as Error).message); } }}>Accept selected scenes</button>}
-        <button type="button" disabled={busy || (mode === 'live' && !consent) || !quoteReady || stale} onClick={() => void generate(true, mode === 'fixture')}>Regenerate selected — new reviewed request</button>
-        <button type="button" disabled={busy} onClick={() => act(() => mutate((data) => { data.sessions.find((item) => item.id === session.id)!.stage = 'rejected'; }))}>Reject proposals</button></>}
+        {session.mode !== 'surprise' && <button type="button" disabled={premiseLocked || stale || busy} onClick={async () => { try { await commitReviewedStoryDocument(getDocument, commit, (document, digest) => acceptStoryScenes(document, session.id, digest, partial)); await flush(); setNotice('Scenes accepted as one undoable change. No AI call.'); onAccepted?.(); } catch (error) { setError((error as Error).message); } }}>Accept selected scenes</button>}
+        <button type="button" disabled={premiseLocked || !!unresolved || busy || (mode === 'live' && !consent) || !quoteReady || stale} onClick={() => void generate(true, mode === 'fixture')}>Regenerate selected — new reviewed request</button>
+        <button type="button" disabled={premiseLocked || busy} onClick={() => act(() => mutate((data) => { data.sessions.find((item) => item.id === session.id)!.stage = 'rejected'; }))}>Reject proposals</button></>}
     </section>}</>}
   </>;
   return embedded ? <div className="story-development-dialog story-development-embedded">{content}</div>

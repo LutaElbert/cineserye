@@ -8,7 +8,7 @@ import { selectShotMediaPreview } from './shot-media-selection';
 import './shot-media-preview.css';
 
 /** Read-only local media surface. Dimensions stay fixed while bytes load. */
-export function ShotMediaPreview({ cinema, shot, compact = false }: { cinema: CinemaProjectData; shot: CinemaShotRecord; compact?: boolean }) {
+export function ShotMediaPreview({ cinema, shot, compact = false, emptyDescription = 'Review the image settings below, then generate a storyboard.' }: { cinema: CinemaProjectData; shot: CinemaShotRecord; compact?: boolean; emptyDescription?: string }) {
   const selected = selectShotMediaPreview(cinema, shot);
   // Compact cards show the storyboard thumbnail, never a tiny unusable player.
   // The full expanded node retains the approved clip's real video controls.
@@ -44,7 +44,7 @@ export function ShotMediaPreview({ cinema, shot, compact = false }: { cinema: Ci
         // eslint-disable-next-line @next/next/no-img-element
         <img src={media.url} alt={`${selected.image.status === 'approved' ? 'Approved' : 'Candidate'} storyboard for ${shot.title}`} draggable={false}
           onError={() => setLoaded({ key, url: null, failed: true })} /> : <span>
-          {compact ? <Icon size={19} aria-hidden="true" /> : missing ? 'This browser no longer has the media. Restore or regenerate this take.' : primary ? 'Loading local preview…' : selected.hasPreviousMedia ? 'Previous media is retained in history. Review it against the current plan.' : 'Review the image settings below, then generate a storyboard.'}
+          {compact ? <Icon size={19} aria-hidden="true" /> : missing ? 'This browser no longer has the media. Restore or regenerate this take.' : primary ? 'Loading local preview…' : selected.hasPreviousMedia ? 'Previous media is retained in history. Review it against the current plan.' : emptyDescription}
         </span>}
       {compact && selected.clip && media?.url ? <span className="shot-media-video-mark" aria-hidden="true"><Film size={10} /></span> : null}
     </div>

@@ -13,9 +13,12 @@
     "start": "vinext start",
     "check": "vinext check",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern artifacts/simplified-flow/browser-modules",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test",
+    "test:built:node": "node scripts/test-built.mjs node-fixture",
+    "test:built:worker": "node scripts/test-built.mjs worker",
+    "check:test-environment": "node scripts/check-test-environment.mjs",
     "preview": "npm run build && wrangler dev --config dist/server/wrangler.json",
     "deploy:preview": "vinext-cloudflare deploy --preview --config wrangler.jsonc",
     "deploy": "vinext-cloudflare deploy --config wrangler.jsonc"
@@ -29,7 +32,7 @@
     "@tiptap/extension-task-list": "^3.30.5",
     "@tiptap/react": "^3.30.5",
     "@tiptap/starter-kit": "^3.30.5",
-    "@xyflow/react": "^12.11.5",
+    "@xyflow/react": "^12.11.6",
     "dompurify": "^3.4.14",
     "imagetracerjs": "^1.2.6",
     "lucide-react": "^1.35.0",
@@ -65,7 +68,10 @@
     "wrangler": "4.127.1"
   },
   "overrides": {
-    "adm-zip": "0.6.0"
+    "adm-zip": "0.6.0",
+    "miniflare": {
+      "sharp": "0.35.4"
+    }
   },
   "type": "module"
 }

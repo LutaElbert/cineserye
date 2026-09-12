@@ -43,6 +43,9 @@ describe('storyboard bytes boundary', () => {
 });
 
 const capability = await localAssemblyCapability();
+if (process.env.CINESERYE_REQUIRE_RENDERER_TESTS === 'true' && !capability.available) {
+  throw new Error(`Required media decoder tests cannot run: ${capability.reason}`);
+}
 describe.skipIf(!capability.available)('actual storyboard still decoding (local synthetic bytes, no paid calls)', () => {
   let directory: string;
   const images: Record<string, string> = {};

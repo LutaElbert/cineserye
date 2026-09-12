@@ -8,37 +8,129 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  CINESERYE_E2E_FIXTURE: 'true'
+  CINESERYE_PROVIDER_MODE: fixture
+  CINESERYE_LIVE_ENABLED: 'false'
+  CINESERYE_RUN_VIDEO_SMOKE: '0'
+  CINESERYE_RUN_STORYBOARD_SMOKE: '0'
+  CINESERYE_RUN_VERTEX_SMOKE: '0'
+  CINESERYE_RUN_STORY_LIVE_SMOKE: '0'
+  CINESERYE_REQUIRE_RENDERER_TESTS: 'true'
+  WRANGLER_SEND_METRICS: 'false'
+
 jobs:
-  verify:
+  static:
+    name: Static and security
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
           cache: npm
+      - name: Verify exact candidate checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git rev-parse HEAD
       - run: npm ci
+      - name: Require native renderer tools (no capability skips)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm run check:test-environment
       - run: npm run check
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run check:client-boundary
       - run: npm audit --audit-level=high
-      - run: npx playwright install --with-deps chromium firefox webkit
-      - name: Test the built Cloudflare Worker
+
+  native:
+    name: Native (${{ matrix.browser }})
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Verify exact candidate checkout
         run: |
-          npx wrangler dev --config dist/server/wrangler.json --port 8787 > /tmp/cineserye-wrangler.log 2>&1 &
-          worker_pid=$!
-          trap 'kill "$worker_pid"' EXIT
-          for attempt in {1..60}; do
-            if curl --fail --silent --show-error http://localhost:8787/ > /dev/null; then
-              break
-            fi
-            if [ "$attempt" -eq 60 ]; then
-              cat /tmp/cineserye-wrangler.log
-              exit 1
-            fi
-            sleep 1
-          done
-          PLAYWRIGHT_BASE_URL=http://localhost:8787 npm run test:e2e
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git rev-parse HEAD
+      - run: npm ci
+      - name: Require native renderer tools (no capability skips)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm run check:test-environment
+      - run: npm run build
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Full built native suite for this browser
+        run: npm run test:built:node -- --project=${{ matrix.browser }}
+      - name: Require both Final Cut checks in this browser
+        run: node scripts/assert-renderer-report.mjs artifacts/simplified-flow/node-fixture.json 2
+
+  worker:
+    name: Worker compatibility
+    # Avoid spending additional included minutes when a native shard fails.
+    needs: [static, native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Verify exact candidate checkout
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git rev-parse HEAD
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Built local Worker compatibility and negative matrix
+        run: npm run test:built:worker
+
+  verify:
+    name: verify
+    if: ${{ always() }}
+    needs: [static, native, worker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every acceptance lane to succeed
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+          WORKER_RESULT: ${{ needs.worker.result }}
+        run: |
+          printf '%s\n' "Candidate: $CANDIDATE_SHA" "Static: $STATIC_RESULT" "Native: $NATIVE_RESULT" "Worker: $WORKER_RESULT"
+          test "$STATIC_RESULT" = success
+          test "$NATIVE_RESULT" = success
+          test "$WORKER_RESULT" = success

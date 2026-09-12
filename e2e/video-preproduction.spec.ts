@@ -23,7 +23,8 @@ async function openVideoWorkbench(page: import('@playwright/test').Page) {
 test('S6-E2E-01 approved frame becomes one reviewable and independently approved clip', async ({ page }) => {
   const panel = await openVideoWorkbench(page);
   await expect(panel.getByText(/one silent clip/)).toBeVisible();
-  await panel.getByRole('checkbox', { name: /I confirm one 4s 720p silent clip/ }).check();
+  await expect(panel.getByLabel('Video duration')).toHaveValue('8');
+  await panel.getByRole('checkbox', { name: /I confirm one 8s 720p silent clip/ }).check();
   await panel.getByRole('button', { name: 'Generate one clip' }).click();
   await expect(panel.locator('.video-version')).toHaveCount(1, { timeout: 10_000 });
   await expect(panel.locator('.video-version')).toContainText('Clip candidate');
@@ -42,7 +43,7 @@ test('S6-E2E-02 setting changes invalidate confirmation and recompute the prefli
   const panel = await openVideoWorkbench(page);
   const consent = panel.getByRole('checkbox', { name: /I confirm one/ });
   await consent.check();
-  await panel.getByLabel('Video duration').selectOption('8');
+  await panel.getByLabel('Video duration').selectOption('4');
   await expect(consent).not.toBeChecked();
   await expect(panel.getByRole('button', { name: 'Generate one clip' })).toBeDisabled();
   await expect(panel.getByText('$0.00 USD', { exact: true })).toBeVisible();
@@ -51,7 +52,7 @@ test('S6-E2E-02 setting changes invalidate confirmation and recompute the prefli
 test('S6-E2E-03 cancel and linked retry remain keyboard-operable on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const panel = await openVideoWorkbench(page);
-  const consent = panel.getByRole('checkbox', { name: /I confirm one 4s 720p silent clip/ });
+  const consent = panel.getByRole('checkbox', { name: /I confirm one 8s 720p silent clip/ });
   await consent.focus();
   await page.keyboard.press('Space');
   await panel.getByRole('button', { name: 'Generate one clip' }).click();

@@ -31,7 +31,7 @@ async function usefulBody(page: Page, assistant: Locator, minimum = 100) {
   await expect(page.locator('dialog[open]')).toHaveCount(0);
 }
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Isolated fixture only.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.setViewportSize({ width: 735, height: 389 });
   await page.route('**/api/cinema/**', async (route) => {
     if (route.request().method() === 'POST' && /"mode"\s*:\s*"live"/.test(route.request().postData() ?? '')) return route.abort('blockedbyclient');
@@ -124,10 +124,8 @@ test('very short Assistant questions scroll and typing does not move the canvas'
 
 test('very short live approval retains the full estimate and ceiling without a provider request', async ({ page }, info) => {
   const posts: string[] = [];
-  await page.route('**/api/cinema/provider-status', async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ json: { ...await response.json(), mode: 'live' } });
-  });
+  const { fulfillWorkspaceMode } = await import('./workspace-capability-helpers');
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, 'live'));
   await page.route('**/api/cinema/story-assistant?mode=live', (route) => route.fulfill({ json: {
     enabled: true, mode: 'live', model: 'review-only-test-model', quoteId: 'a'.repeat(64), cost: 12.75, ceiling: 25.5,
     ready: true, blockers: [],

@@ -1,10 +1,11 @@
 import 'server-only';
 import { ProviderError } from './provider-errors';
+import { isNativeRuntime } from './native-runtime';
 
 /** Local operator boundary, not multi-tenant authentication. Never trust proxy headers. */
 export function assertLocalRequest(request: Request, options: { mutation?: boolean; json?: boolean } = {}): URL {
   const url = new URL(request.url);
-  if (typeof process === 'undefined' || process.release?.name !== 'node' || typeof process.getBuiltinModule !== 'function'
+  if (!isNativeRuntime()
     || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
     || !['http:', 'https:'].includes(url.protocol)
     || request.headers.has('x-forwarded-host') || request.headers.has('forwarded')

@@ -1,0 +1,22 @@
+# Shared capability adoption — attempt 2
+
+**NOT ACCEPTED, 8.91/10: C5 full native failed.** Fresh `capability_adoption_critic_2` independently verified source digest, correspondence, counts and before-fix traces. Scores correctness 9.1, simplicity 9.0, usability 8.6, safety 9.2, evidence 8.2 (30/20/20/20/10). C1–C4 pass their bounded inspection/targeted evidence; C5 fails. Same C1–C5 bounded acceptance scope as attempt 1, not P1 or whole-plan acceptance. Attempt 1 remains NOT ACCEPTED, 8.02/10.
+
+## Repairs and evidence
+
+- New shared `useWorkspaceAdmission` captures the committed discovery identity and invalidates on unknown status, replacement (even same mode), or unmount. Analysis and scoped shot preparation/retry check admission after asynchronous work and immediately before POST. This is a UI approval boundary; route authorization remains independent.
+- Analysis estimates are schema-validated and attached to their discovery snapshot. Old estimates cannot reappear during same-mode recovery. In-flight analysis also rechecks quote identity. Source and operation identity are checked after saving. A locally prevented analysis dispatch restores the prior operation state rather than falsely becoming outcome-unknown.
+- Scoped shot estimates likewise belong to a discovery snapshot; old quotes cannot approve recovered discovery. Preparation and retry reject stale discovery before adopting a quote.
+- The unknown status badge explicitly says Availability unknown; manual Story direction remains editable without fetching a quote or sending a POST until discovery recovers.
+
+Three new regressions failed against the earlier safe build: analysis preparation dispatched to the intercepted POST, shot preparation dispatched to its intercepted POST (both show Failed to fetch/unknown rather than the expected local admission block), and analysis exposed Continue while the replacement estimate was held. Reports and traces: `artifacts/simplified-flow/capability-adoption-attempt-2/before-fix.json` and `before-fix/`. No live providers used. Added saved-request boundary variants hold the actual IndexedDB transaction completion callback; they do not change source or approval data.
+
+Frozen 311-file digest `bd00cc6bc964fcdc8ea4e4a95b84e5961ec1fe87c52536efaa9cd7bc24504202`; manifest `artifacts/simplified-flow/capability-adoption-attempt-2/source-manifest.json`. All root/safe bytes match. Original checkout remains uncommitted; safe checkout `/private/tmp/cineserye-full-flow-3W6tpD` has no credentials. Fixture production build, typecheck, lint (zero warnings) and client-boundary passed. Full offline report `units.json`; repeated three-engine browser matrix in progress, then full native matrix required.
+
+No full-phase acceptance, verified live-provider claim, paid action, CI dispatch, push, merge or deployment. All prior 58-criterion, Worker, exact-SHA CI/$0 and actual user approval gates remain open. Existing preview 3040 was not replaced. Complete feature-panel status/reason adoption, identity-bound successful-run evidence, complete document/operation ownership and journey/export measurements remain work, not claims of this packet.
+
+Exact-candidate repeated results: **153/153 passed**, 17 cases × three engines × three repetitions, no retries, skips, failures or flakes (`browser-153.json`). **532 offline passes / 5 intentional paid/live skips**. Full native suite is now running. Critic2 source review confirms the three original blockers repaired; verdict awaits complete evidence.
+
+Separate pre-existing source/operation race remains open: scoped-shot post-save validation awaits a digest of a captured document before POST without synchronously rechecking live document/operation identity after that final await. This attempt adds discovery admission, not complete source-admission safety. Track with remaining operation/document ownership; do not imply it was fixed by the discovery token.
+
+Full native result: **552 expected / 546 passed / 2 failed / 4 baseline skips / 0 interrupted / 0 not run / 0 flaky**, 11.2m, zero retries. `full-native-failed.json` and `full-native-failures/` preserve both WebKit failures: locked-layer connector handle was under Properties; hierarchy center measurement was 7.381px against the unchanged <3px requirement. Read-only critic supports proposed normal Fit View navigation and atomic same-frame DOM measurement, subject to repeated and full verification. Those test changes create attempt3; they do not convert this frozen candidate into a pass.

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { addCinemaDraft, createDiagramPng, openEditor, waitForSaved, openSelectedScenePlanner } from './helpers';
 import { readFile } from 'node:fs/promises';
 import AxeBuilder from '@axe-core/playwright';
+import { fulfillWorkspaceMode, refreshWorkspaceDiscovery } from './workspace-capability-helpers';
 
 async function openEmptyStory(page: import('@playwright/test').Page) {
   await page.goto('/');
@@ -12,12 +13,12 @@ async function openEmptyStory(page: import('@playwright/test').Page) {
 
 const liveQuote = { enabled: true, mode: 'live', model: 'MOCK-LIVE-NO-PROVIDER', quoteId: 'c'.repeat(64), cost: 0.01, ceiling: 1, ready: true, blockers: [] };
 async function mockLiveCapabilities(page: import('@playwright/test').Page) {
-  await page.route('**/api/cinema/provider-status', (route) => route.fulfill({ json: { mode: 'live', research: { configured: false, provider: 'fixture' }, planning: { configured: false, provider: 'mock', model: liveQuote.model } } }));
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, 'live'));
   for (const endpoint of ['develop-story', 'story-assistant']) await page.route(`**/api/cinema/${endpoint}?mode=live`, (route) => route.fulfill({ json: liveQuote }));
 }
 
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Use the isolated fixture origin.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.route('**/api/cinema/**', (route) => {
     if (route.request().method() === 'POST' && /"mode"\s*:\s*"live"/.test(route.request().postData() ?? '')) return route.abort('blockedbyclient');
     return route.continue();
@@ -39,7 +40,7 @@ async function story(page: import('@playwright/test').Page) {
   const manual = assistant.getByRole('button', { name: 'Edit full brief manually', exact: true });
   const panel = assistant.getByRole('region', { name: 'Manual story direction', exact: true });
   if (!(await panel.isVisible())) {
-    await assistant.locator('summary').filter({ hasText: /^Advanced options$/ }).click();
+    await assistant.locator('summary').filter({ hasText: /^Advanced story tools$/ }).click();
     await manual.click();
   }
   await expect(panel).toBeVisible(); return panel;
@@ -54,6 +55,24 @@ async function direction(panel: import('@playwright/test').Locator, waitForQuote
   await panel.getByRole('button', { name: 'Approve direction — no AI call', exact: true }).click();
   if (waitForQuote) await expect(panel.getByRole('region', { name: 'Story generation review', exact: true })).toContainText('One attempt, no automatic retry.');
 }
+test('unknown workspace keeps manual direction editable but blocks generation until discovery recovers', async ({ page }) => {
+  let available = false; let quotes = 0; let posts = 0;
+  await page.route('**/api/cinema/workflow-capabilities', (route) => available
+    ? route.continue() : route.fulfill({ json: { version: 1, mode: 'fixture' } }));
+  page.on('request', (request) => {
+    if (request.url().includes('/api/cinema/develop-story?')) quotes++;
+    if (request.method() === 'POST' && request.url().includes('/api/cinema/')) posts++;
+  });
+  await openEmptyStory(page); const panel = await story(page);
+  await direction(panel, false);
+  await expect(page.getByRole('button', { name: 'Provider availability unknown. Open provider status and local traces.', exact: true })).toHaveText('Availability unknown');
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
+  expect(quotes).toBe(0); expect(posts).toBe(0);
+  available = true;
+  await refreshWorkspaceDiscovery(page);
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeEnabled();
+  expect(quotes).toBeGreaterThan(0); expect(posts).toBe(0);
+});
 test('submission journey: premise to reviewed scenes, shots, frames, downloaded clip and reload', async ({ page }) => {
   test.setTimeout(120_000);
   const posts: import('@playwright/test').Request[] = [];
@@ -162,11 +181,11 @@ test('later manual scene appears in continuation and reference scopes after reop
 
 test('delayed fixture estimate cannot enable live consent after a mode switch', async ({ page }) => {
   let release!: () => void; const held = new Promise<void>((resolve) => { release = resolve; });
-  let releaseStatus!: () => void; const heldStatus = new Promise<void>((resolve) => { releaseStatus = resolve; });
+  let nextMode: 'fixture' | 'live' = 'fixture';
   let started = false; let finished = false; let posts = 0;
   page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/api/cinema/')) posts++; });
-  await page.route('**/api/cinema/provider-status', async (route) => { await heldStatus; await route.fulfill({ json: { mode: 'live' } }); });
-  await page.route('**/api/cinema/develop-story', async (route) => {
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, nextMode));
+  await page.route('**/api/cinema/develop-story?mode=fixture', async (route) => {
     if (route.request().method() !== 'GET') return route.abort('blockedbyclient');
     started = true; await held;
     await route.fulfill({ json: { enabled: true, mode: 'fixture', model: 'DELAYED-FIXTURE', quoteId: 'd'.repeat(64), cost: 0, ceiling: 1, ready: true, blockers: [] } }); finished = true;
@@ -174,14 +193,137 @@ test('delayed fixture estimate cannot enable live consent after a mode switch', 
   await page.route('**/api/cinema/develop-story?mode=live', (route) => route.fulfill({ json: { ...liveQuote, ready: false, blockers: ['Live disabled for this test.'] } }));
   await openEmptyStory(page); const panel = await story(page); await direction(panel, false);
   await expect.poll(() => started).toBe(true);
-  releaseStatus();
+  nextMode = 'live'; await refreshWorkspaceDiscovery(page);
   await expect(panel.getByText('Workspace provider: Live — explicit approval required', { exact: true })).toBeVisible();
   release(); await expect.poll(() => finished).toBe(true);
   await expect(panel.getByText(/DELAYED-FIXTURE/)).toHaveCount(0);
+  await expect(panel.getByText(new RegExp(liveQuote.model))).toBeVisible();
   await expect(panel.getByLabel('I approve sending this brief, scene context and listed references for this one paid request.', { exact: true })).toBeDisabled();
   await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
   expect(posts).toBe(0);
 });
+
+test('a failed same-mode estimate refresh removes the old approval until explicit recovery', async ({ page }) => {
+  let failEstimate = false; let posts = 0;
+  await mockLiveCapabilities(page);
+  await page.route('**/api/cinema/develop-story?mode=live', (route) => route.fulfill({ json: failEstimate ? { ready: true } : liveQuote }));
+  page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/api/cinema/')) posts++; });
+  await openEmptyStory(page); const panel = await story(page); await direction(panel);
+  const consent = panel.getByLabel('I approve sending this brief, scene context and listed references for this one paid request.', { exact: true });
+  await consent.check();
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeEnabled();
+  failEstimate = true;
+  await panel.getByLabel('Tone', { exact: true }).fill('Warm suspense');
+  await panel.getByRole('button', { name: 'Review creative brief', exact: true }).click();
+  await panel.getByRole('button', { name: 'Approve direction — no AI call', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Retry story estimate', exact: true })).toBeVisible();
+  await expect(panel.getByText(new RegExp(liveQuote.model))).toHaveCount(0);
+  await expect(consent).not.toBeChecked(); await expect(consent).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
+  failEstimate = false;
+  await panel.getByRole('button', { name: 'Retry story estimate', exact: true }).click();
+  await expect(panel.getByText(new RegExp(liveQuote.model))).toBeVisible();
+  await expect(consent).toBeEnabled(); await expect(consent).not.toBeChecked();
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
+  expect(posts).toBe(0);
+});
+
+for (const boundary of ['preparation', 'saved request'] as const) test(`mode changes during async Story ${boundary} stop before any dispatch`, async ({ page }) => {
+  let nextMode: 'fixture' | 'live' = 'fixture';
+  let posts = 0;
+  await page.route('**/api/cinema/workflow-capabilities', (route) => fulfillWorkspaceMode(route, nextMode));
+  await page.route(/\/api\/cinema\/develop-story(?:\?mode=fixture)?$/, (route) => {
+    if (route.request().method() !== 'GET') { posts++; return route.abort('blockedbyclient'); }
+    return route.fulfill({ json: { ...liveQuote, mode: 'fixture', model: 'HELD-PREPARATION-FIXTURE', cost: 0 } });
+  });
+  await page.route('**/api/cinema/develop-story?mode=live', (route) => route.fulfill({ json: { ...liveQuote, ready: false, blockers: ['Live disabled for this test.'] } }));
+  await openEmptyStory(page); const panel = await story(page); await direction(panel);
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeEnabled();
+  await page.evaluate((boundary) => {
+    const original = crypto.subtle.digest.bind(crypto.subtle);
+    const probe = window as unknown as { digestHeld: boolean; runningRecordWritten: boolean; releaseStoryDigest: () => void };
+    probe.digestHeld = false;
+    probe.runningRecordWritten = false;
+    let armed = boundary === 'preparation';
+    if (!armed) {
+      const originalPut = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function(value, ...args) {
+        const request = originalPut.call(this, value, ...args);
+        if (this.name === 'documents' && value.id === 'current'
+          && value.cinema?.storyWorkflow?.sessions?.some((session: { stage: string }) => session.stage === 'running')) {
+          armed = true; probe.runningRecordWritten = true;
+          IDBObjectStore.prototype.put = originalPut;
+        }
+        return request;
+      };
+    }
+    const gate = new Promise<void>((resolve) => { probe.releaseStoryDigest = () => { crypto.subtle.digest = original; resolve(); }; });
+    crypto.subtle.digest = async (...args: Parameters<SubtleCrypto['digest']>) => {
+      if (armed) { probe.digestHeld = true; await gate; }
+      return original(...args);
+    };
+  }, boundary);
+  await panel.getByRole('button', { name: 'Generate scene proposals', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { digestHeld: boolean }).digestHeld)).toBe(true);
+  if (boundary === 'saved request') await expect.poll(() => page.evaluate(() => (window as unknown as { runningRecordWritten: boolean }).runningRecordWritten)).toBe(true);
+  nextMode = 'live'; await refreshWorkspaceDiscovery(page);
+  await expect(panel.getByText('Workspace provider: Live — explicit approval required', { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { releaseStoryDigest: () => void }).releaseStoryDigest());
+  await expect(panel.getByText('The workspace mode, estimate or approval changed. Review again before generating.', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
+  expect(posts).toBe(0);
+});
+test('reference permission withdrawal during the final preparation digest prevents Story dispatch', async ({ page }) => {
+  let posts = 0;
+  await page.route('**/api/cinema/develop-story', (route) => {
+    if (route.request().method() === 'POST') { posts++; return route.abort('blockedbyclient'); }
+    return route.continue();
+  });
+  await openEmptyStory(page); const panel = await story(page);
+  await panel.locator('summary').click();
+  await panel.getByLabel('Reference title', { exact: true }).fill('Revocable image');
+  await panel.getByRole('combobox', { name: 'Rights', exact: true }).selectOption('creator-owned');
+  await panel.getByLabel('I approve this reference content', { exact: true }).check();
+  await panel.getByLabel('story-development', { exact: true }).check();
+  await panel.getByLabel('shot-planning', { exact: true }).check();
+  await panel.getByLabel('Attach reference image', { exact: true }).setInputFiles({ name: 'owned.png', mimeType: 'image/png', buffer: await createDiagramPng(page) });
+  await expect(panel.getByRole('img', { name: 'Revocable image', exact: true })).toBeVisible();
+  await direction(panel);
+  await page.getByRole('button', { name: 'Fit View', exact: true }).click();
+  await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
+  await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
+  const editor = page.getByRole('region', { name: 'Story premise layer editor', exact: true });
+  await editor.getByRole('button', { name: 'Review reference permissions · 1', exact: true }).click();
+  const permissions = editor.getByRole('region', { name: 'Reference permissions', exact: true });
+  await expect(permissions.getByLabel('Story development', { exact: true })).toBeChecked();
+  await waitForSaved(page);
+  await page.getByRole('button', { name: 'Focus story assistant', exact: true }).click();
+  await page.evaluate(() => {
+    const original = crypto.subtle.digest.bind(crypto.subtle);
+    const probe = window as unknown as { finalDigestHeld: boolean; releaseFinalDigest: () => void };
+    probe.finalDigestHeld = false; let calls = 0;
+    crypto.subtle.digest = async (...args: Parameters<SubtleCrypto['digest']>) => {
+      // Generation hashes source, approval content, then the pre-record source.
+      if (++calls === 3) {
+        crypto.subtle.digest = original; probe.finalDigestHeld = true;
+        await new Promise<void>((resolve) => { probe.releaseFinalDigest = resolve; });
+      }
+      return original(...args);
+    };
+  });
+  await panel.getByRole('button', { name: 'Generate scene proposals', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { finalDigestHeld: boolean }).finalDigestHeld)).toBe(true);
+  await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
+  await permissions.getByLabel('Story development', { exact: true }).uncheck();
+  await permissions.getByRole('button', { name: /Save permissions for/ }).click();
+  await expect(permissions).toContainText('Current policy: approved · v2');
+  await page.evaluate(() => (window as unknown as { releaseFinalDigest: () => void }).releaseFinalDigest());
+  await page.getByRole('button', { name: 'Focus story assistant', exact: true }).click();
+  await expect(panel.getByText('Source changed while preparing references. Review again.', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Check existing Story request', exact: true })).toHaveCount(0);
+  expect(posts).toBe(0);
+});
+
 test('local direction and reference editing persist without AI; accepted fixture scenes are atomic and inherit timing', async ({ page }) => {
   const posts: string[] = [];
   page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/api/cinema/')) posts.push(request.url()); });
@@ -317,24 +459,91 @@ test('premise image remains local and scene exclusion can reset to inheritance',
 
 test('cancelled story request never inserts late output; recovery performs only a GET', async ({ page }) => {
   let posts = 0; let release!: () => void;
+  let operationId = ''; const checkedIds: string[] = [];
   const held = new Promise<void>((resolve) => { release = resolve; });
   await page.route('**/api/cinema/develop-story', async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
-    posts++; await held;
+    posts++; operationId = route.request().postDataJSON().operationId; await held;
     await route.fulfill({ status: 200, json: { ok: true, result: { version: 1, proposals: [{ id: 'late', title: 'Late result', synopsis: 'Do not insert', purpose: 'Test', durationSeconds: 60, selected: true }] } } }).catch(() => undefined);
   });
-  await page.route('**/api/cinema/develop-story?operationId=*', (route) => route.fulfill({ status: 200, json: { status: 'unknown' } }));
+  await page.route('**/api/cinema/develop-story?operationId=*', (route) => {
+    checkedIds.push(new URL(route.request().url()).searchParams.get('operationId')!);
+    return route.fulfill({ status: 200, json: { status: 'unknown' } });
+  });
   await openEmptyStory(page); const panel = await story(page); await direction(panel);
   await expect(panel.getByLabel('I understand these are sample outputs and approve fixture generation.', { exact: true })).toHaveCount(0);
   await panel.getByRole('button', { name: 'Generate scene proposals', exact: true }).click();
   await expect.poll(() => posts).toBe(1);
   await panel.getByRole('button', { name: 'Cancel story request', exact: true }).click(); release();
   await expect(panel.getByRole('heading', { name: 'Review your scenes · cancelled', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
   await panel.getByRole('button', { name: 'Check saved result — never generate again', exact: true }).click();
   await expect(panel.getByRole('alert')).toContainText('No request was dispatched');
   expect(posts).toBe(1); await expect(panel.getByLabel('Proposal 1 title', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Hide story assistant', exact: true }).click();
   await expect(page.locator('.react-flow__node:not([data-id^="story-assistant:"])')).toHaveCount(1);
+  // Undo may reverse later creative edits, but cannot erase an unresolved
+  // provider request. Repeated attempts keep the boundary and identity intact.
+  for (let attempt = 0; attempt < 6; attempt++) await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByText('Check the existing Story request before undoing past its start. Undo cannot cancel provider work.').first()).toBeVisible();
+  await waitForSaved(page);
+  await page.reload();
+  const reopened = await story(page);
+  await expect(reopened.getByRole('button', { name: 'Generate scene proposals', exact: true })).toBeDisabled();
+  await expect(reopened.getByRole('button', { name: 'Check existing Story request', exact: true })).toBeVisible();
+  await reopened.getByRole('button', { name: 'Check existing Story request', exact: true }).click();
+  await expect.poll(() => checkedIds.length).toBe(2);
+  expect(operationId).not.toBe('');
+  expect(checkedIds).toEqual([operationId, operationId]);
+  expect(posts).toBe(1);
+});
+
+test('resolved Story result stays resolved across undo and redo without another request', async ({ page }) => {
+  let posts = 0;
+  let identity: { projectId: string; operationId: string } | undefined;
+  page.on('request', (request) => { if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/cinema/develop-story') {
+    posts++; const body = request.postDataJSON(); identity = { projectId: body.input.projectId, operationId: body.operationId };
+  } });
+  await openEmptyStory(page); const panel = await story(page); await direction(panel);
+  await panel.getByRole('button', { name: 'Generate scene proposals', exact: true }).click();
+  await expect(panel.getByRole('heading', { name: 'Review your scenes · proposal-review', exact: true })).toBeVisible();
+  // Manual fixture responses must also be recoverable through the real GET
+  // endpoint, not just copied into the undoable browser document.
+  const saved = await page.evaluate(async (value) => {
+    const response = await fetch(`/api/cinema/develop-story?projectId=${encodeURIComponent(value.projectId)}&operationId=${value.operationId}`);
+    return { status: response.status, body: await response.json() };
+  }, identity!);
+  expect(saved.status).toBe(200);
+  expect(saved.body).toMatchObject({ status: 'completed', result: { provenance: { runId: identity!.operationId } } });
+  await page.getByRole('button', { name: 'Hide story assistant', exact: true }).click();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  const reopened = await story(page);
+  await expect(reopened.getByRole('heading', { name: 'Review your scenes · proposal-review', exact: true })).toBeVisible();
+  await expect(reopened.getByRole('button', { name: 'Check existing Story request', exact: true })).toHaveCount(0);
+  await expect(reopened.getByRole('button', { name: 'Accept selected scenes', exact: true })).toBeEnabled();
+  await expect(page.locator('.react-flow__node:not([data-id^="story-assistant:"])')).toHaveCount(1);
+  expect(posts).toBe(1);
+});
+
+test('manual Story tools respect the premise lock for review, references and acceptance', async ({ page }) => {
+  let posts = 0;
+  page.on('request', (request) => { if (request.method() === 'POST' && request.url().includes('/api/cinema/')) posts++; });
+  await openEmptyStory(page); const panel = await story(page); await direction(panel);
+  await panel.getByRole('button', { name: 'Generate scene proposals', exact: true }).click();
+  await expect(panel.getByLabel('Select proposal 1', { exact: true })).toBeVisible();
+  const before = await panel.locator('.story-proposal strong').allTextContents();
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('button', { name: 'Lock Story Premise', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Accept selected scenes', exact: true })).toBeDisabled();
+  await expect(panel.getByRole('button', { name: 'Reject proposals', exact: true })).toBeDisabled();
+  await expect(panel.getByLabel('Select proposal 1', { exact: true })).toBeDisabled();
+  await expect(panel.getByRole('textbox', { name: 'Premise for development', exact: true })).toBeDisabled();
+  await panel.locator('summary').filter({ hasText: /^References / }).click();
+  await expect(panel.getByLabel('Attach reference image', { exact: true })).toBeDisabled();
+  expect(posts).toBe(1); expect(await panel.locator('.story-proposal strong').allTextContents()).toEqual(before);
+  await page.getByRole('button', { name: 'Unlock Story Premise', exact: true }).click();
+  await expect(panel.getByRole('button', { name: 'Accept selected scenes', exact: true })).toBeEnabled();
 });
 
 test('Continue inserts only reviewed new material and preserves existing manual scenes', async ({ page }) => {

@@ -1,7 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 test('idea to accepted three-scene shot plans uses explicit scope and survives reload without redispatch', async ({ page }, info) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Requires isolated fixture server.');
+  const runtimeErrors: string[] = [];
+  page.on('pageerror', (error) => runtimeErrors.push(error.message));
+  page.on('console', (message) => { if (message.type() === 'error') runtimeErrors.push(message.text()); });
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
   const posts: string[] = [];
@@ -42,12 +45,13 @@ test('idea to accepted three-scene shot plans uses explicit scope and survives r
   await shotScope.getByRole('button', { name: 'Add selected shot plans', exact: true }).click();
   await expect(shotScope.getByRole('button', { name: /Open shots & media/ })).toHaveCount(3);
   await expect(shotScope.getByRole('alert')).toHaveCount(0);
-  for (const host of hosts) {
-    expect(await page.locator(`.react-flow__node[data-id="${host.id}"]`).evaluate((node) => (node as HTMLElement).style.transform)).toBe(host.transform);
-  }
+  await expect.poll(() => Promise.all(hosts.map(async ({ id }) => ({ id,
+    transform: await page.locator(`.react-flow__node[data-id="${id}"]`).evaluate((node) => (node as HTMLElement).style.transform),
+  })))).toEqual(hosts);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('three-scene-shots-added.png') });
   await shotScope.getByRole('button', { name: /Open shots & media/ }).first().click();
   await expect(page.getByRole('button', { name: 'Close layer editor', exact: true })).toBeVisible();
   expect(posts.filter((path) => /generate-storyboard|generate-video/.test(path))).toHaveLength(0);
+  expect(runtimeErrors).toEqual([]);
 });

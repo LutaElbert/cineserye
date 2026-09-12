@@ -64,6 +64,13 @@ export function defaultSequenceTrim(shot: CinemaShotRecord): SequenceTrim {
   return { startFrame: 0, durationFrames: Math.max(1, Math.round(shot.durationSeconds * ASSEMBLY_LIMITS.fps)) };
 }
 
+export function sequenceTimingIssue(trim: SequenceTrim, decodedDurationSeconds: number): string | null {
+  const startSeconds = trim.startFrame / ASSEMBLY_LIMITS.fps;
+  const useSeconds = trim.durationFrames / ASSEMBLY_LIMITS.fps;
+  if (startSeconds + useSeconds <= decodedDurationSeconds + 0.001) return null;
+  return `Decoded clip is ${decodedDurationSeconds.toFixed(2)}s; the selected ${startSeconds.toFixed(2)}s start and ${useSeconds.toFixed(2)}s use exceed the available footage.`;
+}
+
 export function buildSequenceManifest(rows: SequenceRow[], trims: Record<string, SequenceTrim>, aspectRatio: '9:16' | '16:9'): SequenceManifest {
   if (rows.some((row) => row.issue || !row.clip)) throw new Error('Every shot needs a current approved video take before assembly.');
   return SequenceManifestSchema.parse({

@@ -21,6 +21,20 @@ async function pending(mode: 'expand' | 'continue' = 'expand') {
   }) };
 }
 describe('integrated story domain commands', () => {
+  it.each(['running', 'outcome-unknown', 'cancelled'] as const)('blocks another Story dispatch while any saved session is %s', async (stage) => {
+    const { document } = await pending();
+    const unresolved = changeStory(document, (data) => { data.sessions[0].stage = stage; });
+    const before = structuredClone(unresolved);
+    expect(() => changeStory(unresolved, (data) => {
+      data.sessions.push({ ...structuredClone(data.sessions[0]), id: 'another-operation', stage: 'running' });
+    })).toThrow(/existing Story request/);
+    expect(unresolved).toEqual(before);
+    // Tracking and reconciliation of the original identity remain possible.
+    const recovered = changeStory(unresolved, (data) => { data.sessions[0].stage = 'proposal-review'; });
+    expect(() => changeStory(recovered, (data) => {
+      data.sessions.push({ ...structuredClone(data.sessions[0]), id: 'reviewed-new-operation', stage: 'running' });
+    })).not.toThrow();
+  });
   it('registers later manual scenes once without overwriting accepted metadata, geometry or locks', async () => {
     const { document, digest } = await pending();
     const before = structuredClone(document.cinema);
@@ -97,10 +111,25 @@ describe('integrated story domain commands', () => {
     expect(() => acceptStoryScenes(partial, 'session', digest, false)).toThrow(/allocated/);
     expect(acceptStoryScenes(partial, 'session', digest, true).nodes).toHaveLength(5);
   });
-  it('inserts continuation after the chosen anchor and never moves a locked parent', async () => {
-    const { document, digest } = await pending('continue'); document.nodes[0].data.locked = true;
+  it('inserts continuation after the chosen anchor and never moves a locked existing scene', async () => {
+    const { document, digest } = await pending('continue'); document.nodes[1].data.locked = true;
     const result = acceptStoryScenes(document, 'session', digest, false);
-    expect(result.nodes[0]).toEqual(validateEditorDocument(document).nodes[0]); expect(result.cinema?.sceneOrder[1]).toBe('session:proposal-1');
+    expect(result.nodes[1]).toEqual(validateEditorDocument(document).nodes[1]); expect(result.cinema?.sceneOrder[1]).toBe('session:proposal-1');
+  });
+  it('enforces a late premise lock at every story mutation boundary, including manual review', async () => {
+    const { document, digest } = await pending(); document.nodes[0].data.locked = true;
+    const before = structuredClone(document);
+    expect(() => acceptStoryScenes(document, 'session', digest, false)).toThrow(/Unlock/);
+    for (const change of [
+      (data: NonNullable<typeof document.cinema>['storyWorkflow']) => { data!.sessions[0].proposals.reverse(); },
+      (data: NonNullable<typeof document.cinema>['storyWorkflow']) => { data!.sessions[0].proposals[0].selected = false; },
+      (data: NonNullable<typeof document.cinema>['storyWorkflow']) => { data!.sessions[0].stage = 'rejected'; },
+      (data: NonNullable<typeof document.cinema>['storyWorkflow']) => { data!.sessions = []; },
+    ]) expect(() => changeStory(document, change)).toThrow(/Unlock/);
+    expect(document).toEqual(before);
+    const tracked = changeStory(document, (data) => { data.sessions[0].stage = 'outcome-unknown'; data.sessions[0].error = 'Connection lost'; });
+    expect(tracked.cinema?.storyWorkflow?.sessions[0].error).toBe('Connection lost');
+    expect(tracked.nodes).toEqual(validateEditorDocument(before).nodes);
   });
   it('invalidates proposals for manual scene text changes, not canvas movement', async () => {
     const { document, digest } = await pending();

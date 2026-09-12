@@ -390,9 +390,10 @@ export async function updatePendingCinemaProposal(
   }
 }
 
-export async function saveLocalDocument(document: EditorDocument): Promise<void> {
+export async function saveLocalDocument(document: EditorDocument, assertWritable: () => void = () => {}): Promise<void> {
   const database = await openDatabase();
   try {
+    assertWritable();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(STORE_NAME, 'readwrite');
       const store = transaction.objectStore(STORE_NAME);
@@ -405,6 +406,43 @@ export async function saveLocalDocument(document: EditorDocument): Promise<void>
   } finally {
     database.close();
   }
+}
+
+/** Validated replacement and portable image bytes commit together. No media or
+ * current-project mutation is visible if preparation or the transaction fails.
+ * Call through the controller's serialized replacement boundary, never beside
+ * a pending autosave. Existing media/ledgers/checkpoints are not deleted. */
+export async function replaceLocalDocument(document: EditorDocument, options: {
+  media?: Array<Omit<LocalMediaBlob, 'createdAt'>>;
+  clearRecovery?: boolean;
+  assertCurrent: () => void;
+}): Promise<void> {
+  const validated = validateEditorDocument(document, { strictGraph: true });
+  const media = await Promise.all((options.media ?? []).map(async entry => {
+    if (entry.blob.size !== entry.byteSize || entry.blob.type !== entry.mimeType || await sha256Blob(entry.blob) !== entry.hash)
+      throw Error('Backup media changed or failed validation.');
+    return { hash: entry.hash, bytes: await entry.blob.arrayBuffer(), mimeType: entry.mimeType,
+      width: entry.width, height: entry.height, byteSize: entry.byteSize, createdAt: Date.now() } satisfies StoredLocalMediaBlob;
+  }));
+  const database = await openDatabase();
+  try {
+    options.assertCurrent();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction([STORE_NAME, MEDIA_STORE_NAME, PENDING_PROPOSAL_STORE_NAME], 'readwrite');
+      let failure: unknown;
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(failure ?? transaction.error ?? Error('Project replacement failed.'));
+      transaction.onabort = () => reject(failure ?? transaction.error ?? Error('Project replacement was aborted.'));
+      try {
+        const documents = transaction.objectStore(STORE_NAME);
+        documents.put({ ...validated, id: DOCUMENT_ID });
+        if (options.clearRecovery) documents.delete(RECOVERY_DOCUMENT_ID);
+        for (const entry of media) transaction.objectStore(MEDIA_STORE_NAME).put(entry);
+        transaction.objectStore(PENDING_PROPOSAL_STORE_NAME).clear();
+      } catch (error) { failure = error; transaction.abort(); }
+    });
+    for (const entry of media) sessionMediaPins.add(entry.hash);
+  } finally { database.close(); }
 }
 
 /** Atomic story edit against the latest saved project; future UI must use this

@@ -1,5 +1,5 @@
 import { canonicalRequest, requestDigest } from '../domain/cinema/request-digest';
-import { updateStoryWorkflow, storySourceIsStale, type StoryWorkflowData } from '../domain/cinema/story-workflow';
+import { updateStoryWorkflow, storySourceIsStale, hasUnresolvedStoryOutcome, type StoryWorkflowData } from '../domain/cinema/story-workflow';
 import { applyCinemaDomainCommand } from './cinema-domain-commands';
 import { planCinemaDraftInsertion } from './cinema-workspace-placement';
 import { validateEditorDocument } from './document-file';
@@ -138,8 +138,42 @@ export function storyContextDigest(document: EditorDocument, excludeSceneIds: re
 }
 export function changeStory(document: EditorDocument, change: (draft: StoryWorkflowData) => void): EditorDocument {
   if (!document.cinema || !storyPremise(document)) throw Error('Create a story premise first.');
-  return validateEditorDocument({ ...document, cinema: updateStoryWorkflow(document.cinema,
-    document.cinema.storyWorkflow?.revision ?? 0, change) });
+  const cinema = updateStoryWorkflow(document.cinema, document.cinema.storyWorkflow?.revision ?? 0, change);
+  const unresolved = unresolvedStoryOperation(document.cinema.storyWorkflow);
+  if (unresolved && cinema.storyWorkflow?.sessions.some((session) => session.stage === 'running'
+    && !document.cinema?.storyWorkflow?.sessions.some((previous) => previous.id === session.id && previous.stage === 'running'))) {
+    throw Error('Check the existing Story request before starting another. Its outcome is not yet known.');
+  }
+  if (document.nodes.find((node) => node.id === storyPremise(document)?.nodeId)?.data.locked
+    && canonicalRequest(storyEditableContent(document.cinema.storyWorkflow)) !== canonicalRequest(storyEditableContent(cinema.storyWorkflow))) {
+    throw Error('Unlock the Story premise before changing story content or proposals.');
+  }
+  return validateEditorDocument({ ...document, cinema });
+}
+
+/** Session history is authoritative across every Story panel, not a component's busy flag. */
+export function unresolvedStoryOperation(workflow: StoryWorkflowData | undefined) {
+  return workflow?.sessions.find(hasUnresolvedStoryOutcome);
+}
+
+/** Locks protect creative edits/adoption, not view state or durable error tracking. */
+function storyEditableContent(workflow: StoryWorkflowData | undefined) {
+  return workflow && {
+    draft: workflow.draft, briefs: workflow.briefs, references: workflow.references, bindings: workflow.bindings,
+    allocations: workflow.allocations,
+    sessions: workflow.sessions.map((session) => ({ id: session.id, mode: session.mode, anchorSceneId: session.anchorSceneId,
+      source: session.source, proposals: session.proposals, accepted: session.accepted,
+      decision: ['accepted', 'rejected'].includes(session.stage) ? session.stage : null })),
+    assistant: workflow.assistant && { answers: workflow.assistant.answers, checkpoint: workflow.assistant.checkpoint,
+      confirmedBriefVersion: workflow.assistant.confirmedBriefVersion },
+  };
+}
+
+export function assertStoryEditable(document: EditorDocument): void {
+  const premise = storyPremise(document);
+  if (!premise || document.nodes.find((node) => node.id === premise.nodeId)?.data.locked) {
+    throw Error('Unlock the Story premise before changing story content or proposals.');
+  }
 }
 /** Select saved proposals for local inspection without reviving a stale approval. */
 export function openStorySessionReview(document: EditorDocument, sessionId: string) {
@@ -174,6 +208,7 @@ export async function commitReviewedStoryDocument(getDocument: () => EditorDocum
   commit(apply(current, digest));
 }
 export function acceptStoryScenes(document: EditorDocument, sessionId: string, digest: string, partialConfirmed: boolean) {
+  assertStoryEditable(document);
   const cinema = document.cinema;
   const session = cinema?.storyWorkflow?.sessions.find((item) => item.id === sessionId);
   if (!cinema || !session || session.stage !== 'proposal-review' || session.mode === 'surprise') throw Error('This proposal is not available for acceptance.');

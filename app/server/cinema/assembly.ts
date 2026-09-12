@@ -1,9 +1,10 @@
 import 'server-only';
 import { ASSEMBLY_LIMITS, SequenceManifestSchema, sequenceRuntime, type SequenceManifest } from '../../features/assembly/sequence-manifest';
+import { isNativeRuntime } from './native-runtime';
 
 type NativeModules = { fs: typeof import('node:fs/promises'); os: typeof import('node:os'); path: typeof import('node:path'); child: typeof import('node:child_process'); crypto: typeof import('node:crypto') };
 async function nativeModules(): Promise<NativeModules> {
-  if (typeof process === 'undefined' || process.release?.name !== 'node' || typeof process.getBuiltinModule !== 'function') throw new Error('Local MP4 assembly requires a native Node server.');
+  if (!isNativeRuntime()) throw new Error('Local MP4 assembly requires a native Node server.');
   // Workers expose some Node compatibility modules but cannot spawn a renderer.
   const child = process.getBuiltinModule('node:child_process') as NativeModules['child'] | undefined;
   if (!child?.spawn) throw new Error('Local MP4 assembly is unavailable in this runtime.');

@@ -1,5 +1,5 @@
 import { cinemaDraftRole, type CinemaDraftRole } from '../domain/cinema/manual-creation';
-import { isCinemaHierarchyEdge } from './cinema-hierarchy';
+import { isCinemaHierarchyEdgeInIndex } from './cinema-hierarchy';
 import { richTextToPlainText } from './rich-text';
 import type { EditorEdge, EditorNode } from './types';
 
@@ -47,9 +47,9 @@ function nodeRole(node: EditorNode | undefined) {
     : null;
 }
 
-function isStructuralEdge(nodes: EditorNode[], edge: EditorEdge, byId: ReadonlyMap<string, EditorNode>) {
+function isStructuralEdge(edge: EditorEdge, byId: ReadonlyMap<string, EditorNode>) {
   if (!byId.has(edge.source) || !byId.has(edge.target) || edge.source === edge.target) return false;
-  if (isCinemaHierarchyEdge(nodes, edge)) return true;
+  if (isCinemaHierarchyEdgeInIndex(byId, edge)) return true;
   if (edge.data?.relationship === 'attachment') return true;
   if (edge.data?.relationship !== undefined) return false;
   const targetRole = nodeRole(byId.get(edge.target));
@@ -75,7 +75,7 @@ export function buildLayerStructure(
   const indexById = new Map(nodes.map((node, index) => [node.id, index]));
   const candidates = new Map<string, Set<string>>();
   for (const edge of edges) {
-    if (!isStructuralEdge(nodes, edge, byId)) continue;
+    if (!isStructuralEdge(edge, byId)) continue;
     const parents = candidates.get(edge.target) ?? new Set<string>();
     parents.add(edge.source);
     candidates.set(edge.target, parents);

@@ -26,7 +26,7 @@ export function SceneBriefDialog({
 }: {
   embedded?: boolean;
   defaults: SceneBriefDefaults;
-  providerMode: 'fixture' | 'live';
+  providerMode: 'fixture' | 'live' | 'loading';
   livePreflight: { ready: boolean; blockers: string[]; maxLiveRunCost: number | null } | null;
   inheritedContext?: { notes: string[]; excluded: string[]; directionLabel?: string };
   onCancel: () => void;
@@ -128,6 +128,7 @@ export function SceneBriefDialog({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     try {
+      if (providerMode === 'loading') throw new Error('Workspace availability is unknown. Refresh workspace status before planning.');
       if (providerMode === 'live' && !liveProviderConsent) {
         setErrors({ liveProviderConsent: 'Confirm the live provider content transfer to continue.' });
         window.requestAnimationFrame(() => document.getElementById('scene-brief-liveProviderConsent')?.focus());
@@ -192,7 +193,7 @@ export function SceneBriefDialog({
               <h2 id="scene-brief-title">Generate shot plan</h2>
             </div>
             <span className={`provider-mode-badge mode-${providerMode}`} aria-label={`${providerMode} provider mode`}>
-              {providerMode === 'live' ? 'Live mode' : 'Fixture mode'}
+              {providerMode === 'loading' ? 'Availability unknown' : providerMode === 'live' ? 'Live mode' : 'Fixture mode'}
             </span>
           </div>
           <p>{inheritedContext?.directionLabel ? 'Your approved story direction is already filled in. Review or adjust only what this scene needs.' : 'Describe the creative intent, AI-generation allowance, and physical-production reality separately.'}</p>
@@ -376,7 +377,7 @@ export function SceneBriefDialog({
           <p>AI-generation estimates are illustrative and never compared with the physical-production ceiling.</p>
           <div>
             <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
-            <button type="submit" className="primary-button">Generate shot plan</button>
+            <button type="submit" className="primary-button" disabled={providerMode === 'loading'}>Generate shot plan</button>
           </div>
         </footer>
       </form>

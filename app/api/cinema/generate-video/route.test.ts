@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerateVideoRequest, VideoOperationResponse, VideoPreflightResponse } from '../../../features/video/video-api';
 import { ownedVideoOperationUrl, videoApprovalContent } from '../../../features/video/video-api';
 import { operationDigest } from '../../../server/cinema/operation-repository';
-import { FixtureVideoProvider, VertexVideoProvider } from '../../../server/cinema/video-provider';
+import { ConfirmedVideoFailure, FixtureVideoProvider, VertexVideoProvider } from '../../../server/cinema/video-provider';
 import { DELETE, GET, POST } from './route';
+import { localVideoOperationStore } from '../../../server/cinema/video-operation-store';
+import { FIXTURE_VIDEO_CAPABILITIES } from '../../../server/cinema/video-capabilities';
 
+let testProject = 'project-1';
 function payload(id: string): GenerateVideoRequest {
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jxWQAAAAASUVORK5CYII=';
   return {
@@ -12,7 +15,7 @@ function payload(id: string): GenerateVideoRequest {
     idempotencyKey: id,
     shotId: 'shot-1',
     revisionId: 'revision-1',
-    projectId: 'project-1', sceneId: 'scene-1',
+    projectId: testProject, sceneId: 'scene-1',
     acceptedPlan: true,
     prompt: { id: 'video-prompt-1', version: 1, text: 'Slow push toward the auditorium screen.', purpose: 'video', negativeConstraints: ['No extra people'], status: 'approved' },
     startFrame: { id: 'frame-1', status: 'approved', mimeType: 'image/png', base64: png, byteSize: Buffer.from(png, 'base64').length },
@@ -37,13 +40,13 @@ async function dispatch(request: GenerateVideoRequest) {
   }));
 }
 
-async function poll(id: string) {
-  const response = await GET(new Request(ownedUrl(id)));
+async function poll(id: string, reconcile = false) {
+  const response = await GET(new Request(`${ownedUrl(id)}${reconcile ? '&reconcile=1' : ''}`));
   return response.json() as Promise<VideoOperationResponse>;
 }
-function ownedUrl(id: string) { return `http://localhost${ownedVideoOperationUrl({ operationId: id, projectId: 'project-1', sceneId: 'scene-1', shotId: 'shot-1', revisionId: 'revision-1' })}`; }
+function ownedUrl(id: string) { return `http://localhost${ownedVideoOperationUrl({ operationId: id, projectId: testProject, sceneId: 'scene-1', shotId: 'shot-1', revisionId: 'revision-1' })}`; }
 
-beforeEach(() => vi.stubEnv('CINESERYE_VIDEO_OPERATION_DB_PATH', ':memory:'));
+beforeEach(() => { testProject = `project-${crypto.randomUUID()}`; vi.stubEnv('CINESERYE_VIDEO_OPERATION_DB_PATH', ':memory:'); });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -53,6 +56,48 @@ afterEach(() => {
 });
 
 describe('video operation route', () => {
+  it('only explicit reconciliation renews the observation window, never the provider start time', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000);
+    const id = 'video-observation-window', store = await localVideoOperationStore();
+    const owner = { projectId: testProject, sceneId: 'scene-1', shotId: 'shot-1', revisionId: 'revision-1', operationId: id };
+    const dispatchSpy = vi.fn(async () => ({ name: 'original-handle', startedAt: 1000 }));
+    await store.start({ version: 1, owner, digest: operationDigest('window-test'), mode: 'live',
+      provider: { id: 'google-vertex-ai', model: 'model', project: 'project', location: 'region' },
+      capability: FIXTURE_VIDEO_CAPABILITIES, settings: payload(id).settings, handle: { name: '', startedAt: 1000 },
+      status: 'queued', estimatedCost: 1, currency: 'USD', error: null, clip: null }, dispatchSpy);
+    const providerPoll = vi.spyOn(VertexVideoProvider.prototype, 'poll').mockImplementation(async handle => ({ handle, status: 'running', clip: null }));
+    vi.setSystemTime(1000 + 16 * 60 * 1000);
+    expect(await poll(id)).toMatchObject({ operation: { status: 'unknown' } });
+    expect(await poll(id)).toMatchObject({ operation: { status: 'unknown' } });
+    expect(providerPoll).not.toHaveBeenCalled();
+    const resumed = await GET(new Request(`${ownedUrl(id)}&reconcile=1`));
+    expect(await resumed.json()).toMatchObject({ operation: { status: 'running' } });
+    vi.setSystemTime(1000 + 17 * 60 * 1000);
+    expect(await poll(id)).toMatchObject({ operation: { status: 'running' } });
+    expect(providerPoll).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(1000 + 32 * 60 * 1000);
+    expect(await poll(id)).toMatchObject({ operation: { status: 'unknown' } });
+    expect(providerPoll).toHaveBeenCalledTimes(2);
+    expect(store.read(owner).handle).toEqual({ name: 'original-handle', startedAt: 1000 });
+    expect(dispatchSpy).toHaveBeenCalledTimes(1);
+  });
+  it('a poll transport failure stays unknown and can reconcile the same handle without another start', async () => {
+    const dispatchSpy = vi.spyOn(FixtureVideoProvider.prototype, 'start');
+    const id = 'video-poll-unknown-1';
+    await start(payload(id));
+    const pollSpy = vi.spyOn(FixtureVideoProvider.prototype, 'poll').mockRejectedValueOnce(Error('Network down'));
+    expect(await poll(id)).toMatchObject({ ok: true, operation: { status: 'unknown', clip: null } });
+    const returned = await poll(id, true);
+    expect(returned).toMatchObject({ ok: true, operation: { status: 'running', error: null } });
+    expect(pollSpy).toHaveBeenCalledTimes(2); expect(dispatchSpy).toHaveBeenCalledTimes(1);
+  });
+  it('only an explicitly confirmed provider failure is a terminal failed result', async () => {
+    const id = 'video-poll-known-failure'; await start(payload(id));
+    const pollSpy = vi.spyOn(FixtureVideoProvider.prototype, 'poll').mockRejectedValueOnce(new ConfirmedVideoFailure());
+    expect(await poll(id)).toMatchObject({ ok: true, operation: { status: 'failed', clip: null } });
+    expect(await poll(id)).toMatchObject({ ok: true, operation: { status: 'failed', clip: null } });
+    expect(pollSpy).toHaveBeenCalledTimes(1);
+  });
   it('S6-IT-01 exposes capability preflight and progresses through a reload-safe operation identity', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-02T00:00:00.000Z'));

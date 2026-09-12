@@ -85,6 +85,8 @@ export type CinemaStoryboardFrameRecord = {
 };
 
 export type CinemaVideoOperationStatus =
+  | 'unknown'
+  | 'expired'
   | 'queued'
   | 'running'
   | 'finalizing'
@@ -123,6 +125,8 @@ export type CinemaVideoOperationRecord = {
   currency: 'USD' | null;
   providerOperationId: string | null;
   status: CinemaVideoOperationStatus;
+  /** Missing in old backups: never infer confirmed live failure from old labels. */
+  failureConfirmed?: boolean;
   retryOf: string | null;
   consentedAt: string;
   startedAt: string;
@@ -197,6 +201,10 @@ function nullableText(value: unknown, label: string, max = 4_000): string | null
 function enumValue<T extends string>(value: unknown, values: readonly T[], label: string): T {
   if (typeof value !== 'string' || !values.includes(value as T)) throw new Error(`${label} is unsupported.`);
   return value as T;
+}
+function booleanValue(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw Error(`${label} must be a boolean.`);
+  return value;
 }
 
 function ids(value: unknown, label: string): string[] {
@@ -410,7 +418,8 @@ export function validateVisualPreproductionData(
       estimatedCost: nullableNumber(item.estimatedCost, 'Video estimated cost'),
       currency: item.currency === null ? null : enumValue(item.currency, ['USD'], 'Video currency'),
       providerOperationId: optionalNullableText(item.providerOperationId, 'Provider video operation id', 500),
-      status: enumValue(item.status, ['queued', 'running', 'finalizing', 'ready', 'failed', 'cancelled', 'timed-out'], 'Video operation status'),
+      status: enumValue(item.status, ['queued', 'running', 'finalizing', 'ready', 'failed', 'cancelled', 'timed-out', 'unknown', 'expired'], 'Video operation status'),
+      failureConfirmed: item.failureConfirmed === undefined ? false : booleanValue(item.failureConfirmed, 'Confirmed video failure'),
       retryOf: optionalNullableText(item.retryOf, 'Video retry operation id', 160),
       consentedAt: iso(item.consentedAt, 'Video consent time'),
       startedAt: iso(item.startedAt, 'Video start time'),

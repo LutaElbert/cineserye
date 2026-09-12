@@ -14,6 +14,9 @@ import { readAssistantStream } from './assistant-client';
 import type { StoryQuote } from './contracts';
 import { resolvePromptReferenceMentions } from './prompt-composer-model';
 import type { OperationProgress } from '../../domain/cinema/generation-operation';
+import type { WorkflowCapabilities } from './workflow-capabilities';
+import { useWorkspaceAdmission } from '../simplified-flow/useWorkspaceAdmission';
+import { ensureClientOperation, observeClientOperation } from '../simplified-flow/operation-journal';
 
 export const assistantRefLimits = { maxImages: 8, maxBytes: 12 * 1024 * 1024, maxNoteCharacters: 20000 };
 export function assistantSourceIdentity(document: EditorDocument) {
@@ -29,7 +32,8 @@ export function assistantSourceIdentity(document: EditorDocument) {
     draft: workflow?.draft ?? initialPremiseDraft(draftSource), references: workflow?.references ?? [], bindings: workflow?.bindings ?? [] });
 }
 export function useStoryAssistant(current: EditorDocument, getDocument: () => EditorDocument,
-  commit: (document: EditorDocument, history?: boolean) => void, flush: () => Promise<unknown>) {
+  commit: (document: EditorDocument, history?: boolean) => void, flush: () => Promise<unknown>, capabilities: WorkflowCapabilities | null) {
+  const captureAdmission = useWorkspaceAdmission(capabilities);
   const running = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -123,13 +127,18 @@ export function useStoryAssistant(current: EditorDocument, getDocument: () => Ed
     }), checkpoint.stage === 'confirmed');
     await flush();
   };
-  const execute = async (mode: 'fixture' | 'live', quote: StoryQuote | null, consent: boolean, approvedIdentity: string, resume = false) => {
+  const execute = async (mode: 'fixture' | 'live', quote: StoryQuote | null, consent: boolean, approvedIdentity: string, resume = false, approvalCurrent: () => boolean = () => true) => {
     if (running.current) return;
     const controller = new AbortController(); running.current = controller; setBusy(true); setError(''); setProgress([]);
-    let operationId = ''; let projectId = '';
+    let operationId = ''; let projectId = ''; let dispatched = false; let journalRecorded = false; let previous: StoryAssistant | undefined;
+    let journalScope = '';
     try {
+      const requireAdmission = captureAdmission(mode);
+      const requireApproval = () => { requireAdmission(); if (!approvalCurrent()) throw Error('Analysis estimate changed. Review and approve the current estimate again.'); };
+      requireApproval();
       const source = getDocument(); editable(source);
       const state = source.cinema?.storyWorkflow?.assistant; if (!state) throw Error('Open Story assistance first.');
+      previous = state;
       projectId = source.cinema!.projectId;
       const identity = assistantSourceIdentity(source), localDigest = await requestDigest(identity);
       if (approvedIdentity !== identity) throw Error('The premise or references changed. Review again.');
@@ -147,6 +156,7 @@ export function useStoryAssistant(current: EditorDocument, getDocument: () => Ed
         forwardedProps = { command: 'analyze', mode, input, consent: true, quoteId: quote.quoteId, contentDigest: await requestDigest({ input, quoteId: quote.quoteId }) };
       }
       controller.signal.throwIfAborted();
+      requireApproval();
       if (assistantSourceIdentity(getDocument()) !== identity) throw Error('The source changed while preparing references. Review again.');
       mutate((value) => {
         if (!resume && value.checkpoint && value.answers.length) {
@@ -157,6 +167,16 @@ export function useStoryAssistant(current: EditorDocument, getDocument: () => Ed
         value.operationId = operationId; value.sourceDigest = localDigest; value.state = 'understanding'; value.error = null;
       }); await flush();
       controller.signal.throwIfAborted();
+      requireApproval();
+      if (assistantSourceIdentity(getDocument()) !== identity || getDocument().cinema?.storyWorkflow?.assistant?.operationId !== operationId) throw Error('The source changed before dispatch. Review again.');
+      journalScope = storyPremise(source)!.nodeId;
+      const journalOwner = { projectId, kind: 'story-analysis' as const, scopeKey: journalScope };
+      ensureClientOperation({ id: operationId, ...journalOwner, sourceFingerprint: localDigest,
+        provider: mode === 'fixture' ? 'cineserye-story-assistant-fixture' : 'configured-story-provider',
+        model: quote?.model ?? null, estimateUsd: quote?.cost ?? null }, { phase: 'intent', dispatchCertainty: 'not-dispatched' });
+      journalRecorded = true;
+      observeClientOperation(operationId, journalOwner, { phase: 'dispatched', dispatchCertainty: 'may-have-dispatched' });
+      dispatched = true;
       const response = await fetch('/api/cinema/story-assistant', { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ threadId: projectId, runId: operationId, state: {}, messages: [], tools: [], context: [], forwardedProps, ...(resumeInput.length ? { resume: resumeInput } : {}) }) });
       const checkpoint = await readAssistantStream(response, projectId, operationId, (step) => {
@@ -166,11 +186,19 @@ export function useStoryAssistant(current: EditorDocument, getDocument: () => Ed
       });
       controller.signal.throwIfAborted();
       await applyCheckpoint(checkpoint, identity, localDigest, operationId);
+      observeClientOperation(operationId, journalOwner, { phase: 'awaiting-review', dispatchCertainty: 'completed', lastError: null });
     } catch (error) {
       const message = (error as Error).message; setError(controller.signal.aborted ? '' : message);
       if (operationId && getDocument().cinema?.projectId === projectId) mutate((value) => {
-        if (value.operationId === operationId && value.state === 'understanding') { value.state = 'outcome-unknown'; value.error = message.slice(0, 2000); }
+        if (value.operationId === operationId && value.state === 'understanding') {
+          if (!dispatched && previous) { value.state = previous.state; value.operationId = previous.operationId; value.sourceDigest = previous.sourceDigest; }
+          else value.state = 'outcome-unknown';
+          value.error = message.slice(0, 2000);
+        }
       });
+      if (journalRecorded) try { observeClientOperation(operationId, { projectId, kind: 'story-analysis', scopeKey: journalScope }, {
+        phase: dispatched ? 'unknown' : 'failed', dispatchCertainty: dispatched ? 'may-have-dispatched' : 'not-dispatched', lastError: message,
+      }); } catch { /* Older/corrupt records remain visible through their own recovery warning. */ }
     } finally { running.current = null; setBusy(false); }
   };
   const recover = async () => {
@@ -183,11 +211,19 @@ export function useStoryAssistant(current: EditorDocument, getDocument: () => Ed
       const result = await response.json() as { status?: string; checkpoint?: unknown };
       if (!response.ok || result.status !== 'completed') throw Error('No saved result yet. The outcome may be unknown; no analysis was restarted.');
       await applyCheckpoint(AssistantCheckpointSchema.parse(result.checkpoint), identity, digest, state.operationId);
+      try { observeClientOperation(state.operationId, { projectId: source.cinema!.projectId, kind: 'story-analysis',
+        scopeKey: state.premiseNodeId }, { phase: 'awaiting-review', dispatchCertainty: 'completed', lastError: null }); } catch { /* Legacy request. */ }
     } catch (error) { setError((error as Error).message); }
   };
   return { assistant, sourceIdentity, busy, error, progress, open, execute, recover,
     change: mutate,
-    cancel: () => { running.current?.abort(); mutate((state) => { state.state = 'cancelled'; state.error = 'Cancelled locally. Dispatched work may still be billed; late results will not apply.'; }); },
+    cancel: () => { running.current?.abort(); mutate((state) => { state.state = 'cancelled'; state.error = 'Cancelled locally. Dispatched work may still be billed; late results will not apply.';
+      if (state.operationId && current.cinema) try {
+        observeClientOperation(state.operationId, { projectId: current.cinema.projectId, kind: 'story-analysis', scopeKey: state.premiseNodeId }, {
+          phase: 'tracking-stopped', dispatchCertainty: 'may-have-dispatched', lastError: state.error,
+        });
+      } catch { /* Legacy request. */ }
+    }); },
   };
 }
 export type StoryAssistantController = ReturnType<typeof useStoryAssistant>;

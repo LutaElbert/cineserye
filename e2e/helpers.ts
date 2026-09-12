@@ -1,7 +1,13 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export async function openEditor(page: Page) {
-  await page.goto('/');
+  // The editor's readiness contract is hydration plus an actionable graph,
+  // checked below, not completion of every page load resource.
+  // Some engines can leave the navigation lifecycle pending after the fully
+  // hydrated editor is already usable under a saturated native matrix. Commit
+  // is the only navigation signal needed; the assertions below are the actual
+  // application readiness contract.
+  await page.goto('/', { waitUntil: 'commit' });
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
   const chooser = page.getByRole('dialog', { name: /Start with your scene/ });
   if (await chooser.count()) {
@@ -10,6 +16,10 @@ export async function openEditor(page: Page) {
   }
   await expect(page.locator('.react-flow__node')).toHaveCount(3);
   await expect(page.locator('.react-flow__edge')).toHaveCount(2);
+  // Hydration and node counts precede the intentional first-run fit animation.
+  // Pointer actionability waits for real visible, stable geometry before tests
+  // measure it or derive a creation point from the current viewport.
+  await page.locator('.react-flow__node').first().hover();
 }
 
 export async function addCinemaDraft(page: Page, role: string, finishEditing = false) {
@@ -41,9 +51,25 @@ export function canvasNode(page: Page, name: string): Locator {
   return page.locator('.react-flow__node').filter({ hasText: name }).first();
 }
 
+/** React Flow can publish hydrated nodes before a scheduled fit animation has
+ * finished. Pointer tests must wait for the viewport itself, not just nodes. */
+export async function waitForCanvasSettled(page: Page) {
+  const viewport = page.locator('.react-flow__viewport');
+  let previous: string | null = null;
+  let stableSamples = 0;
+  await expect.poll(async () => {
+    const current = await viewport.getAttribute('style');
+    stableSamples = current === previous ? stableSamples + 1 : 0;
+    previous = current;
+    return stableSamples;
+  }, { intervals: [100], timeout: 5_000 }).toBeGreaterThanOrEqual(3);
+}
+
 export async function connectLayers(page: Page, sourceName: string, targetName: string) {
   const sourceHandle = canvasNode(page, sourceName).locator('.react-flow__handle.source').first();
   const targetHandle = canvasNode(page, targetName).locator('.react-flow__handle.target').first();
+  await sourceHandle.hover();
+  await targetHandle.hover();
   const sourceBox = await sourceHandle.boundingBox();
   const targetBox = await targetHandle.boundingBox();
   expect(sourceBox).toBeTruthy();

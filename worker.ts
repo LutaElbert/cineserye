@@ -1,10 +1,12 @@
 import app from 'vinext/server/app-router-entry';
+import { disableNativeRuntime } from './app/server/cinema/native-runtime';
 
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
   "connect-src 'self' data:",
@@ -29,6 +31,9 @@ type AppContext = Parameters<typeof app.fetch>[2];
 
 const worker = {
   async fetch(request: Request, environment?: AppEnvironment, context?: AppContext) {
+    // vinext start also loads this entry, and supplies a trusted hostRuntime.
+    // Workerd's ExecutionContext has no native marker. Never infer it from headers.
+    if (context?.hostRuntime !== 'node') disableNativeRuntime();
     const response = await app.fetch(request, environment, context);
     const headers = new Headers(response.headers);
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);

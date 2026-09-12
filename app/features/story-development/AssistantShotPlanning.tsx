@@ -1,5 +1,7 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { WorkflowCapabilities } from './workflow-capabilities';
+import { useWorkspaceAdmission } from '../simplified-flow/useWorkspaceAdmission';
 import { ArrowRight, Check, Clapperboard, LoaderCircle } from 'lucide-react';
 import { ScopedShotStateSchema, ScopedShotResponseSchema, scopedShotApprovalContent, scopedShotRetryEligible, scopedShotRetryParentContent, type ScopedShotRetry, type ScopedShotInput, type ScopedShotQuote, type ScopedShotState } from '../../domain/cinema/scoped-shot-planning';
 import { canonicalRequest, requestDigest } from '../../domain/cinema/request-digest';
@@ -10,10 +12,12 @@ import type { EditorDocument } from '../../editor/types';
 import { SequenceReview } from '../assembly/SequenceReview';
 import { SceneAllocationCorrection } from './SceneAllocationCorrection';
 import { continuityReuseSummary } from '../../domain/cinema/continuity-identity';
+import { ensureClientOperation, observeClientOperation } from '../simplified-flow/operation-journal';
 
 type Props = { document: EditorDocument; getDocument: () => EditorDocument; commit: (document: EditorDocument, history?: boolean) => void;
-  flush: () => Promise<unknown>; providerMode: 'fixture' | 'live' | 'loading'; onOpenLayer: (nodeId: string) => void; onExpand?: () => void };
-export function AssistantShotPlanning({ document, getDocument, commit, flush, providerMode, onOpenLayer, onExpand }: Props) {
+  flush: () => Promise<unknown>; providerMode: 'fixture' | 'live' | 'loading'; capabilities: WorkflowCapabilities | null; onOpenLayer: (nodeId: string) => void; onExpand?: () => void; reviewOnOpen?: boolean; onReviewSequence?: () => void };
+export function AssistantShotPlanning({ document, getDocument, commit, flush, providerMode, capabilities, onOpenLayer, onExpand, reviewOnOpen, onReviewSequence }: Props) {
+  const captureAdmission = useWorkspaceAdmission(capabilities);
   const cinema = document.cinema!;
   const saved = cinema.storyWorkflow?.shotPlanning;
   const defaultSceneIds = storyReviewSession(cinema.storyWorkflow)?.accepted.map((item) => item.sceneId) ?? [];
@@ -22,9 +26,15 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
   const sceneIds = scope?.key === scopeKey ? scope.ids : defaultSceneIds;
   const setSceneIds = (value: string[] | ((ids: string[]) => string[])) => setScope({ key: scopeKey, ids: typeof value === 'function' ? value(sceneIds) : value });
   const [changing, setChanging] = useState(false);
-  const [quote, setQuote] = useState<ScopedShotQuote | null>(null);
+  const [estimate, setEstimate] = useState<{ value: ScopedShotQuote; workspace: WorkflowCapabilities } | null>(null);
+  const quote = capabilities && estimate?.workspace === capabilities ? estimate.value : null;
   const [input, setInput] = useState<ScopedShotInput | null>(null);
   const [retry, setRetry] = useState<ScopedShotRetry | null>(null);
+  const currentReview = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    currentReview.current = {};
+    return () => { currentReview.current = null; };
+  }, [input, quote, retry]);
   const [retryIds, setRetryIds] = useState<string[] | null>(null);
   const [selectedResults, setSelectedResults] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,6 +73,17 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
     state.acceptedSceneIds = snapshot.acceptedSceneIds;
     return state;
   };
+  const shotJournalOwner = (state: Pick<ScopedShotState, 'projectId' | 'inputDigest'>) => ({
+    projectId: state.projectId, kind: 'shot-plan' as const, scopeKey: state.inputDigest,
+  });
+  const observeShotJournal = (state: ScopedShotState) => {
+    const completed = state.jobs.filter((job) => job.status === 'ready').length;
+    const phase = state.status === 'running' ? 'running' : state.status === 'review' ? 'awaiting-review'
+      : state.status === 'cancelled' ? 'tracking-stopped' : 'unknown';
+    try { observeClientOperation(state.requestId, shotJournalOwner(state), { phase,
+      dispatchCertainty: phase === 'awaiting-review' ? 'completed' : 'may-have-dispatched',
+      lastError: state.jobs.find((job) => job.error)?.error ?? null, completedUnits: completed, totalUnits: state.jobs.length }); } catch { /* Legacy request. */ }
+  };
   const recover = async () => {
     if (!saved || busy) return;
     setBusy(true); setError('');
@@ -82,14 +103,15 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
         state = child;
       }
       if (getDocument().cinema?.storyWorkflow?.shotPlanning?.requestId !== saved.requestId) return;
-      save(state); setRetryIds(null); setInput(null); setRetry(null); setSelectedResults(null);
+      save(state); observeShotJournal(state); setRetryIds(null); setInput(null); setRetry(null); setSelectedResults(null);
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   };
   const prepareRetry = async () => {
-    if (!saved || busy || providerMode === 'loading') return;
+    if (!saved || busy || providerMode === 'loading' || !capabilities) return;
     setBusy(true); setError(''); onExpand?.();
     try {
+      const requireAdmission = captureAdmission(providerMode);
       const state = await readSaved(saved);
       if (state.status === 'running' || state.successorRequestId) throw Error('This request is still active or already has a retry. Check saved status first.');
       const ids = retryIds ?? state.jobs.filter(scopedShotRetryEligible).map((job) => job.sceneId);
@@ -99,9 +121,11 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
       const response = await fetch('/api/cinema/plan-scenes'); const payload = ScopedShotResponseSchema.parse(await response.json());
       if (!response.ok || !payload.ok || !payload.quote || payload.quote.mode !== providerMode || payload.quote.mode !== state.mode || payload.quote.model !== state.model) throw Error('The provider changed. Existing results are kept; review a separate new scope.');
       if (getDocument().cinema?.storyWorkflow?.shotPlanning?.requestId !== saved.requestId) return;
+      const parentStateDigest = await requestDigest(scopedShotRetryParentContent(state));
+      requireAdmission();
       save(state);
-      setRetry({ parentRequestId: state.requestId, parentStateDigest: await requestDigest(scopedShotRetryParentContent(state)), jobs: jobs.map(({ sceneId, runId, sourceDigest }) => ({ sceneId, runId, sourceDigest })) });
-      setQuote(payload.quote); setInput(state.input); setChanging(false);
+      setRetry({ parentRequestId: state.requestId, parentStateDigest, jobs: jobs.map(({ sceneId, runId, sourceDigest }) => ({ sceneId, runId, sourceDigest })) });
+      setEstimate({ value: payload.quote, workspace: capabilities }); setInput(state.input); setChanging(false);
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   };
@@ -139,6 +163,7 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
         if (latest.cinema.storyWorkflow.shotPlanning.status === 'cancelled') return;
         state.acceptedSceneIds = latest.cinema.storyWorkflow.shotPlanning.acceptedSceneIds;
         if (canonicalRequest(state) !== canonicalRequest(latest.cinema.storyWorkflow.shotPlanning)) documentRef.current.commit(changeStory(latest, (workflow) => { workflow.shotPlanning = state; }), false);
+        observeShotJournal(state);
         if (state.status === 'running') timer = setTimeout(poll, 1000);
       } catch (error) { if (!stopped) { setError((error as Error).message); timer = setTimeout(poll, 4000); } }
     };
@@ -154,27 +179,56 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saved?.requestId, saved?.status, saved?.projectId]);
   const prepare = async () => {
-    if (busy || providerMode === 'loading') return;
+    if (busy || providerMode === 'loading' || !capabilities) return;
     onExpand?.();
     setBusy(true); setError('');
     try {
+      const requireAdmission = captureAdmission(providerMode);
       const source = getDocument();
       const prepared = await buildScopedShotInput(source, sceneIds);
       const response = await fetch('/api/cinema/plan-scenes'); const payload = ScopedShotResponseSchema.parse(await response.json());
       if (!response.ok || !payload.ok || !payload.quote || payload.quote.mode !== providerMode) throw Error(payload.error ?? 'Provider mode changed. Refresh the feature status.');
-      setQuote(payload.quote); setInput(prepared); setRetry(null); setChanging(false);
+      requireAdmission();
+      setEstimate({ value: payload.quote, workspace: capabilities }); setInput(prepared); setRetry(null); setChanging(false);
     } catch (error) { setError((error as Error).message); }
     finally { setBusy(false); }
   };
+  const reviewedOpen = useRef(false);
+  useEffect(() => {
+    if (!reviewOnOpen || reviewedOpen.current || saved || input || busy) return;
+    reviewedOpen.current = true;
+    void prepare();
+    // Explicit scene acceptance may enter this read-only review. It cannot
+    // dispatch shot planning and will not repeat on render or reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewOnOpen]);
   const start = async () => {
     if (!quote?.ready || !input || busy) return;
     setBusy(true); setError('');
     let operationId: string | null = null;
-    let dispatched = false;
+    let dispatched = false, journalRecorded = false;
     let original: ScopedShotState | undefined;
     let knownRejected = false;
     try {
+      const requireAdmission = captureAdmission(quote.mode);
+      const approvedReview = currentReview.current;
+      const requireReview = () => {
+        requireAdmission();
+        if (!approvedReview || currentReview.current !== approvedReview) throw Error('The planning review changed. Review the request again.');
+      };
+      // Hashing yields to edits, cancellation and project replacement. Compare
+      // synchronous source/operation snapshots around those awaits, and never
+      // yield between the final comparison and POST. Canvas pan/selection and
+      // save timestamps are intentionally outside the approval identity.
+      const reviewedIds = retry?.jobs.map((job) => job.sceneId) ?? input.scenes.map((scene) => scene.sceneId);
+      const sourceIdentity = (value: EditorDocument) => {
+        if (value.cinema?.projectId !== input.projectId || !value.nodes.some((node) => node.id === input.premiseNodeId)) return null;
+        return canonicalRequest({ operation: value.cinema.storyWorkflow?.shotPlanning ?? null,
+          scenes: reviewedIds.map((id) => ({ eligible: scopedSceneEligibility(value, id),
+            source: scopedSceneIdentity(value, id, retry ? input.scenes.find((scene) => scene.sceneId === id)?.continuityIds : undefined) })) });
+      };
       const source = getDocument();
+      const beforePreparation = sourceIdentity(source);
       original = source.cinema?.storyWorkflow?.shotPlanning;
       if (retry) {
         if (!original || original.requestId !== retry.parentRequestId || await requestDigest(scopedShotRetryParentContent(original)) !== retry.parentStateDigest) throw Error('The saved retry scope changed. Review it again.');
@@ -197,19 +251,31 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
           ? { ...job, runId: crypto.randomUUID(), retryOfRunId: job.runId, attemptRequestId: requestId, status: 'queued', result: null, error: null, dispatchState: undefined }
           : job);
       }
+      requireReview();
+      if (sourceIdentity(getDocument()) !== beforePreparation) throw Error('The source or active request changed before dispatch. Review again.');
       save(placeholder); await flush();
       const current = getDocument();
       if (current.cinema?.projectId !== input.projectId || current.cinema.storyWorkflow?.shotPlanning?.requestId !== requestId || current.cinema.storyWorkflow.shotPlanning.status !== 'running') throw Error('The active request changed before dispatch.');
+      const beforeFinalDigest = sourceIdentity(current);
       if (retry) await validateReviewedScenes(current, input, retry.jobs.map((job) => job.sceneId));
       else {
         const afterFlush = await buildScopedShotInput(current, input.scenes.map((scene) => scene.sceneId));
         if (canonicalRequest(afterFlush) !== canonicalRequest(input)) throw Error('Content changed before dispatch. Review again.');
       }
+      requireReview();
+      if (sourceIdentity(getDocument()) !== beforeFinalDigest) throw Error('The source or active request changed before dispatch. Review again.');
+      ensureClientOperation({ id: requestId, ...shotJournalOwner(placeholder), sourceFingerprint: contentDigest,
+        provider: quote.mode === 'fixture' ? 'cineserye-shot-plan-fixture' : 'configured-shot-planning-provider',
+        model: quote.model, estimateUsd: total }, { phase: 'intent', dispatchCertainty: 'not-dispatched' });
+      journalRecorded = true;
+      observeClientOperation(requestId, shotJournalOwner(placeholder), { phase: 'dispatched', dispatchCertainty: 'may-have-dispatched',
+        completedUnits: 0, totalUnits: placeholder.jobs.length });
       dispatched = true;
       const response = await fetch('/api/cinema/plan-scenes', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ version: 1, requestId, input, quoteId: quote.quoteId, contentDigest, consent: true, approvedEstimate: total, mode: quote.mode, ...(retry ? { retry } : {}) }) });
       const payload = ScopedShotResponseSchema.parse(await response.json());
       if (!response.ok || !payload.ok) { knownRejected = payload.dispatchCertainty === 'not-dispatched'; throw Error(payload.error ?? 'Planning could not start.'); }
+      if (payload.state) observeShotJournal(payload.state);
       const latest = getDocument();
       const active = latest.cinema?.projectId === input.projectId && latest.cinema.storyWorkflow?.shotPlanning?.requestId === requestId;
       if (active && latest.cinema!.storyWorkflow!.shotPlanning!.status !== 'cancelled') {
@@ -226,7 +292,7 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
     } catch (error) {
       setError((error as Error).message);
       const current = getDocument(), state = current.cinema?.storyWorkflow?.shotPlanning;
-      if (operationId && state?.requestId === operationId && state.status === 'running') {
+      if (current.cinema?.projectId === input.projectId && operationId && state?.requestId === operationId && state.status === 'running') {
         if (retry && original && (!dispatched || knownRejected)) {
           const parent = original;
           commit(changeStory(current, (workflow) => {
@@ -240,6 +306,10 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
         if (uncertain) void fetch(`/api/cinema/plan-scenes?projectId=${encodeURIComponent(state.projectId)}&requestId=${operationId}`, { method: 'DELETE' }).catch(() => undefined);
         if (uncertain) { setInput(null); setRetry(null); }
       }
+      if (journalRecorded && operationId) try { observeClientOperation(operationId, { projectId: input.projectId, kind: 'shot-plan', scopeKey: await requestDigest(scopedShotApprovalContent(input, quote.quoteId, retry ?? undefined)) }, {
+        phase: dispatched && !knownRejected ? 'unknown' : 'failed', dispatchCertainty: dispatched && !knownRejected ? 'may-have-dispatched' : 'not-dispatched',
+        lastError: error instanceof Error ? error.message : 'Planning could not start.', completedUnits: null, totalUnits: null,
+      }); } catch { /* Preserve the saved document operation if local recovery is older. */ }
     }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -257,6 +327,7 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
       const current = getDocument(), latest = current.cinema?.storyWorkflow?.shotPlanning;
       if (current.cinema?.projectId !== saved.projectId || latest?.requestId !== saved.requestId) return;
       const state = ScopedShotStateSchema.parse(payload.state); state.status = 'cancelled'; state.acceptedSceneIds = latest.acceptedSceneIds; save(state);
+      observeShotJournal(state);
     } catch (error) { setError((error as Error).message); }
   };
   const ready = saved?.jobs.filter((job) => job.status === 'ready' && !saved.acceptedSceneIds.includes(job.sceneId)) ?? [];
@@ -329,7 +400,7 @@ export function AssistantShotPlanning({ document, getDocument, commit, flush, pr
           <p>These calls were confirmed not sent. Unknown or completed calls cannot be retried here.</p>
           {retryable.map((job) => <label className="assistant-check" key={job.sceneId}><input type="checkbox" checked={selectedRetryIds.includes(job.sceneId)} onChange={(event) => setRetryIds(event.target.checked ? [...selectedRetryIds, job.sceneId] : selectedRetryIds.filter((id) => id !== job.sceneId))} />{job.title}</label>)}
           <button disabled={busy || !selectedRetryIds.length} onClick={() => void prepareRetry()}>Review retry for {selectedRetryIds.length} scenes</button></section>}
-        {accepted.length > 0 && <details><summary>Review sequence & export</summary><SequenceReview cinema={cinema} onNotice={setError} /></details>}
+        {accepted.length > 0 && (onReviewSequence ? <button type="button" onClick={onReviewSequence}>Review sequence in Edit</button> : <details><summary>Review sequence & export</summary><SequenceReview cinema={cinema} capabilities={capabilities} onNotice={setError} /></details>)}
       </>}
     </div>
     <footer className="assistant-stage-footer">

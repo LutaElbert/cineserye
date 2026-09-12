@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { createDiagramPng, waitForSaved } from './helpers';
 
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'New workflow verification uses only the task-owned fixture server on 3040.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.setViewportSize({ width: 1440, height: 900 });
   // This suite exercises local authoring only and may never dispatch generation.
   await page.route('**/api/cinema/**', async (route) => {

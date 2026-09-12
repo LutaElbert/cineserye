@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { openEditor, openSelectedScenePlanner } from './helpers';
 
 test.beforeEach(async ({ page }) => {
-  test.skip(new URL(process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000').port !== '3040', 'Use the isolated fixture origin.');
+  expect(process.env.CINESERYE_E2E_RUNTIME).toBe('node-fixture');
   await page.route('**/api/cinema/**', async (route) => {
     if (route.request().method() === 'POST') await route.abort('blockedbyclient');
     else await route.continue();
@@ -44,6 +44,7 @@ for (const width of [1440, 390]) {
       await expect(menu.getByRole('menuitem', { name: 'Backup or restore' })).toBeFocused();
       await expect(menu.getByRole('menuitem', { name: 'Export SVG' })).toBeVisible();
       await expect(menu.getByRole('menuitem', { name: 'New project' })).toBeVisible();
+      await expect(menu.getByRole('menuitem', { name: 'Try simplified flow', exact: true })).toBeInViewport();
       await page.keyboard.press('Escape');
     }
     expect(posts).toEqual([]);
