@@ -1,0 +1,64 @@
+name: Linux CI diagnosis (not acceptance)
+
+on:
+  push:
+    branches: [fix/ci-linux-diagnostics]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-diagnosis-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRODUCT_SHA: 806144e24a19d53648f72510c4f78f861bbccaa4
+  CINESERYE_E2E_FIXTURE: 'true'
+  CINESERYE_PROVIDER_MODE: fixture
+  CINESERYE_LIVE_ENABLED: 'false'
+  CINESERYE_RUN_VIDEO_SMOKE: '0'
+  CINESERYE_RUN_STORYBOARD_SMOKE: '0'
+  CINESERYE_RUN_VERTEX_SMOKE: '0'
+  CINESERYE_RUN_STORY_LIVE_SMOKE: '0'
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  diagnose:
+    name: Nine focused Linux cases — NOT release acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+      - name: Verify exact product and diagnostic identity
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$PRODUCT_SHA"
+          git diff --exit-code "$PRODUCT_SHA" HEAD -- . ':!ci-diagnostics' ':!.github/workflows/ci-linux-diagnostic.yml'
+          git rev-parse HEAD
+          git rev-parse "$PRODUCT_SHA^{tree}"
+          printf '%s\n' 'Diagnostic only. This run cannot satisfy release acceptance.'
+      - run: npm ci
+      - name: Install the same native fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          npm run check:test-environment
+      - id: build
+        run: npm run build
+      - id: browsers
+        run: npx playwright install --with-deps chromium webkit
+      - name: Chromium — two unchanged stress cases with restore observations
+        run: node ci-diagnostics/run.mjs chromium
+      - name: WebKit — seven unchanged cases with body and teardown observations
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.browsers.outcome == 'success' }}
+        run: node ci-diagnostics/run.mjs webkit
+      - name: Diagnostic scope reminder
+        if: ${{ always() }}
+        run: printf '%s\n' 'No full native, Final Cut assertion, Worker or release verification is represented by this diagnostic run.'
