@@ -150,7 +150,7 @@ export function SequenceReview({ cinema, capabilities, onNotice }: { cinema: Cin
     {!rows.length ? <div className="sequence-empty"><strong>Your cut begins with approved takes</strong><p>Accept a shot plan, then approve video takes to review a sequence.</p></div> : <div className="sequence-review-layout">
       <div className="sequence-review-main">
         <div className="sequence-review-preview">
-          {clip && row && trim ? <video key={`${row.clip!.id}:${active}`} ref={video} src={clip.url} controls playsInline muted preload="metadata"
+          {clip && row && trim && !clip.error && clip.duration !== null ? <video key={`${row.clip!.id}:${active}`} ref={video} src={clip.url} controls playsInline muted preload="metadata"
             aria-label={`Sequence preview: ${row.shot.title}`}
             onLoadedMetadata={(event) => {
               const element = event.currentTarget;
@@ -159,7 +159,7 @@ export function SequenceReview({ cinema, capabilities, onNotice }: { cinema: Cin
               if (playing) void element.play().catch(() => setPlaying(false));
             }}
             onTimeUpdate={(event) => { if (playing && event.currentTarget.currentTime >= (trim.startFrame + trim.durationFrames) / 24) { event.currentTarget.pause(); advance(); } }}
-            onEnded={() => { if (playing) advance(); }} /> : <div><strong>Preview unavailable</strong><span>{activeIssue ? 'This shot has no usable local preview. Review its timeline warning.' : 'No local approved clip for this shot.'}</span></div>}
+            onEnded={() => { if (playing) advance(); }} /> : <div><strong>Preview unavailable</strong><span>{!row?.clip ? 'No local approved clip for this shot.' : activeIssue ? 'This shot has no usable local preview. Review its timeline warning.' : 'Loading the local approved clip…'}</span></div>}
         </div>
         <div className="sequence-transport"><div><strong>{row ? `${active + 1}. ${row.shot.title}` : 'Sequence preview'}</strong>{clip?.duration !== null && clip?.duration !== undefined ? <small>Decoded clip: {clip.duration.toFixed(2)}s · {clip.width}×{clip.height}</small> : <small>Every clip is decoded again before export.</small>}</div>
           <button type="button" className="secondary-button" disabled={!complete || rendering} onClick={() => {

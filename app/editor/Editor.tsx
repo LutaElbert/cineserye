@@ -858,10 +858,12 @@ function EditorInner() {
   const announce = useCallback((message: string, tone: Toast['tone'] = 'info') => {
     const id = Date.now() + Math.random();
     setToasts((current) => [...current.slice(-2), { id, message, tone }]);
-    window.setTimeout(
-      () => setToasts((current) => current.filter((toast) => toast.id !== id)),
-      4200,
-    );
+    // Give heavy document replacements a painted frame before starting the
+    // readable interval; otherwise add/remove updates can batch and no status
+    // is ever exposed to sighted users or the live region.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.setTimeout(
+      () => setToasts((current) => current.filter((toast) => toast.id !== id)), 4200,
+    )));
   }, []);
 
   useEffect(() => {

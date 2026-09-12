@@ -128,7 +128,7 @@ test('decoded short footage is visible before render and clears only after a val
   await waitForSaved(page); await installStorageHarness(page);
   await page.route('**/short-cut-seed', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Short local cut fixture</title>' }));
   await page.goto('/short-cut-seed');
-  const title = await page.evaluate(async base64 => {
+  const seeded = await page.evaluate(async base64 => {
     const modulePath = '/__test-modules/persistence.js';
     const storage = await import(modulePath) as typeof import('../app/editor/persistence');
     const document = (await storage.loadLocalDocument())!, cinema = document.cinema!;
@@ -161,15 +161,31 @@ test('decoded short footage is visible before render and clears only after a val
       promptVersion: motionPrompt.version, startFrameId: frameId, endFrameId: null, referenceIds: [], provider: 'synthetic-local-test', model: 'ffmpeg-test',
       capabilityProfileVersion: 'synthetic-1', settings, blobHash: video.hash, mimeType: 'video/mp4', width: 160, height: 90, byteSize: bytes.length,
       durationSeconds: 4, status: 'approved', estimatedCost: 0, currency: 'USD', createdAt: now };
-    await storage.saveLocalDocument(document); return shot.title;
+    await storage.saveLocalDocument(document); return { title: shot.title, clipId };
   }, Buffer.from(await readFile(inputPath)).toString('base64'));
   await page.goto('/?flow=simplified&workspace=edit');
   const cut = page.getByRole('region', { name: 'Review sequence', exact: true });
   await expect(cut).toContainText('Decoded clip: 1.00s');
   await expect(cut.getByText(/Decoded clip is 1.00s; the selected 0.00s start and 2.00s use exceed/)).toBeVisible();
-  await expect(cut.getByLabel('Sequence status and export')).toContainText(`${title} needs attention`);
+  await expect(cut.getByLabel('Sequence status and export')).toContainText(`${seeded.title} needs attention`);
   await expect(cut.getByRole('button', { name: 'Render silent MP4 locally' })).toBeDisabled();
   await cut.getByLabel('Use (s)').first().fill('1');
   await expect(cut.getByText(/Decoded clip is 1.00s/)).toHaveCount(0);
   await expect(cut.getByLabel('Sequence status and export')).toContainText('1.00s used');
+  await waitForSaved(page); await page.goto('/short-cut-seed');
+  await page.evaluate(async clipId => {
+    const modulePath = '/__test-modules/persistence.js';
+    const storage = await import(modulePath) as typeof import('../app/editor/persistence');
+    const document = (await storage.loadLocalDocument())!;
+    const bytes = new Uint8Array([0, 1, 2, 3, 4, 5]);
+    const invalid = await storage.saveLocalMediaBlob(new Blob([bytes], { type: 'video/mp4' }), { mimeType: 'video/mp4', width: 160, height: 90 });
+    const clip = document.cinema!.visualPreproduction!.videoClips[clipId];
+    clip.blobHash = invalid.hash; clip.byteSize = bytes.length;
+    await storage.saveLocalDocument(document);
+  }, seeded.clipId);
+  await page.goto('/?flow=simplified&workspace=edit');
+  await expect(cut.getByText('This shot has no usable local preview. Review its timeline warning.')).toBeVisible();
+  await expect(cut.locator('.sequence-review-preview video')).toHaveCount(0);
+  await expect(cut.getByText(/Local clip metadata could not be decoded/)).toBeVisible();
+  await expect(cut.getByRole('button', { name: 'Render silent MP4 locally' })).toBeDisabled();
 });
