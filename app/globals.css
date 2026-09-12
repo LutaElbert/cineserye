@@ -2590,8 +2590,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .assistant-proposal-review[data-composing=true] { gap:6px; }
   .assistant-proposal-review[data-composing=true] textarea { min-height:72px; height:72px; padding:8px; }
   .assistant-scene-stage:has(.assistant-proposal-review[data-composing=true] textarea:focus) .assistant-scroll-hint { display:none; }
-  .assistant-v2 > header { min-height:36px; padding:2px 12px; gap:6px; }
-  .assistant-v2 > header .assistant-icon-button { min-height:32px; width:32px; }
+  .assistant-v2 > header { min-height:30px; padding:0 12px; gap:6px; }
+  .assistant-v2 > header .assistant-icon-button { min-height:30px; width:30px; }
   .assistant-expanded-content { overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding-bottom:calc(var(--assistant-footer-size, 0px) + 12px); }
   .assistant-expanded-content > .assistant-stage-host, .assistant-expanded-content > .assistant-stage,
   .assistant-stage-host > .assistant-stage { display:contents; }
@@ -2603,7 +2603,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .assistant-expanded-content > .assistant-secondary-tools { order:2; flex:none; margin:4px 12px; }
   .assistant-expanded-content > .assistant-history { order:2; max-height:none; overflow:visible; margin:4px 12px; }
   .assistant-expanded-content > .assistant-shared-notice { order:-1; max-height:none; overflow:visible; }
-  .assistant-stage-footer { position:absolute; left:0; right:0; bottom:0; z-index:2; order:3; display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,1.15fr); align-items:center; gap:6px; padding:4px 12px; border-radius:0; box-shadow:0 -3px 9px #24212e08; }
+  .assistant-stage-footer { position:absolute; left:0; right:0; bottom:0; z-index:2; order:3; display:grid; grid-template-columns:minmax(0,1fr) minmax(140px,1.15fr); align-items:center; gap:6px; padding:1px 12px; border-radius:0; box-shadow:0 -3px 9px #24212e08; }
   .assistant-stage-footer > .assistant-help, .assistant-stage-footer > p, .assistant-stage-footer > span { grid-column:1; grid-row:1; }
   .assistant-stage-footer > button, .assistant-stage-footer > .assistant-footer-actions { grid-column:2; grid-row:1; }
   .assistant-stage-footer .primary-button { min-height:40px; }

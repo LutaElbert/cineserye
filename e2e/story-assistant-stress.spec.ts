@@ -39,6 +39,7 @@ test('assistant progresses on a 500-node 800-edge canvas without changing produc
   await expect(page.locator('.react-flow__node')).toHaveCount(501);
   await expect(page.locator('.react-flow__edge')).toHaveCount(801);
   await waitForSaved(page); await page.reload();
+  await expect(page.locator('main[data-ready="true"]')).toBeVisible({ timeout: 20_000 });
   await expect(assistant.getByRole('heading', { name: 'Ready to shape your scenes', exact: true })).toBeVisible();
   expect(await geometry()).toEqual(before);
 });

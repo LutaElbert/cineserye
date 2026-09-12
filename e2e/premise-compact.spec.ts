@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { openEditor, waitForSaved, createDiagramPng } from './helpers';
+import { openEditor, waitForCanvasSettled, waitForSaved, createDiagramPng } from './helpers';
 
 test('returning from Project to the Story canvas node preserves an already open editor', async ({ page }) => {
   // The app's readiness marker is the contract; optional resources may still
@@ -65,6 +65,7 @@ test('premise expands inside the actual node with local editing, references and 
   await expect(editor).toHaveCount(0);
   await waitForSaved(page); await page.reload();
   await expect(page.locator('main[data-ready="true"]')).toBeVisible();
+  await waitForCanvasSettled(page);
   await page.locator('.react-flow__node[data-id="story-premise"]').dblclick();
   await page.getByRole('button', { name: 'Focus story editor', exact: true }).click();
   await expect(editor.getByLabel('Layer title', { exact: true })).toHaveValue('The Cursed Game');

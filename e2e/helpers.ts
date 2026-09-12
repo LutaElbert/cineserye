@@ -51,6 +51,20 @@ export function canvasNode(page: Page, name: string): Locator {
   return page.locator('.react-flow__node').filter({ hasText: name }).first();
 }
 
+/** React Flow can publish hydrated nodes before a scheduled fit animation has
+ * finished. Pointer tests must wait for the viewport itself, not just nodes. */
+export async function waitForCanvasSettled(page: Page) {
+  const viewport = page.locator('.react-flow__viewport');
+  let previous: string | null = null;
+  let stableSamples = 0;
+  await expect.poll(async () => {
+    const current = await viewport.getAttribute('style');
+    stableSamples = current === previous ? stableSamples + 1 : 0;
+    previous = current;
+    return stableSamples;
+  }, { intervals: [100], timeout: 5_000 }).toBeGreaterThanOrEqual(3);
+}
+
 export async function connectLayers(page: Page, sourceName: string, targetName: string) {
   const sourceHandle = canvasNode(page, sourceName).locator('.react-flow__handle.source').first();
   const targetHandle = canvasNode(page, targetName).locator('.react-flow__handle.target').first();

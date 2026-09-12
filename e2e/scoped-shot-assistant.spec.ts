@@ -45,9 +45,9 @@ test('idea to accepted three-scene shot plans uses explicit scope and survives r
   await shotScope.getByRole('button', { name: 'Add selected shot plans', exact: true }).click();
   await expect(shotScope.getByRole('button', { name: /Open shots & media/ })).toHaveCount(3);
   await expect(shotScope.getByRole('alert')).toHaveCount(0);
-  for (const host of hosts) {
-    expect(await page.locator(`.react-flow__node[data-id="${host.id}"]`).evaluate((node) => (node as HTMLElement).style.transform)).toBe(host.transform);
-  }
+  await expect.poll(() => Promise.all(hosts.map(async ({ id }) => ({ id,
+    transform: await page.locator(`.react-flow__node[data-id="${id}"]`).evaluate((node) => (node as HTMLElement).style.transform),
+  })))).toEqual(hosts);
   await expect(page.locator('dialog[open]')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('three-scene-shots-added.png') });
   await shotScope.getByRole('button', { name: /Open shots & media/ }).first().click();
